@@ -15,7 +15,7 @@ import {
   type Npc,
   type NowPlayingInfo,
 } from "./npc";
-import { drawNpc, drawSelectionRing, getWalkFrames, hitTestNpc, loadImages, type ImageMap } from "./render";
+import { drawCaptions, drawNpc, drawSelectionRing, getWalkFrames, hitTestNpc, loadImages, type ImageMap } from "./render";
 import { bakeRecolor } from "./recolor";
 import {
   close as closeSidebar,
@@ -29,8 +29,8 @@ import {
 const NOW_PLAYING_INTERVAL_MS = 8000;
 const VILLAGE_EVENT_INTERVAL_MS = 5000;
 const DESKTOP_QUERY = "(min-width: 900px)";
-const ZOOM_PHONE = 2;
-const ZOOM_DESKTOP = 3;
+const DISTRICT_ZOOM_PHONE = 2;
+const DISTRICT_ZOOM_DESKTOP = 3;
 const PAN_KEY_SPEED = 260; // world px/sec for arrow-key panning in village view
 const DRAG_THRESHOLD = 6; // css px before a pointer-down counts as a drag, not a tap
 const DIRS: Direction[] = ["down", "left", "up", "right"];
@@ -50,6 +50,13 @@ if (!ctx2d) throw new Error("Canvas 2D context unavailable");
 // null check doesn't carry into functions declared further down the file.
 const ctx: CanvasRenderingContext2D = ctx2d;
 
+// Screen-space overlay for "now playing" caption pills — a separate canvas
+// so its text renders at full device-pixel resolution (crisp, not pixelated)
+// regardless of #game's low-res, integer-zoomed backing store. Sized and
+// positioned in fitCanvas() to exactly cover #game's rendered box.
+const captionCanvas = el<HTMLCanvasElement>("captionLayer");
+const captionCtx = captionCanvas.getContext("2d");
+
 const stageArea = el<HTMLDivElement>("stageArea");
 const recolorNote = el<HTMLParagraphElement>("recolorNote");
 const villageCaption = el<HTMLParagraphElement>("villageCaption");
@@ -59,6 +66,8 @@ const districtGenre = el<HTMLSpanElement>("districtGenre");
 const districtName = el<HTMLSpanElement>("districtName");
 const prevBtn = el<HTMLButtonElement>("prevBtn");
 const nextBtn = el<HTMLButtonElement>("nextBtn");
+const zoomInBtn = el<HTMLButtonElement>("zoomInBtn");
+const zoomOutBtn = el<HTMLButtonElement>("zoomOutBtn");
 const viewTabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".view-tab"));
 
 const sidebarRoot = el<HTMLElement>("sidebar");
@@ -68,6 +77,16 @@ initSidebar(sidebarRoot, sidebarBackdrop, { onClose: () => canvas.focus() });
 let images: ImageMap = {};
 let mode: Mode = "village"; // default view: the whole village, everyone present
 let currentIdx = 0; // which district src/roster navigation currently points at
+
+// Keyboard NPC cursor: which NPC Tab has cycled to (in interactionPool()
+// order) while the canvas has focus. Cleared on every mode switch since the
+// pool it indexes into changes.
+let keyboardCursor = 0;
+let keyboardSelectedSlotId: string | null = null;
+function resetKeyboardCursor(): void {
+  keyboardCursor = 0;
+  keyboardSelectedSlotId = null;
+}
 
 const districtNpcs: Npc[] = SLOTS.map((slot) => makeNpc(slot.character, slot.district));
 
@@ -125,13 +144,51 @@ let mapW = 1;
 let mapH = 1;
 let viewW = 1;
 let viewH = 1;
+/** The zoom `fitCanvas()` last actually used — cached rather than
+ * recomputed on every pointer event so a drag gesture can't shift scale
+ * mid-motion, and so screenToWorld() always agrees with the canvas's own
+ * current CSS size. */
+let zoom = 1;
 
 function isDesktop(): boolean {
   return window.matchMedia(DESKTOP_QUERY).matches;
 }
 
-function currentZoom(): number {
-  return isDesktop() ? ZOOM_DESKTOP : ZOOM_PHONE;
+const VILLAGE_AUTO_MAX_ZOOM = 3;
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 4;
+
+/** The user's explicit zoom choice (+/- buttons, wheel, pinch), overriding
+ * the mode's automatic default until the mode changes. */
+let manualZoom: number | null = null;
+
+/** District view's automatic zoom is fixed (3 desktop / 2 phone). Village
+ * view's automatic zoom fits the whole map to the viewport when possible:
+ * clamp(floor(min(availW/mapW, availH/mapH)), 1, 3). The town map is tall
+ * relative to a typical desktop window (after the topbar/toolbar take their
+ * share of height), so that formula alone lands on 1 there more often than
+ * not — sprites at native (unscaled) size read as uncomfortably small and
+ * hard to aim taps at on a desktop monitor, so on desktop specifically we
+ * floor it to 2 and accept that seeing the whole village then needs a bit of
+ * panning. Phone keeps the plain formula (often also 1, since the map is
+ * much wider than a phone screen) — our hit-test padding is a fixed 44
+ * world units, so tap targets still meet the 44px minimum at zoom 1, just
+ * without the extra margin. Either default can still be overridden by the
+ * zoom controls, up to ZOOM_MAX.
+ */
+function autoZoom(availW: number, availH: number): number {
+  if (mode === "village") {
+    const fitZoom = Math.floor(Math.min(availW / mapW, availH / mapH));
+    let z = Math.max(ZOOM_MIN, Math.min(VILLAGE_AUTO_MAX_ZOOM, fitZoom));
+    if (isDesktop() && z < 2) z = 2;
+    return z;
+  }
+  return isDesktop() ? DISTRICT_ZOOM_DESKTOP : DISTRICT_ZOOM_PHONE;
+}
+
+function computeZoom(availW: number, availH: number): number {
+  if (manualZoom !== null) return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, manualZoom));
+  return autoZoom(availW, availH);
 }
 
 function clampAxis(cam: number, size: number, view: number): number {
@@ -154,10 +211,10 @@ function setMapSize(key: string): void {
  * container, then re-stretches it via CSS to an exact integer multiple —
  * never a fractional scale, and never larger than the container (no crop). */
 function fitCanvas(): void {
-  const zoom = currentZoom();
   const rect = stageArea.getBoundingClientRect();
-  const availW = Math.max(zoom, Math.floor(rect.width));
-  const availH = Math.max(zoom, Math.floor(rect.height));
+  const availW = Math.max(1, Math.floor(rect.width));
+  const availH = Math.max(1, Math.floor(rect.height));
+  zoom = computeZoom(availW, availH);
   viewW = Math.max(1, Math.floor(availW / zoom));
   viewH = Math.max(1, Math.floor(availH / zoom));
   canvas.width = viewW;
@@ -166,6 +223,30 @@ function fitCanvas(): void {
   canvas.style.height = `${viewH * zoom}px`;
   ctx.imageSmoothingEnabled = false;
   clampCamera();
+  fitCaptionLayer(availW, availH);
+}
+
+/** Sizes and positions the caption overlay to exactly cover #game's
+ * (possibly letterboxed, since it's floor()'d to an integer zoom) rendered
+ * box, at full device-pixel resolution so its text stays crisp. */
+function fitCaptionLayer(availW: number, availH: number): void {
+  const cssW = viewW * zoom;
+  const cssH = viewH * zoom;
+  const dpr = window.devicePixelRatio || 1;
+  captionCanvas.style.left = `${Math.round((availW - cssW) / 2)}px`;
+  captionCanvas.style.top = `${Math.round((availH - cssH) / 2)}px`;
+  captionCanvas.style.width = `${cssW}px`;
+  captionCanvas.style.height = `${cssH}px`;
+  captionCanvas.width = Math.max(1, Math.round(cssW * dpr));
+  captionCanvas.height = Math.max(1, Math.round(cssH * dpr));
+  captionCtx?.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+/** Redraws the caption overlay for whichever NPCs are relevant to the
+ * current mode (empty in roster mode, which has no map). */
+function renderCaptions(npcs: Npc[]): void {
+  if (!captionCtx) return;
+  drawCaptions(captionCtx, npcs, { camX, camY, zoom }, viewW * zoom, viewH * zoom);
 }
 
 function centerCamera(): void {
@@ -174,9 +255,32 @@ function centerCamera(): void {
   clampCamera();
 }
 
+/** Changes zoom by `delta` integer steps (clamped to [ZOOM_MIN, ZOOM_MAX]),
+ * keeping the world point under `focalClient` (a client-space point — the
+ * cursor, the pinch midpoint, or the view center for the +/- buttons) fixed
+ * on screen, the way scroll-to-zoom works in map apps. */
+function stepZoom(delta: number, focalClient?: { x: number; y: number }): void {
+  if (mode === "roster") return;
+  const beforeRect = canvas.getBoundingClientRect();
+  const focal = focalClient ?? {
+    x: beforeRect.left + beforeRect.width / 2,
+    y: beforeRect.top + beforeRect.height / 2,
+  };
+  const worldX = (focal.x - beforeRect.left) / zoom + camX;
+  const worldY = (focal.y - beforeRect.top) / zoom + camY;
+
+  const base = manualZoom ?? zoom;
+  manualZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(base) + delta));
+  fitCanvas();
+
+  const afterRect = canvas.getBoundingClientRect();
+  camX = worldX - (focal.x - afterRect.left) / zoom;
+  camY = worldY - (focal.y - afterRect.top) / zoom;
+  clampCamera();
+}
+
 function screenToWorld(clientX: number, clientY: number): Point {
   const rect = canvas.getBoundingClientRect();
-  const zoom = currentZoom();
   return { x: (clientX - rect.left) / zoom + camX, y: (clientY - rect.top) / zoom + camY };
 }
 
@@ -185,6 +289,7 @@ function screenToWorld(clientX: number, clientY: number): Point {
 // ---------------------------------------------------------------------------
 function applyDistrict(i: number): void {
   currentIdx = ((i % SLOTS.length) + SLOTS.length) % SLOTS.length;
+  resetKeyboardCursor();
   const { character, district } = SLOTS[currentIdx]!;
   setMapSize(district.bg);
   fitCanvas();
@@ -208,6 +313,8 @@ function followActiveDistrictNpc(dt: number): void {
 
 function setMode(next: Mode): void {
   mode = next;
+  resetKeyboardCursor();
+  manualZoom = null; // each mode starts at its own sensible default zoom
   viewTabs.forEach((btn) => btn.classList.toggle("is-active", btn.dataset.view === mode));
   districtToolbar.hidden = mode !== "district";
   villageCaption.hidden = mode !== "village";
@@ -311,13 +418,15 @@ function renderDistrict(): void {
   const { district } = SLOTS[currentIdx]!;
   const npc = districtNpcs[currentIdx]!;
   const imgs = (district.recolorFilter && recoloredImagesByDistrict.get(district.id)) || images;
+  const view = { camX, camY, viewW, viewH };
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
   ctx.translate(-camX, -camY);
   ctx.drawImage(imgs[district.bg]!, 0, 0);
-  if (sidebarSlotId() === district.id) drawSelectionRing(ctx, npc);
-  drawNpc(ctx, imgs, npc, mapW);
+  const highlightId = sidebarSlotId() ?? keyboardSelectedSlotId;
+  if (highlightId === district.id) drawSelectionRing(ctx, npc);
+  drawNpc(ctx, imgs, npc, view);
   ctx.restore();
 }
 
@@ -354,14 +463,15 @@ function renderVillage(): void {
   ctx.translate(-camX, -camY);
   ctx.drawImage(images[VILLAGE.mapImage]!, 0, 0);
 
-  const sorted = [...villageNpcs].sort((a, b) => a.y - b.y);
-  const selected = sidebarSlotId();
-  if (selected) {
-    const selectedNpc = sorted.find((n) => n.district.id === selected);
-    if (selectedNpc) drawSelectionRing(ctx, selectedNpc);
+  const view = { camX, camY, viewW, viewH };
+  const sorted = villageDrawOrder();
+  const highlightId = sidebarSlotId() ?? keyboardSelectedSlotId;
+  if (highlightId) {
+    const highlighted = sorted.find((n) => n.district.id === highlightId);
+    if (highlighted) drawSelectionRing(ctx, highlighted);
   }
-  sorted.filter((n) => !n.caption).forEach((n) => drawNpc(ctx, images, n, mapW));
-  sorted.filter((n) => n.caption).forEach((n) => drawNpc(ctx, images, n, mapW));
+  sorted.filter((n) => !n.caption).forEach((n) => drawNpc(ctx, images, n, view));
+  sorted.filter((n) => n.caption).forEach((n) => drawNpc(ctx, images, n, view));
   ctx.restore();
 }
 
@@ -379,51 +489,123 @@ interface DragState {
 }
 let drag: DragState | null = null;
 
+/** Village NPCs in the same back-to-front order renderVillage() draws them
+ * in, so overlapping sprites and overlapping taps agree on which one is
+ * "in front". */
+function villageDrawOrder(): Npc[] {
+  return [...villageNpcs].sort((a, b) => a.y - b.y);
+}
+
+/** The tappable/keyboard-selectable NPCs for the current mode, front-to-back
+ * (reverse draw order) — a tap or Enter/Space on an overlap should hit
+ * whichever sprite is visually on top, not whichever happens first in
+ * villageNpcs's underlying array order. */
+function interactionPool(): Npc[] {
+  if (mode === "village") return [...villageDrawOrder()].reverse();
+  if (mode === "district") return [districtNpcs[currentIdx]!];
+  return [];
+}
+
 function handleTap(clientX: number, clientY: number): void {
   const world = screenToWorld(clientX, clientY);
-  const pool: Npc[] =
-    mode === "village" ? villageNpcs : mode === "district" ? [districtNpcs[currentIdx]!] : [];
-  const hit = pool.find((npc) => hitTestNpc(npc, world.x, world.y));
+  const hit = interactionPool().find((npc) => hitTestNpc(npc, world.x, world.y));
   if (hit) openSidebar(getSlot(hit.district.id));
   else if (isSidebarOpen()) closeSidebar();
+}
+
+// Two-finger pinch-to-zoom tracks every active pointer by id; a single
+// remaining pointer falls back to the existing drag-to-pan/tap handling.
+const activePointers = new Map<number, { x: number; y: number }>();
+let pinchStartDist = 0;
+const PINCH_STEP_RATIO = 1.35; // finger-distance ratio that triggers one integer zoom step
+
+function pointerDist(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+function pointerMid(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
 canvas.addEventListener("pointerdown", (ev) => {
   if (mode === "roster") return;
   canvas.setPointerCapture(ev.pointerId);
-  drag = {
-    pointerId: ev.pointerId,
-    startClientX: ev.clientX,
-    startClientY: ev.clientY,
-    startCamX: camX,
-    startCamY: camY,
-    moved: false,
-  };
+  activePointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+
+  if (activePointers.size === 2) {
+    drag = null; // a pinch starting mid-drag cancels the single-finger pan/tap
+    const [a, b] = Array.from(activePointers.values());
+    pinchStartDist = pointerDist(a!, b!);
+  } else if (activePointers.size === 1) {
+    drag = {
+      pointerId: ev.pointerId,
+      startClientX: ev.clientX,
+      startClientY: ev.clientY,
+      startCamX: camX,
+      startCamY: camY,
+      moved: false,
+    };
+  }
 });
 
 canvas.addEventListener("pointermove", (ev) => {
+  if (!activePointers.has(ev.pointerId)) return;
+  activePointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+
+  if (activePointers.size === 2) {
+    const [a, b] = Array.from(activePointers.values());
+    const dist = pointerDist(a!, b!);
+    const mid = pointerMid(a!, b!);
+    if (pinchStartDist > 0) {
+      if (dist / pinchStartDist >= PINCH_STEP_RATIO) {
+        stepZoom(1, mid);
+        pinchStartDist = dist;
+      } else if (dist / pinchStartDist <= 1 / PINCH_STEP_RATIO) {
+        stepZoom(-1, mid);
+        pinchStartDist = dist;
+      }
+    }
+    return;
+  }
+
   if (!drag || ev.pointerId !== drag.pointerId) return;
   const dx = ev.clientX - drag.startClientX;
   const dy = ev.clientY - drag.startClientY;
   if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) drag.moved = true;
   if (mode === "village" && drag.moved) {
-    const zoom = currentZoom();
     camX = drag.startCamX - dx / zoom;
     camY = drag.startCamY - dy / zoom;
     clampCamera();
   }
 });
 
-function endDrag(ev: PointerEvent): void {
+function releasePointer(ev: PointerEvent): void {
+  const wasSoloPointer = activePointers.size === 1 && activePointers.has(ev.pointerId);
+  activePointers.delete(ev.pointerId);
+  if (activePointers.size < 2) pinchStartDist = 0;
+
   if (!drag || ev.pointerId !== drag.pointerId) return;
   const wasTap = !drag.moved;
   drag = null;
-  if (wasTap) handleTap(ev.clientX, ev.clientY);
+  if (wasSoloPointer && wasTap) handleTap(ev.clientX, ev.clientY);
 }
-canvas.addEventListener("pointerup", endDrag);
-canvas.addEventListener("pointercancel", () => {
+canvas.addEventListener("pointerup", releasePointer);
+canvas.addEventListener("pointercancel", (ev) => {
+  activePointers.delete(ev.pointerId);
+  if (activePointers.size < 2) pinchStartDist = 0;
   drag = null;
 });
+
+// Mouse wheel and trackpad pinch (browsers report trackpad pinch as a wheel
+// event with ctrlKey set) both zoom, centered on the cursor.
+canvas.addEventListener(
+  "wheel",
+  (ev) => {
+    if (mode === "roster") return;
+    ev.preventDefault();
+    stepZoom(ev.deltaY < 0 ? 1 : -1, { x: ev.clientX, y: ev.clientY });
+  },
+  { passive: false },
+);
 
 // ---------------------------------------------------------------------------
 // Keyboard: Esc closes the sidebar from anywhere; arrow keys pan the village
@@ -444,9 +626,49 @@ function isFormField(target: EventTarget | null): boolean {
   );
 }
 
+function nearestNpcToViewCenter(pool: Npc[]): Npc | null {
+  if (pool.length === 0) return null;
+  const cx = camX + viewW / 2;
+  const cy = camY + viewH / 2;
+  return pool.reduce((best, n) => {
+    const d = (n.x - cx) ** 2 + (n.y - cy) ** 2;
+    const bd = (best.x - cx) ** 2 + (best.y - cy) ** 2;
+    return d < bd ? n : best;
+  });
+}
+
+// Enter/Space on the focused canvas open the sidebar for whichever NPC is
+// currently selected: the one Tab last cycled to, else the one the sidebar
+// is already showing, else whichever is nearest the view's center.
+//
+// Tab, while the canvas has focus, cycles that selection instead of leaving
+// the canvas — a deliberate tradeoff: it makes single-key NPC browsing cheap
+// (no separate widgets to build), but it also means Tab can no longer move
+// focus off the map. Escape is the documented way out: it blurs the canvas
+// (once the sidebar itself is already closed) so normal Tab order resumes.
+canvas.addEventListener("keydown", (ev) => {
+  if (mode === "roster") return;
+  const pool = interactionPool();
+  if (pool.length === 0) return;
+
+  if (ev.key === "Tab") {
+    ev.preventDefault();
+    keyboardCursor = (keyboardCursor + (ev.shiftKey ? -1 : 1) + pool.length) % pool.length;
+    keyboardSelectedSlotId = pool[keyboardCursor]!.district.id;
+    return;
+  }
+  if (ev.key === "Enter" || ev.key === " ") {
+    ev.preventDefault();
+    const bySlotId = (id: string | null) => (id ? pool.find((n) => n.district.id === id) : undefined);
+    const target = bySlotId(keyboardSelectedSlotId) ?? bySlotId(sidebarSlotId()) ?? nearestNpcToViewCenter(pool);
+    if (target) openSidebar(getSlot(target.district.id));
+  }
+});
+
 window.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape") {
     if (isSidebarOpen()) closeSidebar();
+    else if (document.activeElement === canvas) canvas.blur();
     return;
   }
   if (isFormField(ev.target)) return;
@@ -478,6 +700,8 @@ function applyKeyPan(dt: number): void {
 // ---------------------------------------------------------------------------
 prevBtn.addEventListener("click", () => applyDistrict(currentIdx - 1));
 nextBtn.addEventListener("click", () => applyDistrict(currentIdx + 1));
+zoomInBtn.addEventListener("click", () => stepZoom(1));
+zoomOutBtn.addEventListener("click", () => stepZoom(-1));
 
 viewTabs.forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -514,11 +738,14 @@ function frame(ts: number): void {
     applyKeyPan(dt);
     tickVillage(ts, dt);
     renderVillage();
+    renderCaptions(villageNpcs);
   } else if (mode === "roster") {
     renderRoster(ts);
+    renderCaptions([]);
   } else {
     followActiveDistrictNpc(dt);
     renderDistrict();
+    renderCaptions([districtNpcs[currentIdx]!]);
   }
 
   requestAnimationFrame(frame);

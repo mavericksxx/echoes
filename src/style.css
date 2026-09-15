@@ -1,34 +1,43 @@
 /* ==========================================================================
    Design tokens — the single source of truth for color, type, space, motion.
+   UI direction: "B — Night Overlay" — frosted glass HUD panels floating
+   directly over the night village; cyan/amber signal colors read as
+   instrumentation, not decoration. The pixel art (canvas village + sprites)
+   is the only pixel element — typography and chrome are refined, not
+   cartoony.
    Breakpoint: 900px is the mobile/desktop split used throughout this file
    and mirrored in main.ts's matchMedia("(min-width: 900px)") check (the
    sidebar needs more room alongside the map than a phone-style 720px split).
    ========================================================================== */
 :root {
-  /* Color — a dusk-over-Konoha palette: plum-indigo ground, lantern amber
-     accent, leaf-green as the "listening" signal. Not generic grey/near-black. */
-  --color-bg: #181322;
-  --color-surface: #241c30;
-  --color-surface-raised: #2d2438;
-  --color-border: #3a2f49;
-  --color-accent: #ff9d3d;
-  --color-accent-strong: #ffb35c;
-  --color-leaf: #6fcf97;
-  --color-text: #f3ecf7;
-  --color-text-muted: #a89bb8;
-  --color-text-faint: #7c6f8d;
-  --color-canvas-bg: #100c17;
+  /* Color — Void ground, Ice text, Cyan "active" signal, Amber secondary. */
+  --color-bg: #0d131c;
+  --color-surface: #121a24; /* panel */
+  --color-surface-raised: #182230; /* panel-2 */
+  --color-border: rgba(231, 238, 244, 0.1); /* line */
+  --color-border-strong: rgba(231, 238, 244, 0.22); /* line-strong */
+  --color-glass: rgba(18, 26, 36, 0.55);
+  --color-glass-border: rgba(231, 238, 244, 0.16);
+  --color-accent: #55c2ce; /* cyan */
+  --color-accent-strong: #7ad3dd;
+  --color-secondary: #f0a85e; /* amber */
+  --color-leaf: var(--color-accent);
+  --color-text: #e7eef4; /* ice */
+  --color-text-muted: #8fa0af; /* fog */
+  --color-text-faint: #62727f;
+  --color-canvas-bg: #0a0f17;
   --color-focus-ring: var(--color-accent);
 
   /* Activity levels (dormant -> quiet -> active -> festival) */
-  --color-activity-dormant: #564a68;
-  --color-activity-quiet: #7ba6c9;
-  --color-activity-active: #6fcf97;
-  --color-activity-festival: #ff9d3d;
+  --color-activity-dormant: #3a4a5a;
+  --color-activity-quiet: #5b7a8c;
+  --color-activity-active: #55c2ce;
+  --color-activity-festival: #f0a85e;
 
-  /* Type */
-  --font-display: "Pixelify Sans", ui-monospace, monospace;
-  --font-body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Type — Archivo for UI + display, IBM Plex Mono for tabular figures. */
+  --font-display: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-body: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-num: "IBM Plex Mono", SFMono-Regular, Consolas, monospace;
   --text-xs: 0.7rem;
   --text-sm: 0.8125rem;
   --text-base: 0.9375rem;
@@ -52,6 +61,8 @@
   --radius-md: 10px;
   --radius-lg: 20px;
   --radius-pill: 999px;
+  --radius-panel: 14px;
+  --radius-sheet: 18px;
   /* Cover-art corners: explicitly 4px on phone, 8px on desktop (see media query below). */
   --cover-radius: 4px;
 
@@ -61,8 +72,10 @@
   --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
 
   /* Layout */
+  --topbar-h: 56px;
   --tabbar-height: 60px;
   --sidebar-width: 400px;
+  --sidebar-inset: 16px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
@@ -70,6 +83,7 @@
 
   /* Z-index */
   --z-topbar: 10;
+  --z-floating: 1;
   --z-tabbar: 20;
   --z-backdrop: 25;
   --z-sidebar: 30;
@@ -172,68 +186,93 @@ select {
 }
 
 .content {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
 }
 
+/* ==========================================================================
+   App bar — a translucent, blurred HUD strip that floats directly over the
+   map (the map fills the full content height behind it; see .main/.stage-area
+   below). Segmented view-switch pill with a cyan active state.
+   ========================================================================== */
 .topbar {
-  flex: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   z-index: var(--z-topbar);
+  min-height: var(--topbar-h);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: calc(var(--space-3) + var(--safe-top)) var(--space-4) var(--space-3);
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
+  padding: calc(var(--safe-top) + var(--space-2)) var(--space-4) var(--space-2);
+  background: var(--color-glass);
+  border-bottom: 1px solid var(--color-glass-border);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
 .brand {
   font-family: var(--font-display);
-  font-size: var(--text-lg);
-  font-weight: 500;
-  color: var(--color-accent);
-  letter-spacing: 0.02em;
+  font-size: var(--text-md);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
 }
 
 .main {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-4) var(--space-4) calc(var(--tabbar-height) + var(--safe-bottom) + var(--space-4));
+  padding-top: calc(var(--topbar-h) + var(--safe-top) + var(--space-3));
+  padding-left: calc(var(--space-4) + var(--safe-left));
+  padding-right: calc(var(--space-4) + var(--safe-right));
+  padding-bottom: calc(var(--tabbar-height) + var(--safe-bottom) + var(--space-4));
   width: 100%;
 }
 
 @media (min-width: 900px) {
   .main {
-    padding: var(--space-4);
+    padding-top: calc(var(--topbar-h) + var(--space-4));
+    padding-bottom: var(--space-4);
   }
 }
 
 /* ==========================================================================
-   View switch — a bottom tab bar on phones, an inline segmented control on
-   desktop. Same markup, repositioned by media query.
+   View switch — a segmented pill (cyan active state) inline on desktop; a
+   fixed bottom tab bar on phones, styled to match the same glass HUD chrome.
+   Same markup, repositioned by media query.
    ========================================================================== */
 .view-switch {
   display: flex;
-  gap: var(--space-1);
+  gap: 2px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 2px;
 }
 
 .view-tab {
   appearance: none;
   border: 1px solid transparent;
   background: transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   padding: var(--space-2) var(--space-3);
   cursor: pointer;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
+  font-weight: 500;
   transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
 }
 
@@ -243,7 +282,7 @@ select {
 
 .view-tab.is-active {
   background: var(--color-accent);
-  color: var(--color-bg);
+  color: #0b1116;
   font-weight: 600;
 }
 
@@ -256,8 +295,11 @@ select {
     z-index: var(--z-tabbar);
     display: flex;
     gap: 0;
-    background: var(--color-surface);
-    border-top: 1px solid var(--color-border);
+    background: var(--color-glass);
+    border-top: 1px solid var(--color-glass-border);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-radius: 0;
     padding: var(--space-1) calc(var(--space-2) + var(--safe-left)) calc(var(--space-1) + var(--safe-bottom))
       calc(var(--space-2) + var(--safe-right));
   }
@@ -274,15 +316,25 @@ select {
 }
 
 /* ==========================================================================
-   District toolbar (prev / readout / next)
+   District toolbar (prev / readout / next) — a floating glass HUD pill
+   above the map, not a full-width bar.
    ========================================================================== */
 .district-toolbar {
+  position: relative;
+  z-index: var(--z-floating);
   flex: none;
-  display: flex;
+  align-self: center;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: var(--space-3);
-  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-glass);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-pill);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 16px 32px -18px rgba(0, 0, 0, 0.6);
+  max-width: 100%;
 }
 
 .icon-btn {
@@ -290,8 +342,8 @@ select {
   min-width: 44px;
   min-height: 44px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
+  border: none;
+  background: transparent;
   color: var(--color-text);
   font-size: var(--text-xl);
   line-height: 1;
@@ -303,7 +355,7 @@ select {
 }
 
 .icon-btn:hover {
-  background: var(--color-surface-raised);
+  background: rgba(231, 238, 244, 0.08);
 }
 
 .icon-btn:active {
@@ -315,8 +367,9 @@ select {
   flex-direction: column;
   align-items: center;
   min-width: 0;
-  flex: 1;
+  max-width: 46vw;
   text-align: center;
+  padding: 0 var(--space-1);
 }
 
 .district-readout__genre {
@@ -326,6 +379,7 @@ select {
 
 .district-readout__name {
   font-family: var(--font-display);
+  font-weight: 600;
   font-size: var(--text-md);
   color: var(--color-text);
   white-space: nowrap;
@@ -335,23 +389,32 @@ select {
 }
 
 .village-caption {
+  position: relative;
+  z-index: var(--z-floating);
   flex: none;
+  align-self: center;
   font-size: var(--text-sm);
   color: var(--color-text-muted);
   text-align: center;
+  background: var(--color-glass);
+  border: 1px solid var(--color-glass-border);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-pill);
+  max-width: 100%;
 }
 
 /* ==========================================================================
-   Stage — the pixel-art canvas. main.ts sizes its backing store to an
-   integer fraction of the container so the browser's own upscaling (with
-   image-rendering: pixelated) lands on exact-pixel zoom. This box fills all
-   remaining height, so the map always fits the viewport with no page scroll.
+   Stage — the pixel-art canvas. Edge-to-edge within .main (the app bar and
+   district toolbar float translucently on top of it). main.ts sizes the
+   canvas's backing store to an integer fraction of the container so the
+   browser's own upscaling (with image-rendering: pixelated) lands on
+   exact-pixel zoom.
    ========================================================================== */
 .stage-area {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
-  width: 100%;
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -359,10 +422,14 @@ select {
 }
 
 #game {
+  /* main.ts sets width/height (in px) to an exact integer multiple of the
+     backing store size. With the global border-box reset, adding a border
+     would shrink the content box below that multiple and break integer
+     scaling — content-box keeps the border purely decorative, added outside
+     the sized box instead of eating into it. */
+  box-sizing: content-box;
   display: block;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-  box-shadow: 0 12px 32px -16px rgba(0, 0, 0, 0.6);
+  border: none;
   background: var(--color-canvas-bg);
   image-rendering: pixelated;
   image-rendering: crisp-edges;
@@ -374,7 +441,70 @@ select {
   cursor: grabbing;
 }
 
+/* Screen-space overlay canvas for "now playing" caption pills — kept
+   separate from #game so its text renders at full device-pixel resolution
+   (smooth, not pixelated) regardless of the map's integer zoom. Positioned
+   by main.ts to exactly cover #game's rendered box. */
+.caption-layer {
+  position: absolute;
+  pointer-events: none;
+  image-rendering: auto;
+}
+
+.zoom-controls {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  background: var(--color-glass);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  overflow: hidden;
+  box-shadow: 0 16px 32px -18px rgba(0, 0, 0, 0.6);
+}
+
+.zoom-btn {
+  appearance: none;
+  min-width: 44px;
+  min-height: 44px;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--text-lg);
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zoom-btn + .zoom-btn {
+  border-top: 1px solid var(--color-border);
+}
+
+.zoom-btn:hover {
+  background: rgba(231, 238, 244, 0.08);
+}
+
+.zoom-btn:active {
+  transform: scale(0.94);
+}
+
+@media (max-width: 899px) {
+  /* Visually more compact on phone (a smaller glyph in the same 44px tap
+     target — the box itself never shrinks below the accessible minimum). */
+  .zoom-btn {
+    font-size: var(--text-base);
+  }
+}
+
 .recolor-note {
+  position: relative;
+  z-index: var(--z-floating);
+  align-self: center;
   flex: none;
   font-size: var(--text-xs);
   color: var(--color-text-faint);
@@ -385,6 +515,8 @@ select {
    Roster grid — the one part of .main that's allowed to scroll.
    ========================================================================== */
 .roster {
+  position: relative;
+  z-index: var(--z-floating);
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -401,9 +533,11 @@ select {
   align-items: center;
   gap: var(--space-1);
   padding: var(--space-2);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  background: var(--color-glass);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   cursor: pointer;
   min-height: 44px;
   transition: border-color var(--duration-fast) var(--ease-standard);
@@ -423,6 +557,7 @@ select {
 
 .rcell__genre {
   font-family: var(--font-display);
+  font-weight: 600;
   font-size: var(--text-xs);
   color: var(--color-accent);
   text-align: center;
@@ -435,15 +570,16 @@ select {
 }
 
 /* ==========================================================================
-   Sidebar — a right-side panel on desktop (the map stays visible and
-   interactive beside it) and a full-height slide-up sheet on phones.
-   Closed state uses transform + visibility so it never blocks input, and
-   the transition is skipped entirely under prefers-reduced-motion (see reset).
+   Sidebar — a floating glass panel over the map on desktop (the map stays
+   visible and interactive around it) and a glass slide-up sheet with a
+   handle on phones. Closed state uses transform + visibility so it never
+   blocks input, and the transition is skipped entirely under
+   prefers-reduced-motion (see reset).
    ========================================================================== */
 .sidebar-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 6, 12, 0.55);
+  background: rgba(5, 8, 12, 0.55);
   z-index: var(--z-backdrop);
   opacity: 0;
   visibility: hidden;
@@ -459,13 +595,21 @@ select {
 
 .sidebar {
   position: fixed;
-  inset: 0;
+  top: calc(var(--safe-top) + var(--topbar-h) + var(--space-4));
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: var(--z-sidebar);
   display: flex;
   flex-direction: column;
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-border);
-  padding: var(--space-3) var(--space-4) calc(var(--space-4) + var(--safe-bottom));
+  background: var(--color-glass);
+  border: 1px solid var(--color-glass-border);
+  border-top-left-radius: var(--radius-sheet);
+  border-top-right-radius: var(--radius-sheet);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  box-shadow: 0 -20px 60px rgba(0, 0, 0, 0.5);
+  padding: var(--space-2) var(--space-4) calc(var(--space-4) + var(--safe-bottom));
   visibility: hidden;
   opacity: 0;
   transform: translateY(100%);
@@ -485,7 +629,7 @@ select {
   width: 36px;
   height: 4px;
   border-radius: var(--radius-pill);
-  background: var(--color-border);
+  background: var(--color-border-strong);
   margin: 0 auto var(--space-2);
 }
 
@@ -493,10 +637,10 @@ select {
   position: absolute;
   top: var(--space-2);
   right: var(--space-2);
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-pill);
-  border: none;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-muted);
   font-size: var(--text-lg);
@@ -520,8 +664,8 @@ select {
 
 .sidebar__portrait {
   flex: none;
-  width: 64px;
-  height: 64px;
+  width: 56px;
+  height: 56px;
   border-radius: var(--radius-md);
   background: var(--color-canvas-bg);
   border: 1px solid var(--color-border);
@@ -534,8 +678,9 @@ select {
 
 .sidebar__name {
   font-family: var(--font-display);
-  font-size: var(--text-lg);
-  color: var(--color-accent);
+  font-weight: 600;
+  font-size: var(--text-md);
+  color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -551,11 +696,12 @@ select {
 
 .pill {
   font-size: var(--text-xs);
-  color: var(--color-bg);
-  background: var(--color-accent);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
   padding: 2px var(--space-2);
-  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -575,13 +721,26 @@ select {
   font-size: var(--text-xs);
   color: var(--color-text-faint);
   min-width: 70px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar__footer::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-faint);
+  opacity: 0.7;
+  flex: none;
 }
 
 /* ---- tablist ---- */
 .sidebar-tablist {
   flex: none;
   display: flex;
-  gap: var(--space-1);
+  gap: var(--space-3);
   margin-top: var(--space-3);
   overflow-x: auto;
   scrollbar-width: none;
@@ -599,7 +758,8 @@ select {
   background: transparent;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
-  padding: var(--space-3) var(--space-3);
+  font-weight: 500;
+  padding: var(--space-3) 0;
   min-height: 44px;
   cursor: pointer;
   border-bottom: 2px solid transparent;
@@ -624,8 +784,13 @@ select {
 
 .sidebar-heading {
   font-size: var(--text-xs);
-  color: var(--color-text-faint);
+  font-weight: 600;
+  color: var(--color-text);
   margin: var(--space-4) 0 var(--space-2);
+}
+
+.sidebar-heading:first-of-type {
+  margin-top: 2px;
 }
 
 .sidebar-empty {
@@ -636,25 +801,36 @@ select {
 
 /* ---- overview ---- */
 .activity-pill {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--text-xs);
-  font-weight: 600;
-  padding: var(--space-1) var(--space-3);
+  font-weight: 500;
+  padding: 4px var(--space-2) 4px 8px;
   border-radius: var(--radius-pill);
-  color: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text);
+  background: transparent;
+}
+.activity-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dot);
+  box-shadow: 0 0 8px var(--dot);
 }
 .activity-pill--dormant {
-  background: var(--color-activity-dormant);
-  color: var(--color-text);
+  --dot: var(--color-activity-dormant);
 }
 .activity-pill--quiet {
-  background: var(--color-activity-quiet);
+  --dot: var(--color-activity-quiet);
 }
 .activity-pill--active {
-  background: var(--color-activity-active);
+  --dot: var(--color-activity-active);
 }
 .activity-pill--festival {
-  background: var(--color-activity-festival);
+  --dot: var(--color-activity-festival);
 }
 
 .overview-stats {
@@ -669,8 +845,10 @@ select {
 }
 
 .overview-stat strong {
-  font-family: var(--font-display);
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
   font-size: var(--text-xl);
+  font-weight: 600;
   color: var(--color-text);
 }
 
@@ -708,6 +886,7 @@ select {
 .artist-row__name {
   color: var(--color-text);
   font-size: var(--text-sm);
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -716,7 +895,95 @@ select {
 .artist-row__plays {
   flex: none;
   color: var(--color-text-faint);
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
   font-size: var(--text-xs);
+}
+
+/* ---- now playing card (Overview) ---- */
+.nowplaying-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  margin-top: var(--space-2);
+}
+
+.np-cover {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--cover-radius);
+  overflow: hidden;
+  background: var(--color-canvas-bg);
+  flex: none;
+}
+
+.np-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.np-meta {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.np-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.np-sub {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 16px;
+  flex: none;
+}
+
+.eq i {
+  width: 3px;
+  background: var(--color-accent);
+  border-radius: 1px;
+  display: block;
+  animation: eq-pulse 0.9s ease-in-out infinite;
+}
+
+.eq i:nth-child(1) {
+  animation-delay: -0.6s;
+}
+.eq i:nth-child(2) {
+  animation-delay: -0.3s;
+}
+.eq i:nth-child(3) {
+  animation-delay: 0s;
+}
+
+@keyframes eq-pulse {
+  0%,
+  100% {
+    height: 4px;
+  }
+  50% {
+    height: 14px;
+  }
 }
 
 /* ---- songs tab ---- */
@@ -733,8 +1000,12 @@ select {
   padding: 0 var(--space-3);
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
-  background: var(--color-surface);
+  background: var(--color-surface-raised);
   color: var(--color-text);
+}
+
+.songs-search::placeholder {
+  color: var(--color-text-faint);
 }
 
 .songs-filter {
@@ -743,7 +1014,7 @@ select {
   padding: 0 var(--space-2);
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
-  background: var(--color-surface);
+  background: var(--color-surface-raised);
   color: var(--color-text);
 }
 
@@ -789,6 +1060,7 @@ select {
 
 .song-row__title {
   font-size: var(--text-sm);
+  font-weight: 500;
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -806,16 +1078,16 @@ select {
 
 .song-row__plays {
   flex: none;
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
   font-size: var(--text-xs);
   color: var(--color-text-faint);
 }
 
-/* ---- Now playing row (Overview) reuses .song-row styling ---- */
-
 /* ==========================================================================
-   Desktop: sidebar is a fixed-width column beside the map, not a full-screen
-   sheet. The map (.content) shrinks to fill the rest via flex, so it stays
-   visible and interactive next to the open panel.
+   Desktop: the sidebar becomes a floating glass panel inset over the map
+   (position: absolute, 16px inset, 400px wide) instead of a full-screen
+   sheet — the map stays visible and interactive around it.
    ========================================================================== */
 @media (min-width: 900px) {
   .sidebar-backdrop {
@@ -823,21 +1095,15 @@ select {
   }
 
   .sidebar {
-    position: relative;
-    inset: auto;
-    flex: none;
-    width: 0;
-    border-left: none;
-    padding: 0;
-    transform: none;
-    overflow: hidden;
-    transition: width var(--duration-base) var(--ease-standard);
-  }
-
-  .sidebar.is-open {
+    position: absolute;
+    top: calc(var(--topbar-h) + var(--sidebar-inset));
+    right: var(--sidebar-inset);
+    bottom: var(--sidebar-inset);
+    left: auto;
     width: var(--sidebar-width);
-    border-left: 1px solid var(--color-border);
-    padding: var(--space-4);
+    border-radius: var(--radius-panel);
+    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55);
+    padding: var(--space-3) var(--space-4) var(--space-4);
   }
 
   .sidebar__grabber {

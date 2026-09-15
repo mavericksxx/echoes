@@ -50,87 +50,149 @@ export function getWalkFrames(anims: CharacterAnims, dir: Direction): Rect[] {
   }
 }
 
-/** Draws one NPC (sprite + caption bubble, if any) onto ctx. */
-export function drawNpc(
-  ctx: CanvasRenderingContext2D,
-  images: ImageMap,
-  npc: Npc,
-  canvasWidth: number,
-): void {
+/** The visible camera rect in world space, used to clamp on-screen overlays
+ * (like caption bubbles) so they never draw outside the viewport. */
+export interface ViewRect {
+  camX: number;
+  camY: number;
+  viewW: number;
+  viewH: number;
+}
+
+/** The sprite rect an NPC is currently showing, independent of which sheet
+ * image it comes from — shared by drawNpc (which also needs the image) and
+ * captionAnchor (which only needs the rect's height). */
+function currentSprite(npc: Npc): { rect: Rect; label: string; scale: number; sheet: string } {
   const { character } = npc;
-  let img: DrawableImage;
-  let rect: Rect;
-  let label: string;
-  let scale = 1;
-
   if (npc.state === "performing") {
-    img = images[character.battleSheet]!;
-    const i = npc.performFrame % character.specials.length;
-    rect = character.specials[i] ?? character.idle;
-    label = character.specials[i] ? `specials[${i}]` : "idle";
-    scale = getSpecialScale(character);
-  } else if (npc.state === "idle") {
-    img = images[character.sheet]!;
-    rect = character.idle;
-    label = "idle";
-  } else {
-    img = images[character.sheet]!;
-    const frames = getWalkFrames(character.anims, npc.dir);
-    const i = npc.frame % frames.length;
-    rect = frames[i] ?? character.idle;
-    label = frames[i] ? `walk_${npc.dir}[${i}]` : "idle";
+    const i = npc.performFrame % Math.max(1, character.specials.length);
+    const special = character.specials[i];
+    if (special) {
+      return { rect: special, label: `specials[${i}]`, scale: getSpecialScale(character), sheet: character.battleSheet };
+    }
+    return { rect: character.idle, label: "idle", scale: 1, sheet: character.sheet };
   }
+  if (npc.state === "idle") {
+    return { rect: character.idle, label: "idle", scale: 1, sheet: character.sheet };
+  }
+  const frames = getWalkFrames(character.anims, npc.dir);
+  const i = npc.frame % frames.length;
+  const frame = frames[i];
+  return frame
+    ? { rect: frame, label: `walk_${npc.dir}[${i}]`, scale: 1, sheet: character.sheet }
+    : { rect: character.idle, label: "idle", scale: 1, sheet: character.sheet };
+}
 
+function currentSpriteRect(npc: Npc): Rect {
+  return currentSprite(npc).rect;
+}
+
+/** Draws one NPC's sprite onto ctx (world space), anchored at its pivot (feet).
+ * Caption bubbles are drawn separately, in a screen-space overlay pass — see drawCaptions(). */
+export function drawNpc(ctx: CanvasRenderingContext2D, images: ImageMap, npc: Npc, _view: ViewRect): void {
+  const { rect, label, scale, sheet } = currentSprite(npc);
+  const img: DrawableImage = images[sheet]!;
   const [sx, sy, rx1, ry1] = rect;
   const sw = rx1 - sx;
   const sh = ry1 - sy;
-  const pivot = resolvePivot(character, label, rect);
+  const pivot = resolvePivot(npc.character, label, rect);
   const { dx, dy, dw, dh } = drawOrigin(rect, pivot, npc.x, npc.y, scale);
   ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
-
-  if (npc.caption) drawCaption(ctx, npc.caption, npc.x, dy, canvasWidth);
 }
 
-function drawCaption(
+/** World-space position of the top-center of an NPC's current sprite —
+ * where its caption bubble should anchor above. */
+export function captionAnchor(npc: Npc): { x: number; y: number } {
+  const rect = currentSpriteRect(npc);
+  const sh = rect[3] - rect[1];
+  return { x: npc.x, y: npc.y - sh };
+}
+
+/** The camera state needed to convert world coordinates to screen (CSS px)
+ * coordinates for the caption overlay. */
+export interface ScreenView {
+  camX: number;
+  camY: number;
+  zoom: number;
+}
+
+/** Draws every NPC's "now playing" caption as a glass pill, in screen space,
+ * onto a dedicated overlay canvas (see main.ts's captionLayer). Kept separate
+ * from the pixel-art canvas so the text renders at full device-pixel
+ * resolution — crisp, not pixelated — using the loaded Archivo webfont.
+ * `cssW`/`cssH` are the overlay's size in CSS px (its context is expected to
+ * already be transform-scaled to the device pixel ratio by the caller). */
+export function drawCaptions(
   ctx: CanvasRenderingContext2D,
-  text: string,
-  anchorX: number,
-  spriteTopY: number,
-  canvasWidth: number,
+  npcs: Npc[],
+  view: ScreenView,
+  cssW: number,
+  cssH: number,
 ): void {
-  ctx.save();
-  ctx.font = "9px monospace";
-  ctx.textAlign = "center";
-  const maxW = Math.min(150, canvasWidth - 12);
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let line = "";
-  words.forEach((w) => {
-    const test = line ? `${line} ${w}` : w;
-    if (ctx.measureText(test).width > maxW && line) {
-      lines.push(line);
-      line = w;
-    } else {
-      line = test;
-    }
+  ctx.clearRect(0, 0, cssW, cssH);
+  npcs.forEach((npc) => {
+    if (!npc.caption) return;
+    const anchor = captionAnchor(npc);
+    const screenX = (anchor.x - view.camX) * view.zoom;
+    const screenTopY = (anchor.y - view.camY) * view.zoom;
+    drawCaptionBubble(ctx, npc.caption!, screenX, screenTopY, cssW);
   });
-  if (line) lines.push(line);
+}
 
-  const boxW = Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width))) + 10;
-  const boxH = lines.length * 11 + 6;
-  const bx = Math.max(boxW / 2 + 2, Math.min(canvasWidth - boxW / 2 - 2, anchorX));
-  const by = Math.max(2, spriteTopY - boxH - 6);
+function drawCaptionBubble(ctx: CanvasRenderingContext2D, text: string, anchorX: number, topY: number, cssW: number): void {
+  ctx.save();
+  ctx.font = "500 12px Archivo, -apple-system, sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
 
-  ctx.fillStyle = "rgba(255,255,255,0.92)";
-  ctx.strokeStyle = "#333";
-  ctx.lineWidth = 1;
+  const dotR = 3;
+  const paddingX = 10;
+  const gapAfterDot = 6;
+  const boxH = 24;
+
+  // Ellipsize rather than overflow a narrow phone viewport.
+  const maxTextW = Math.max(40, cssW - 64);
+  let label = text;
+  if (ctx.measureText(label).width > maxTextW) {
+    while (label.length > 1 && ctx.measureText(`${label}…`).width > maxTextW) {
+      label = label.slice(0, -1);
+    }
+    label = `${label}…`;
+  }
+  const textW = ctx.measureText(label).width;
+  const boxW = paddingX * 2 + dotR * 2 + gapAfterDot + textW;
+
+  const minX = boxW / 2 + 4;
+  const maxX = cssW - boxW / 2 - 4;
+  const bx = minX > maxX ? cssW / 2 : Math.max(minX, Math.min(maxX, anchorX));
+  const by = Math.max(boxH / 2 + 4, topY - 10 - boxH / 2);
+  const left = bx - boxW / 2;
+  const top = by - boxH / 2;
+  const radius = boxH / 2;
+
   ctx.beginPath();
-  ctx.rect(bx - boxW / 2, by, boxW, boxH);
+  ctx.moveTo(left + radius, top);
+  ctx.arcTo(left + boxW, top, left + boxW, top + boxH, radius);
+  ctx.arcTo(left + boxW, top + boxH, left, top + boxH, radius);
+  ctx.arcTo(left, top + boxH, left, top, radius);
+  ctx.arcTo(left, top, left + boxW, top, radius);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(18, 26, 36, 0.86)";
   ctx.fill();
+  ctx.strokeStyle = "rgba(231, 238, 244, 0.20)";
+  ctx.lineWidth = 1;
   ctx.stroke();
 
-  ctx.fillStyle = "#111";
-  lines.forEach((l, i) => ctx.fillText(l, bx, by + 4 + i * 11));
+  ctx.beginPath();
+  ctx.fillStyle = "#55C2CE";
+  ctx.shadowColor = "#55C2CE";
+  ctx.shadowBlur = 6;
+  ctx.arc(left + paddingX + dotR, by, dotR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "#E7EEF4";
+  ctx.fillText(label, left + paddingX + dotR * 2 + gapAfterDot, by + 1);
   ctx.restore();
 }
 
@@ -145,10 +207,10 @@ export function drawSelectionRing(ctx: CanvasRenderingContext2D, npc: Npc): void
   ctx.save();
   ctx.beginPath();
   ctx.ellipse(npc.x, npc.y + 2, 16, 6, 0, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(255, 157, 61, 0.35)";
+  ctx.fillStyle = "rgba(85, 194, 206, 0.35)";
   ctx.fill();
   ctx.lineWidth = 1.5;
-  ctx.strokeStyle = "rgba(255, 157, 61, 0.85)";
+  ctx.strokeStyle = "rgba(85, 194, 206, 0.85)";
   ctx.stroke();
   ctx.restore();
 }

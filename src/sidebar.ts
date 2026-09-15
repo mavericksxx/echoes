@@ -15,6 +15,7 @@ import {
   SAMPLE_NOW,
   topArtists,
   totalPlays,
+  type ArtistTotal,
   type Song,
 } from "./sample-data";
 import { coverPlaceholderGradient } from "./cover-art";
@@ -114,6 +115,65 @@ function buildSongRow(song: Song): HTMLElement {
   return row;
 }
 
+/** The Overview tab's "now playing" card — a small panel with a cover, the
+ * track's title/artist, and a purely decorative equalizer glyph (a visual
+ * "this is playing" cue, not audio-driven). */
+function buildNowPlayingCard(song: Song): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "nowplaying-card";
+
+  const cover = document.createElement("div");
+  cover.className = "np-cover";
+  if (song.coverUrl) {
+    const img = document.createElement("img");
+    img.className = "np-cover-img";
+    img.src = song.coverUrl;
+    img.alt = "";
+    img.loading = "lazy";
+    cover.appendChild(img);
+  } else {
+    cover.style.background = coverPlaceholderGradient(`${song.title}|${song.artist}`);
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "np-meta";
+  const title = document.createElement("p");
+  title.className = "np-title";
+  title.textContent = song.title;
+  const sub = document.createElement("p");
+  sub.className = "np-sub";
+  sub.textContent = song.artist;
+  meta.append(title, sub);
+
+  const eq = document.createElement("span");
+  eq.className = "eq";
+  eq.setAttribute("aria-hidden", "true");
+  eq.append(document.createElement("i"), document.createElement("i"), document.createElement("i"));
+
+  card.append(cover, meta, eq);
+  return card;
+}
+
+/** Shared artist row for Overview's "top artists" and the Artists tab — built
+ * with textContent (not innerHTML) since the artist name is data, not markup. */
+function buildArtistRow(artist: ArtistTotal, onSelect: () => void): HTMLButtonElement {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "artist-row";
+
+  const name = document.createElement("span");
+  name.className = "artist-row__name";
+  name.textContent = artist.name;
+
+  const plays = document.createElement("span");
+  plays.className = "artist-row__plays";
+  plays.textContent = `${artist.plays} plays`;
+
+  row.append(name, plays);
+  row.addEventListener("click", onSelect);
+  return row;
+}
+
 // ---------------------------------------------------------------------------
 // Overview
 // ---------------------------------------------------------------------------
@@ -152,14 +212,7 @@ function renderOverview(container: HTMLElement, ctx: SectionContext): void {
     container.appendChild(heading);
     const list = document.createElement("div");
     list.className = "artist-list";
-    artists.forEach((a) => {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "artist-row";
-      row.innerHTML = `<span class="artist-row__name">${a.name}</span><span class="artist-row__plays">${a.plays} plays</span>`;
-      row.addEventListener("click", () => ctx.switchToSongs(a.name));
-      list.appendChild(row);
-    });
+    artists.forEach((a) => list.appendChild(buildArtistRow(a, () => ctx.switchToSongs(a.name))));
     container.appendChild(list);
   }
 
@@ -170,7 +223,7 @@ function renderOverview(container: HTMLElement, ctx: SectionContext): void {
 
   const now = nowPlayingSong(listening);
   if (now) {
-    container.appendChild(buildSongRow(now));
+    container.appendChild(buildNowPlayingCard(now));
   } else {
     const empty = document.createElement("p");
     empty.className = "sidebar-empty";
@@ -305,14 +358,7 @@ function renderArtists(container: HTMLElement, ctx: SectionContext): void {
 
   const list = document.createElement("div");
   list.className = "artist-list";
-  artists.forEach((a) => {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "artist-row";
-    row.innerHTML = `<span class="artist-row__name">${a.name}</span><span class="artist-row__plays">${a.plays} plays</span>`;
-    row.addEventListener("click", () => ctx.switchToSongs(a.name));
-    list.appendChild(row);
-  });
+  artists.forEach((a) => list.appendChild(buildArtistRow(a, () => ctx.switchToSongs(a.name))));
   container.appendChild(list);
 }
 
@@ -465,14 +511,19 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
 
 export function openSidebar(slot: Slot): void {
   const isFirstOpen = !root.classList.contains("is-open");
+  const districtChanged = isFirstOpen || currentSlot?.district.id !== slot.district.id;
   currentSlot = slot;
-  if (isFirstOpen) {
+  // A fresh open resets everything, including landing back on Overview.
+  // Switching to a different character while the panel stays open resets the
+  // Songs search/filters (they were scoped to the old district) but leaves
+  // whichever tab the user was on alone.
+  if (districtChanged) {
     songsSearch = "";
     songsArtistFilter = "";
     songsAlbumFilter = "";
     songsSort = "plays";
-    activeSectionId = "overview";
   }
+  if (isFirstOpen) activeSectionId = "overview";
   renderHeader(slot);
   renderSection(activeSectionId);
 
