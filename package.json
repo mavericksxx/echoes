@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit",
     "check:data": "node scripts/check-data.mjs",
     "assets:sync": "node scripts/sync-assets.mjs",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run check:data && npm run build && wrangler deploy"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260915.1",
