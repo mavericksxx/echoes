@@ -48,7 +48,8 @@ Status legend: **[decided]** locked in · **[default]** proposed, revisit if nee
 - **[decided]** Deployed from Phase 1 onward; every phase ends with a deploy to the same URL so it can be checked from a phone. Local `wrangler dev` + Vite still used while building.
 
 ### Auth & tokens
-- **[default]** PKCE in the browser gets the code; the Worker exchanges it and stores the refresh token encrypted in D1 (single user). Access tokens are refreshed automatically before expiry; a failed refresh → re-login prompt.
+- **[decided]** Visitors never log in. The owner connects Spotify **once** via a hidden `/connect` page; the Worker stores the refresh token encrypted in D1 and refreshes access tokens automatically (saving the rotated refresh token each time). Refresh tokens don't expire on their own — only revoking access, changing password, or losing Premium breaks it.
+- **[decided]** The site never depends on a live token: it always renders from D1 (last known village + songs). If refresh fails, visitors still see the village with a subtle "live updates paused" state; the owner gets a notice (email/log) to reconnect. `/connect` is protected so visitors can't swap in their own account (owner-only secret or Spotify user ID check on the callback).
 
 ### Data model (D1, derived data only)
 - **[default]** Tables: `genre_slot_map` (raw genre/tag → one of the 17 slots, with source + confidence), `artist_cache` (artist id → slot, mood/energy, NPC text; TTL), `daily_snapshot` (rolled up from `play_event` + top-items per time range), `play_event` (derived: timestamp, artist id, slot; **source of truth**), `world_state` (current district states), `agent_event` (evolution-agent actions, reasoning, before/after diff), `llm_cache` (prompt hash → output), `usage_log` (Spotify requests + 429s, Gemini tokens/cost).
@@ -72,7 +73,7 @@ Status legend: **[decided]** locked in · **[default]** proposed, revisit if nee
 - **[open]** Characters are genres, so artists need a representation. Candidates: (a) signs/banners on district buildings named after top artists, (b) "now playing" caption + info card list, (c) small generic background NPCs (Konoha villager sprites) per top artist. Naruto rips have no standalone building sprites, so (a) means labeling existing map buildings. Default: (b) from Phase 3; evaluate (a)/(c) in Phase 7.
 
 ### Empty & edge states
-- **[default]** New/low-history account → build the town from `short_term` top artists and show an onboarding note; nothing playing → idle town, polling slows; private session / no data returned → "listening privately" state; podcasts/audiobooks → ignored; artist with no genre → Last.fm → Gemini inference → nearest slot; Spotify down or token revoked → last known town + reconnect banner.
+- **[default]** New/low-history account → build the town from `short_term` top artists and show an onboarding note; nothing playing → idle town, polling slows; private session / no data returned → "listening privately" state; podcasts/audiobooks → ignored; artist with no genre → Last.fm → Gemini inference → nearest slot; Spotify down or token revoked → last known town + "live paused" state for visitors, reconnect notice for the owner only.
 
 ### AI cost control
 - **[default]** Monthly Gemini budget cap enforced in the Worker via `usage_log` (hard stop + fall back to cached/template text). Limits: genre mapping only for new genres; artist tagging once per artist; captions cached per artist+song; weekly brief 1/week; Mayor chat rate-limited per day; evolution agent at most 1 run/day.
@@ -101,7 +102,7 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 **You'll see:** the Konoha village live at a real URL, driven by fake data.
 
 ### Phase 2 — Log in and see your real top artists
-- Spotify PKCE login (deployed HTTPS redirect + local `127.0.0.1` redirect), token exchange + refresh in the Worker.
+- One-time owner connect at `/connect` (PKCE, deployed HTTPS + local `127.0.0.1` redirects); Worker stores + auto-refreshes the token. Visitors see data without logging in.
 - Rate-aware Spotify wrapper (429 handling, backoff, request log).
 - Fetch top artists (medium_term); show them in a simple in-game panel.
 
