@@ -173,6 +173,7 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 ---
 
 ## Cross-cutting (every phase)
+- **Design is first-class, every phase.** Polished UI on both desktop and mobile browsers (phone ~390px → wide desktop), touch + mouse/keyboard, design tokens in one place, coherent visual identity. Each phase's "You'll see" must look finished on both, not just work.
 - All LLM outputs cached; no uncached LLM call on page load.
 - API keys only in the Worker.
 - Disconnect button deletes all stored user data.
