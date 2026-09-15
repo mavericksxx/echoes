@@ -1,4 +1,4 @@
-# spotify-pixel-town — Spec
+# Echoes (working name; formerly spotify-pixel-town)
 
 See `IDEA.md` for the concept. This spec breaks the build into **vertical slices**: every phase ships something you can open and see working end to end (data → logic → AI → pixels). No "backend-only" or "AI-only" phases.
 
