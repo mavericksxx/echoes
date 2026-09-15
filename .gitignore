@@ -1,0 +1,9 @@
+# Ripped Naruto sprites/maps (copyrighted) — local only, never commit
+prototypes/konoha-demo/assets/
+prototypes/konoha-demo/raw/
+node_modules/
+dist/
+.env
+.dev.vars
+.DS_Store
+.wrangler/

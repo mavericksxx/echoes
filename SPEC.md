@@ -1,0 +1,187 @@
+# spotify-pixel-town — Spec
+
+See `IDEA.md` for the concept. This spec breaks the build into **vertical slices**: every phase ships something you can open and see working end to end (data → logic → AI → pixels). No "backend-only" or "AI-only" phases.
+
+**Rule for every phase:** it ends with a runnable demo and a short "what you'll see" check. If a phase can't be demoed, it's scoped wrong.
+
+## Spotify API constraints (researched 2026-09)
+- **Dev Mode forever:** max 5 allowlisted users; Extended Quota needs 250k+ MAU. Fine for personal use; public sharing = images/read-only views, not logins.
+- **Redirect URI:** `localhost` is banned — use `http://127.0.0.1:PORT/callback`.
+- **Artist `genres` is deprecated and often empty.** Genre source = Spotify genres when present → Last.fm/MusicBrainz tags → LLM inference from artist name. Clustering runs on this merged tag set.
+- **Storage policy:** no indefinite storage of raw Spotify Content. Persist only *derived* stats (play counts, district tallies, snapshots of our own world state); expire raw API responses; delete all on disconnect.
+- **AI policy:** training ML models on Spotify Content is banned. We only do inference with off-the-shelf models, never fine-tune; send minimal fields (artist names, tags, counts).
+- **Rate limits:** undocumented (rolling 30s window, Dev Mode lower than Extended). Always honor 429 `Retry-After` with exponential backoff.
+- **Live listening:** no push/webhooks — polling only. App open: `currently-playing` every ~5s while playing, 30–60s when paused/idle. App closed: Worker cron pulls `recently-played` (50-item cap) every 15–30 min to backfill history. Intervals are provisional until the rate-limit test below.
+
+## Stack (proposed)
+- **Frontend:** TypeScript + Vite, PixiJS for tile/sprite rendering.
+- **Backend:** Cloudflare Worker (LLM proxy, agent runs, cron) + D1 (SQLite) for history and cached AI output.
+- **Auth:** Spotify Authorization Code + PKCE.
+- **LLM:** Gemini via `@google/genai` in the Worker (same setup as the portfolio site's Cloudflare backend). Flash-Lite for bulk tagging/captions, Flash for writing, Flash/Pro with function calling for agents. Pin exact model IDs at build time.
+
+## Art direction (decided 2026-09-15)
+- **Naruto: Path of the Ninja 1/2 (DS) sprites** — chosen over free packs (LPC, Ninja Adventure, Kenney) after side-by-side demos.
+- **Genres are characters.** Each genre district = one Naruto character in one Naruto location. Artists appear as buildings/captions/info inside their genre's district.
+- Roster (17): Hip-Hop=Naruto, Pop=Sakura, R&B=Neji, Rock/Metal=Rock Lee, Lo-fi=Shikamaru, Emo/Alt=Gaara, Darkwave=Sasuke (CS2 form only), Electronic=Kakashi, Punk=Kiba, Folk=Hinata, Ambient=Shino, Jazz=Guy, Indie=Ino, Soul/Funk=Choji, Latin=Tenten, Classical=Temari, Metalcore=Kankuro. Each has walk (4-dir, some mirrored), idle, 2 special poses.
+- **Locations:** 8 real same-scale maps (Konoha village ×2 halves, Hidden Leaf Forest, Academy dojo, Hokage Monument yard, Hospital yard, Ichiraku interior, house interior). Remaining districts recolor Konoha. No usable Suna/Forest of Death/Valley of the End rips exist.
+- Views: single district, all-characters roster, whole village (all characters on the Konoha map).
+- Reference prototype: `prototypes/konoha-demo/` (open `index.html`; frame rects in `main.js`, checks in `verify.js`). Private preview: https://claude.ai/artifact/U1MS16iBHvtG5BTJPvVzsR
+- **Licensing:** ripped assets are copyrighted — git-ignored, never committed to the public repo. The Naruto art is fixed — not a user-swappable feature. Public showcase = screenshots/video only.
+
+## Foundations (before / during Phase 1)
+Status legend: **[decided]** locked in · **[default]** proposed, revisit if needed · **[open]** needs a decision.
+
+### Setup
+- **[decided]** Spotify developer app with two redirect URIs: `http://127.0.0.1:PORT/callback` (local) and the deployed HTTPS origin (Phase 8).
+- **[decided]** Gemini API key, stored only as a Worker secret.
+- **[decided]** Cloudflare account: Worker + D1 + cron.
+- **[decided]** `git init` + public GitHub repo; `CHANGELOG.md` and `BACKLOG.md` kept current.
+
+### Hosting
+- **[decided]** Deployed publicly (Cloudflare Worker + static frontend), no Cloudflare Access gate — it's a personal app only the owner uses.
+- **[decided]** No owner check on the Worker API. Abuse protection = rate limits instead: per-IP limits on every endpoint (Cloudflare rate limiting / Worker counter), a stricter per-IP + global daily cap on any endpoint that triggers a Gemini call, and Spotify-calling endpoints served from the Worker's cache so visitors can't burn the Spotify quota.
+- **[decided]** Gemini free-tier key. Our use is inference only (listening insights), never training. Minimize exposure: send only derived fields (artist names, genre tags, counts), never raw Spotify payloads, user IDs, or tokens.
+- **[default]** Ripped assets stay out of the public git repo (avoids DMCA takedown of the repo); uploaded to the deployment from a local folder or R2 at deploy time.
+- **[default]** Local dev (`wrangler dev` + Vite) through Phase 7; first deploy in Phase 8, before cron in Phase 9.
+
+### Auth & tokens
+- **[default]** PKCE in the browser gets the code; the Worker exchanges it and stores the refresh token encrypted in D1 (single user). Access tokens are refreshed automatically before expiry; a failed refresh → re-login prompt.
+
+### Data model (D1, derived data only)
+- **[default]** Tables: `genre_slot_map` (raw genre/tag → one of the 17 slots, with source + confidence), `artist_cache` (artist id → slot, mood/energy, NPC text; TTL), `daily_snapshot` (rolled up from `play_event` + top-items per time range), `play_event` (derived: timestamp, artist id, slot; **source of truth**), `world_state` (current district states), `agent_event` (evolution-agent actions, reasoning, before/after diff), `llm_cache` (prompt hash → output), `usage_log` (Spotify requests + 429s, Gemini tokens/cost).
+- **[decided]** Disconnect deletes every row + the refresh token.
+
+### Sprite & map data
+- **[decided]** Character frame rects and animations move out of `main.js` into internal JSON data files with a loader and validation script (like `verify.js`). Internal organization only — not a user-facing sprite-swap feature.
+- **[open]** **Walkable areas:** each map gets a walkability grid (hand-painted collision mask per map, likely a small PNG or tile grid) + pathfinding (A*) so characters never walk on roofs/walls. Needed before whole-village view ships.
+
+### Genre fitting
+- **[decided]** Fixed 17 genre slots (the roster). Gemini maps each raw Spotify genre / Last.fm tag → nearest slot, cached in `genre_slot_map`.
+- **[default]** Unused slot (no listening) → district exists but is quiet/faded, character idles alone. Low-confidence or unmappable genres → nearest slot by similarity; truly unfit artists are "visitors" in the whole-village view.
+- **[open]** Overlapping slots (Rock/Metal vs Metalcore; Emo/Alt vs Indie vs Punk): define each slot with example genres/tags in the mapping prompt, and revisit merging slots if mapping is ambiguous in practice.
+- **[open]** Whether heavy sub-genre listening (e.g. lots of drill inside Hip-Hop) should show inside a district (e.g. a variant, prop, or crowd) rather than adding slots.
+
+### What growth means (maps are fixed size)
+- **[default]** A district can't physically grow, so listening share maps to an **activity level** per slot (dormant → quiet → active → festival): character walk speed and performance frequency, district lighting/saturation, festival props, and crowds of background villagers. Dormant slots are faded and still.
+- **[decided]** Most listeners concentrate in ~4 slots, so most districts will usually be dormant. Accepted: the whole-village view highlights active districts; dormant ones stay visible but quiet.
+
+### Where artists appear
+- **[open]** Characters are genres, so artists need a representation. Candidates: (a) signs/banners on district buildings named after top artists, (b) "now playing" caption + info card list, (c) small generic background NPCs (Konoha villager sprites) per top artist. Naruto rips have no standalone building sprites, so (a) means labeling existing map buildings. Default: (b) from Phase 3; evaluate (a)/(c) in Phase 7.
+
+### Empty & edge states
+- **[default]** New/low-history account → build the town from `short_term` top artists and show an onboarding note; nothing playing → idle town, polling slows; private session / no data returned → "listening privately" state; podcasts/audiobooks → ignored; artist with no genre → Last.fm → Gemini inference → nearest slot; Spotify down or token revoked → last known town + reconnect banner.
+
+### AI cost control
+- **[default]** Monthly Gemini budget cap enforced in the Worker via `usage_log` (hard stop + fall back to cached/template text). Limits: genre mapping only for new genres; artist tagging once per artist; captions cached per artist+song; weekly brief 1/week; Mayor chat rate-limited per day; evolution agent at most 1 run/day.
+
+### Testing
+- **[decided]** Unit tests: genre → slot mapping, snapshot diffs, district sizing, backoff wrapper.
+- **[decided]** Rate-limit test (Phase 6).
+- **[default]** AI steps tested against saved fixture inputs with schema validation of outputs (and snapshot-reviewed text), no live calls in CI.
+- **[default]** Sprite/map data validation script runs in CI (frames in bounds, all assets referenced exist, spawn points walkable).
+
+### Docs
+- **[decided]** README: setup, architecture, and agent design write-up for the portfolio; screenshots/video instead of hosted assets.
+
+---
+
+## Phases
+Each phase is sized to be built in **one prompt**: one visible outcome, a handful of files, no more than one new system. If a phase grows during building, split it rather than stretching it.
+
+### Phase 1 — Village on screen (no Spotify yet)
+- Vite + TypeScript scaffold, Worker scaffold (`wrangler dev`), repo + changelog/backlog.
+- Move demo sprite/map data into JSON + loader + validation script; port the renderer (district view + whole-village view) using **hard-coded sample listening data**.
+
+**You'll see:** the Konoha village running in the new app, driven by fake data.
+
+### Phase 2 — Log in and see your real top artists
+- Spotify PKCE login (local `127.0.0.1` redirect), token exchange + refresh in the Worker.
+- Rate-aware Spotify wrapper (429 handling, backoff, request log).
+- Fetch top artists (medium_term); show them in a simple in-game panel.
+
+**You'll see:** log in → your real top artists listed inside the village UI.
+
+### Phase 3 — Your genres become characters
+- Genre gap-fill: Spotify genres → Last.fm tags.
+- Gemini call (Flash-Lite) mapping genres/tags → the 17 slots, cached in D1 `genre_slot_map`; Gemini inference for artists with no tags.
+- Replace sample data: each slot's **activity level** from your listening share; info card lists your top artists per slot.
+
+**You'll see:** the village reflects your actual taste — busy districts for what you play, quiet ones for what you don't.
+
+### Phase 4 — Characters walk properly
+- Walkability grid per map + A* pathfinding; spawn points validated in the data check.
+
+**You'll see:** characters wander naturally, no walking on roofs or through walls.
+
+### Phase 5 — Live reactions
+- Poll currently-playing (~5s playing / 30–60s idle) through the wrapper.
+- Now-playing song → its slot's character walks to their spot + special pose + caption (template text, no AI yet).
+
+**You'll see:** play a song on Spotify → the right character reacts within seconds.
+
+### Phase 6 — Rate-limit test
+- Scripted ramp test (10s → 5s → 3s → 2s on currently-playing + concurrent top/artists calls), log every 429 + `Retry-After`, find fastest zero-429 interval over ~30 min, verify recovery after a forced 429.
+- Set production intervals at ≥2× the safe interval; record results in this spec.
+
+**You'll see:** a small results report and tuned polling in the app.
+
+### Phase 7 — Moods and personalities
+- Gemini mood/energy tagging per artist (cached) → district tint/lighting + character walk speed/performance frequency.
+- Per-slot personality + dialogue lines flavored by your top artists (cached); shown in the info card.
+- AI live captions replace the template captions (cached per artist+song).
+
+**You'll see:** districts feel different by mood; characters talk about your music.
+
+### Phase 8 — Deploy
+- Deploy Worker + frontend publicly; HTTPS redirect URI; ripped assets uploaded at deploy (not in git).
+- Per-IP rate limits, Gemini per-IP + global daily caps, cached Spotify-backed endpoints.
+
+**You'll see:** the village live at a real URL.
+
+### Phase 9 — The village remembers
+- Worker cron backfills `recently-played` every 15–30 min → `play_event`.
+- Daily rollup into `daily_snapshot`; activity levels use history; faded/festival states.
+- Time-range toggle (short/medium/long).
+
+**You'll see:** the village keeps changing even when the app was closed; flip between eras.
+
+### Phase 10 — Weekly notice board
+- Snapshot diff → Gemini weekly brief (1/week, cached) → in-world notice board UI.
+
+**You'll see:** a narrated weekly read on your taste in the village.
+
+### Phase 11 — Talk to the Hokage (agent #1)
+- Chat UI + Gemini function calling with tools `get_top_artists`, `get_recent_plays`, `get_slot_history`, `get_weekly_brief`, `find_artist`; daily chat limit.
+- Camera pans to the district a tool call is about.
+
+**You'll see:** ask a question about your listening → a real data-backed answer.
+
+### Phase 12 — The village evolves itself (agent #2)
+- Daily cron agent with tools `set_district_activity`, `set_weather`, `start_festival`, `set_time_of_day`, `send_visitor`, `set_character_mood`; validated diffs stored in `agent_event`.
+- Weather/festival/time-of-day rendering needed for those tools.
+
+**You'll see:** after a day, the village changed on its own.
+
+### Phase 13 — Village chronicle
+- Timeline UI of agent decisions with reasoning; replay a past day's changes.
+
+**You'll see:** exactly what the agent changed and why.
+
+### Phase 14 — Show it off
+- PNG export / recorded clip, sound, onboarding, edge-state polish (empty account, private session, reconnect banner), disconnect-deletes-everything.
+- README with architecture + agent write-up.
+
+**You'll see:** a polished app and something to post.
+
+---
+
+## Cross-cutting (every phase)
+- All LLM outputs cached; no uncached LLM call on page load.
+- API keys only in the Worker.
+- Disconnect button deletes all stored user data.
+- Each phase: typecheck + build pass, demo checklist verified, changelog entry.
+- Spotify client centralizes all API calls behind one rate-aware wrapper (429 handling, backoff, request counter/logging) so limits can be measured and enforced everywhere.
+
+## Open questions
+- Last.fm vs MusicBrainz as primary tag fallback — default Last.fm (richer tags).
+- PixiJS vs plain canvas — default PixiJS.

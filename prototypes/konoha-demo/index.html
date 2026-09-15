@@ -1,0 +1,172 @@
+<title>Konoha Pixel Town</title>
+<style>
+  html { margin: 0; padding: 0; background: #14171c; }
+  body {
+    margin: 0;
+    padding-block: 0;
+    padding-inline: 16px;
+    box-sizing: border-box;
+    width: 100%;
+    overflow-x: hidden;
+    background: #14171c;
+    color: #eee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 {
+    font-size: 15px;
+    color: #ffd479;
+    margin: 10px 0 2px 0;
+    letter-spacing: 0.5px;
+  }
+  p.sub {
+    font-size: 11px;
+    color: #999;
+    margin: 0 0 10px 0;
+    text-align: center;
+    max-width: 700px;
+  }
+  #controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  #controls button {
+    background: #2a2f38;
+    color: #eee;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  #controls button:hover { background: #3a4150; }
+  #districtSelect {
+    background: #2a2f38;
+    color: #eee;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    max-width: 260px;
+  }
+  #districtLabel {
+    font-size: 12px;
+    color: #ffd479;
+    margin: 2px 0 1px 0;
+    text-align: center;
+  }
+  #recolorNote {
+    font-size: 10px;
+    color: #888;
+    margin: 0 0 8px 0;
+    text-align: center;
+    min-height: 12px;
+  }
+  #stage {
+    position: relative;
+    max-width: 100%;
+    align-self: center;
+  }
+  #controls { flex-wrap: wrap; justify-content: center; }
+  #districtSelect { min-width: 0; flex: 1 1 140px; }
+  #game {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #7ec4a0;
+    touch-action: manipulation;
+  }
+  #hint {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    font-size: 11px;
+    background: rgba(0,0,0,0.55);
+    padding: 4px 8px;
+    border-radius: 4px;
+    pointer-events: none;
+  }
+  #card {
+    position: absolute;
+    display: none;
+    min-width: 200px;
+    max-width: min(260px, 90%);
+    background: #1e2228;
+    border: 2px solid #ffd479;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+    z-index: 10;
+  }
+  #card h2 {
+    margin: 0 0 2px 0;
+    font-size: 14px;
+    color: #ffd479;
+  }
+  #card .artist {
+    color: #7ec4ff;
+    font-weight: bold;
+    margin-bottom: 6px;
+    display: block;
+  }
+  #card .close {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    cursor: pointer;
+    color: #999;
+    font-size: 13px;
+  }
+  #card .close:hover { color: #fff; }
+  footer {
+    font-size: 10px;
+    color: #666;
+    margin: 10px 0 20px 0;
+    max-width: 700px;
+    text-align: center;
+    line-height: 1.5;
+  }
+  #roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; width: 100%; max-width: 720px; }
+  .rcell { background: #1e2228; border: 1px solid #2f3540; border-radius: 6px; padding: 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
+  .rcell canvas { width: 96px; height: 96px; image-rendering: pixelated; background: #2a3a2f; border-radius: 4px; }
+  .rcell b { font-size: 11px; color: #ffd479; text-align: center; }
+  .rcell span { font-size: 10px; color: #9aa3ad; text-align: center; }
+  #allBtn.on, #villageBtn.on { background: #ffd479; color: #14171c; }
+</style>
+
+
+  <h1>KONOHA PIXEL TOWN &mdash; genres as characters</h1>
+  <p class="sub">17 genre districts, each one Naruto character in one Naruto DS location &middot; tap the character for an info card &middot; private preview</p>
+  <div id="controls">
+    <button id="prevBtn">&larr; Prev</button>
+    <select id="districtSelect"></select>
+    <button id="nextBtn">Next &rarr;</button>
+    <button id="allBtn">All characters</button>
+    <button id="villageBtn">Whole village</button>
+  </div>
+  <div id="districtLabel"></div>
+  <div id="recolorNote"></div>
+  <div id="stage">
+    <canvas id="game"></canvas>
+    <div id="hint">Tap the character</div>
+    <div id="card">
+      <span class="close" id="cardClose">&times;</span>
+      <h2 id="cardName"></h2>
+      <span class="artist" id="cardArtist"></span>
+      <div id="cardBody"></div>
+    </div>
+  </div>
+  <div id="roster" hidden></div>
+  <footer>
+    Sprites &amp; maps ripped from Naruto: Path of the Ninja / Path of the Ninja 2 (Nintendo DS) via The Spriters Resource.
+    Private visual mockup &mdash; not affiliated with Spotify, Naruto, Bandai Namco, or the original rippers.
+  </footer>
+  <script src="main.js"></script>
