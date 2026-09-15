@@ -32,7 +32,7 @@ See `IDEA.md` for the concept. This spec breaks the build into **vertical slices
 Status legend: **[decided]** locked in · **[default]** proposed, revisit if needed · **[open]** needs a decision.
 
 ### Setup
-- **[decided]** Spotify developer app with two redirect URIs: `http://127.0.0.1:PORT/callback` (local) and the deployed HTTPS origin (Phase 8).
+- **[decided]** Spotify developer app with two redirect URIs: `http://127.0.0.1:PORT/callback` (local) and the deployed HTTPS origin (from Phase 2).
 - **[decided]** Gemini API key, stored only as a Worker secret.
 - **[decided]** Cloudflare account: Worker + D1 + cron.
 - **[decided]** `git init` + public GitHub repo; `CHANGELOG.md` and `BACKLOG.md` kept current.
@@ -42,7 +42,7 @@ Status legend: **[decided]** locked in · **[default]** proposed, revisit if nee
 - **[decided]** No owner check on the Worker API. Abuse protection = rate limits instead: per-IP limits on every endpoint (Cloudflare rate limiting / Worker counter), a stricter per-IP + global daily cap on any endpoint that triggers a Gemini call, and Spotify-calling endpoints served from the Worker's cache so visitors can't burn the Spotify quota.
 - **[decided]** Gemini free-tier key. Our use is inference only (listening insights), never training. Minimize exposure: send only derived fields (artist names, genre tags, counts), never raw Spotify payloads, user IDs, or tokens.
 - **[default]** Ripped assets stay out of the public git repo (avoids DMCA takedown of the repo); uploaded to the deployment from a local folder or R2 at deploy time.
-- **[default]** Local dev (`wrangler dev` + Vite) through Phase 7; first deploy in Phase 8, before cron in Phase 9.
+- **[decided]** Deployed from Phase 1 onward; every phase ends with a deploy to the same URL so it can be checked from a phone. Local `wrangler dev` + Vite still used while building.
 
 ### Auth & tokens
 - **[default]** PKCE in the browser gets the code; the Worker exchanges it and stores the refresh token encrypted in D1 (single user). Access tokens are refreshed automatically before expiry; a failed refresh → re-login prompt.
@@ -90,12 +90,13 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 
 ### Phase 1 — Village on screen (no Spotify yet)
 - Vite + TypeScript scaffold, Worker scaffold (`wrangler dev`), repo + changelog/backlog.
+- First public deploy (Worker + static assets); ripped assets uploaded at deploy, not in git.
 - Move demo sprite/map data into JSON + loader + validation script; port the renderer (district view + whole-village view) using **hard-coded sample listening data**.
 
-**You'll see:** the Konoha village running in the new app, driven by fake data.
+**You'll see:** the Konoha village live at a real URL, driven by fake data.
 
 ### Phase 2 — Log in and see your real top artists
-- Spotify PKCE login (local `127.0.0.1` redirect), token exchange + refresh in the Worker.
+- Spotify PKCE login (deployed HTTPS redirect + local `127.0.0.1` redirect), token exchange + refresh in the Worker.
 - Rate-aware Spotify wrapper (429 handling, backoff, request log).
 - Fetch top artists (medium_term); show them in a simple in-game panel.
 
@@ -104,6 +105,7 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 ### Phase 3 — Your genres become characters
 - Genre gap-fill: Spotify genres → Last.fm tags.
 - Gemini call (Flash-Lite) mapping genres/tags → the 17 slots, cached in D1 `genre_slot_map`; Gemini inference for artists with no tags.
+- Rate limits land with the first Gemini call: per-IP on every endpoint, Gemini per-IP + global daily cap, Spotify-backed endpoints served from cache.
 - Replace sample data: each slot's **activity level** from your listening share; info card lists your top artists per slot.
 
 **You'll see:** the village reflects your actual taste — busy districts for what you play, quiet ones for what you don't.
@@ -132,42 +134,36 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 
 **You'll see:** districts feel different by mood; characters talk about your music.
 
-### Phase 8 — Deploy
-- Deploy Worker + frontend publicly; HTTPS redirect URI; ripped assets uploaded at deploy (not in git).
-- Per-IP rate limits, Gemini per-IP + global daily caps, cached Spotify-backed endpoints.
-
-**You'll see:** the village live at a real URL.
-
-### Phase 9 — The village remembers
+### Phase 8 — The village remembers
 - Worker cron backfills `recently-played` every 15–30 min → `play_event`.
 - Daily rollup into `daily_snapshot`; activity levels use history; faded/festival states.
 - Time-range toggle (short/medium/long).
 
 **You'll see:** the village keeps changing even when the app was closed; flip between eras.
 
-### Phase 10 — Weekly notice board
+### Phase 9 — Weekly notice board
 - Snapshot diff → Gemini weekly brief (1/week, cached) → in-world notice board UI.
 
 **You'll see:** a narrated weekly read on your taste in the village.
 
-### Phase 11 — Talk to the Hokage (agent #1)
+### Phase 10 — Talk to the Hokage (agent #1)
 - Chat UI + Gemini function calling with tools `get_top_artists`, `get_recent_plays`, `get_slot_history`, `get_weekly_brief`, `find_artist`; daily chat limit.
 - Camera pans to the district a tool call is about.
 
 **You'll see:** ask a question about your listening → a real data-backed answer.
 
-### Phase 12 — The village evolves itself (agent #2)
+### Phase 11 — The village evolves itself (agent #2)
 - Daily cron agent with tools `set_district_activity`, `set_weather`, `start_festival`, `set_time_of_day`, `send_visitor`, `set_character_mood`; validated diffs stored in `agent_event`.
 - Weather/festival/time-of-day rendering needed for those tools.
 
 **You'll see:** after a day, the village changed on its own.
 
-### Phase 13 — Village chronicle
+### Phase 12 — Village chronicle
 - Timeline UI of agent decisions with reasoning; replay a past day's changes.
 
 **You'll see:** exactly what the agent changed and why.
 
-### Phase 14 — Show it off
+### Phase 13 — Show it off
 - PNG export / recorded clip, sound, onboarding, edge-state polish (empty account, private session, reconnect banner), disconnect-deletes-everything.
 - README with architecture + agent write-up.
 
