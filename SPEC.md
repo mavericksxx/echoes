@@ -94,12 +94,16 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 - First public deploy (Worker + static assets); ripped assets uploaded at deploy, not in git.
 - Move demo sprite/map data into JSON + loader + validation script; port the renderer (district view + whole-village view) using **hard-coded sample listening data**.
 
+- Tapping any character opens the **genre sidebar** (desktop right panel / phone slide-up sheet) with sections: Overview, Songs (filter by artist/album, search, sort), Artists — on sample data. Sections are data-driven so later phases add tabs.
+
 **You'll see:** the Konoha village live at a real URL, driven by fake data.
 
 ### Phase 2 — Log in and see your real top artists
 - Spotify PKCE login (deployed HTTPS redirect + local `127.0.0.1` redirect), token exchange + refresh in the Worker.
 - Rate-aware Spotify wrapper (429 handling, backoff, request log).
 - Fetch top artists (medium_term); show them in a simple in-game panel.
+
+- Sidebar Songs/Overview switch to real data where available (cover art per research outcome).
 
 **You'll see:** log in → your real top artists listed inside the village UI.
 
@@ -133,6 +137,8 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 - Per-slot personality + dialogue lines flavored by your top artists (cached); shown in the info card.
 - AI live captions replace the template captions (cached per artist+song).
 
+- Sidebar gains a **Character** section (personality + dialogue).
+
 **You'll see:** districts feel different by mood; characters talk about your music.
 
 ### Phase 8 — The village remembers
@@ -140,10 +146,14 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 - Daily rollup into `daily_snapshot`; activity levels use history; faded/festival states.
 - Time-range toggle (short/medium/long).
 
+- Sidebar gains a **History** section (this genre's activity over time).
+
 **You'll see:** the village keeps changing even when the app was closed; flip between eras.
 
 ### Phase 9 — Weekly notice board
 - Snapshot diff → Gemini weekly brief (1/week, cached) → in-world notice board UI.
+
+- Sidebar gains a **This week** section (the brief's notes for this genre).
 
 **You'll see:** a narrated weekly read on your taste in the village.
 
