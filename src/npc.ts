@@ -19,6 +19,9 @@ export interface Npc {
   dir: Direction;
   state: NpcState;
   frame: number;
+  /** Position within the boomerang walk cycle (see WALK_CYCLE) — `frame` is
+   * derived from this, not incremented directly. */
+  cyclePhase: number;
   frameTimer: number;
   idleTimer: number;
   caption: string | null;
@@ -52,6 +55,7 @@ export function makeNpc(
     dir: "down",
     state: "idle",
     frame: 0,
+    cyclePhase: 0,
     frameTimer: 0,
     idleTimer: 1 + Math.random() * 2,
     caption: null,
@@ -63,10 +67,31 @@ export function makeNpc(
   };
 }
 
-export function pickDir(dx: number, dy: number): Direction {
-  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "right" : "left";
-  return dy > 0 ? "down" : "up";
+// A direction switch must dominate the current movement axis by this factor
+// before it takes over — otherwise dx/dy hovering near parity near a patrol
+// waypoint flips the sprite's facing back and forth every frame.
+const DIR_HYSTERESIS = 1.3;
+
+export function pickDir(dx: number, dy: number, current?: Direction): Direction {
+  const absDx = Math.abs(dx);
+  const absDy = Math.abs(dy);
+  const onXAxis = current === "left" || current === "right";
+  const onYAxis = current === "up" || current === "down";
+  let horizontal: boolean;
+  if (onXAxis) horizontal = absDx * DIR_HYSTERESIS >= absDy;
+  else if (onYAxis) horizontal = absDx > absDy * DIR_HYSTERESIS;
+  else horizontal = absDx > absDy;
+  return horizontal ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
 }
+
+// The 3 frames per direction on these sheets are [pose A, a middle pose,
+// pose B] (which pose is the "neutral" one varies per character/sheet — see
+// scripts/detect-frames.py's contact sheets). Looping 0,1,2,0,1,2 jump-cuts
+// from pose B straight back to pose A. Boomeranging through the array
+// instead — 0,1,2,1,0,1,2,1,... — always steps to an adjacent frame, which
+// for the common case (middle frame = a neutral standing pose) is exactly
+// the classic stand/step-A/stand/step-B walk cycle.
+const WALK_CYCLE = [0, 1, 2, 1];
 
 export function startPerform(npc: Npc, andThen: NpcState | null): void {
   npc.state = "performing";
@@ -177,7 +202,7 @@ function stepToward(npc: Npc, target: Point, dt: number, onArrive: () => void): 
     onArrive();
     return;
   }
-  npc.dir = pickDir(dx, dy);
+  npc.dir = pickDir(dx, dy, npc.dir);
   const step = Math.min(WALK_SPEED * dt, dist);
   npc.x += (dx / dist) * step;
   npc.y += (dy / dist) * step;
@@ -185,6 +210,7 @@ function stepToward(npc: Npc, target: Point, dt: number, onArrive: () => void): 
   const frameTime = 1 / npc.character.fps;
   if (npc.frameTimer >= frameTime) {
     npc.frameTimer -= frameTime;
-    npc.frame = (npc.frame + 1) % 3;
+    npc.cyclePhase = (npc.cyclePhase + 1) % WALK_CYCLE.length;
+    npc.frame = WALK_CYCLE[npc.cyclePhase]!;
   }
 }

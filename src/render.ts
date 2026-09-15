@@ -2,6 +2,7 @@
 
 import type { CharacterAnims, Rect } from "../data/types";
 import type { Direction, Npc } from "./npc";
+import { drawOrigin, getSpecialScale, resolvePivot } from "./sprite";
 
 /** A loaded sprite/map image, or a pre-baked recolored copy of one (see
  * src/recolor.ts) — both are valid CanvasRenderingContext2D.drawImage sources. */
@@ -59,25 +60,33 @@ export function drawNpc(
   const { character } = npc;
   let img: DrawableImage;
   let rect: Rect;
+  let label: string;
+  let scale = 1;
 
   if (npc.state === "performing") {
     img = images[character.battleSheet]!;
-    rect = character.specials[npc.performFrame % character.specials.length] ?? character.idle;
+    const i = npc.performFrame % character.specials.length;
+    rect = character.specials[i] ?? character.idle;
+    label = character.specials[i] ? `specials[${i}]` : "idle";
+    scale = getSpecialScale(character);
   } else if (npc.state === "idle") {
     img = images[character.sheet]!;
     rect = character.idle;
+    label = "idle";
   } else {
     img = images[character.sheet]!;
     const frames = getWalkFrames(character.anims, npc.dir);
-    rect = frames[npc.frame % frames.length] ?? character.idle;
+    const i = npc.frame % frames.length;
+    rect = frames[i] ?? character.idle;
+    label = frames[i] ? `walk_${npc.dir}[${i}]` : "idle";
   }
 
   const [sx, sy, rx1, ry1] = rect;
   const sw = rx1 - sx;
   const sh = ry1 - sy;
-  const dx = Math.round(npc.x - sw / 2);
-  const dy = Math.round(npc.y - sh);
-  ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+  const pivot = resolvePivot(character, label, rect);
+  const { dx, dy, dw, dh } = drawOrigin(rect, pivot, npc.x, npc.y, scale);
+  ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
 
   if (npc.caption) drawCaption(ctx, npc.caption, npc.x, dy, canvasWidth);
 }

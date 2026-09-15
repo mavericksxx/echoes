@@ -30,6 +30,15 @@ export interface CharacterDef {
   /** Key into assets.json for the battle/special-pose sheet. */
   battleSheet: string;
   specials: Rect[];
+  /**
+   * Per-frame anchor overrides — the "feet point" a frame is drawn at, in
+   * absolute sheet-pixel coordinates. Keyed by "idle", "specials[i]", or
+   * "<animName>[i]" (matching scripts/detect-frames.py's labels). Frames not
+   * listed here anchor at the bottom-center of their rect by default — see
+   * src/sprite.ts. Only needed when that default misplaces a frame (e.g. an
+   * asymmetric lunge whose tight bbox isn't centered on the actual feet).
+   */
+  pivots?: Record<string, Point>;
 }
 
 /** One genre's district: where the character stands. Listening data (artist,
