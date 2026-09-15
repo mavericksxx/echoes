@@ -5,6 +5,8 @@ See `IDEA.md` for the concept. This spec breaks the build into **vertical slices
 **Rule for every phase:** it ends with a runnable demo and a short "what you'll see" check. If a phase can't be demoed, it's scoped wrong.
 
 ## Spotify API constraints (researched 2026-09)
+- **Feb 2026 Dev Mode rules:** app owner needs active Premium; max 5 users. Verify in the dashboard before Phase 2.
+- **Storage:** no databases of Spotify content. Store track/artist **IDs + derived counts** only; fetch names/art live (batch `/tracks`) when rendering. Delete everything within 5 days of disconnect.
 - **Dev Mode forever:** max 5 allowlisted users; Extended Quota needs 250k+ MAU. Fine for personal use; public sharing = images/read-only views, not logins.
 - **Redirect URI:** `localhost` is banned — use `http://127.0.0.1:PORT/callback`.
 - **Artist `genres` is deprecated and often empty.** Genre source = Spotify genres when present → Last.fm/MusicBrainz tags → LLM inference from artist name. Clustering runs on this merged tag set.
@@ -103,7 +105,8 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 - Rate-aware Spotify wrapper (429 handling, backoff, request log).
 - Fetch top artists (medium_term); show them in a simple in-game panel.
 
-- Sidebar Songs/Overview switch to real data where available (cover art per research outcome).
+- Sidebar Songs/Overview switch to real data with **cover art** (researched 2026-09-15, allowed): `album.images` from top-tracks / recently-played / currently-playing, hotlinked from `i.scdn.co` (never re-hosted), unmodified (no crop/filter/overlay), 4px/8px rounded corners, each row links to `external_urls.spotify`, official Spotify logo ≥70px in the sidebar, our own visual style (not a Spotify look-alike). CSP `img-src https://i.scdn.co`.
+- Optional: official Spotify embed for the now-playing row.
 
 **You'll see:** log in → your real top artists listed inside the village UI.
 
