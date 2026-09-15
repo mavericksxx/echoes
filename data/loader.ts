@@ -36,9 +36,19 @@ export function getSlot(id: string): Slot {
   return slot;
 }
 
+function assetEntry(key: string) {
+  const entry = ASSET_MANIFEST[key];
+  if (!entry) throw new Error(`Unknown asset key "${key}"`);
+  return entry;
+}
+
 /** Public URL for an asset key, once `npm run assets:sync` has populated public/assets/. */
 export function assetUrl(key: string): string {
-  const filename = ASSET_MANIFEST[key];
-  if (!filename) throw new Error(`Unknown asset key "${key}"`);
-  return `/assets/${filename}`;
+  return `/assets/${assetEntry(key).file}`;
+}
+
+/** Pixel size of an asset (e.g. a district's `bg` or the village's `mapImage`). */
+export function assetSize(key: string): [number, number] {
+  const entry = assetEntry(key);
+  return [entry.w, entry.h];
 }

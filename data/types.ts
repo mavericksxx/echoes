@@ -32,17 +32,17 @@ export interface CharacterDef {
   specials: Rect[];
 }
 
-/** One genre's district: where the character stands and what plays there. */
+/** One genre's district: where the character stands. Listening data (artist,
+ * song, now-playing) lives in src/sample-data.ts instead — this is map/sprite
+ * placement only. */
 export interface DistrictDef {
   /** Matches a CharacterDef.id. */
   id: string;
   genre: string;
-  artist: string;
-  song: string;
   location: string;
-  /** Key into assets.json for the background image. */
+  /** Key into assets.json for the background image; its pixel size is
+   * assets.json's own w/h, not duplicated here. */
   bg: string;
-  bgSize: [number, number];
   /** CSS canvas ctx.filter string applied when this district recolors the Konoha map. */
   recolorFilter?: string;
   recolored?: boolean;
@@ -51,14 +51,20 @@ export interface DistrictDef {
   note?: string;
 }
 
-/** Whole-village view: shared map + anchor spots for every character. */
+/** Whole-village view: shared map + one anchor spot per character. */
 export interface VillageDef {
   /** Key into assets.json for the village map. */
   mapImage: string;
-  mapSize: [number, number];
-  anchors: [number, number][];
+  /** One anchor point per CharacterDef/DistrictDef id — every slot must have one. */
+  anchors: Record<string, Point>;
 }
 
-/** Maps an asset key (used by CharacterDef.sheet/battleSheet, DistrictDef.bg,
- * VillageDef.mapImage) to its filename under public/assets/. */
-export type AssetManifest = Record<string, string>;
+/** One entry per asset key (used by CharacterDef.sheet/battleSheet,
+ * DistrictDef.bg, VillageDef.mapImage): its filename under public/assets/ and
+ * its pixel size, so frame-rect/bounds checks don't need the PNG on disk. */
+export interface AssetEntry {
+  file: string;
+  w: number;
+  h: number;
+}
+export type AssetManifest = Record<string, AssetEntry>;

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Copies the ripped Naruto PNGs from a local, gitignored source folder into
-// public/assets/ so Vite can serve them. The PNGs themselves are copyrighted
-// rips and are never committed — see .gitignore and README.md.
+// public/assets/ so Vite can serve them, then runs clean-assets.py on the
+// copies to key out leftover ripper watermarks/border colors (never touches
+// the original rip). The PNGs themselves are copyrighted and are never
+// committed — see .gitignore and README.md.
 //
 // Source folder: $ASSETS_SRC, defaulting to the sibling prototype's assets/
 // folder used while building this app.
@@ -11,6 +13,7 @@
 
 import { existsSync, mkdirSync, copyFileSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,6 +24,19 @@ const DEFAULT_SRC =
   "/Users/maverick/Developer/spotify-pixel-town/prototypes/konoha-demo/assets";
 const SRC = process.env.ASSETS_SRC || DEFAULT_SRC;
 const DEST = path.join(ROOT, "public", "assets");
+
+function cleanAssets() {
+  const script = path.join(ROOT, "scripts", "clean-assets.py");
+  const report = path.join(ROOT, "scripts", "asset-patches.json");
+  const result = spawnSync("python3", [script, DEST, "--report", report], {
+    stdio: "inherit",
+  });
+  if (result.error) {
+    console.warn(
+      `clean-assets: could not run python3 (${result.error.message}) — PNGs will keep any ripper watermarks/key colors.`,
+    );
+  }
+}
 
 export async function syncAssets() {
   if (!existsSync(SRC)) {
@@ -36,7 +52,7 @@ export async function syncAssets() {
 
   const manifestPath = path.join(ROOT, "data", "assets.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  const wantedFiles = Object.values(manifest);
+  const wantedFiles = Object.values(manifest).map((entry) => entry.file);
 
   const available = new Set(readdirSync(SRC));
   const missing = [];
@@ -55,6 +71,9 @@ export async function syncAssets() {
   if (missing.length) {
     console.warn(`Missing from source (not copied): ${missing.join(", ")}`);
   }
+
+  if (copied > 0) cleanAssets();
+
   return { copied, missing };
 }
 

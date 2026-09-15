@@ -1,7 +1,8 @@
 /* ==========================================================================
    Design tokens — the single source of truth for color, type, space, motion.
-   Breakpoint: 720px is the mobile/desktop split used throughout this file
-   and mirrored in main.ts's matchMedia("(min-width: 720px)") check.
+   Breakpoint: 900px is the mobile/desktop split used throughout this file
+   and mirrored in main.ts's matchMedia("(min-width: 900px)") check (the
+   sidebar needs more room alongside the map than a phone-style 720px split).
    ========================================================================== */
 :root {
   /* Color — a dusk-over-Konoha palette: plum-indigo ground, lantern amber
@@ -18,6 +19,12 @@
   --color-text-faint: #7c6f8d;
   --color-canvas-bg: #100c17;
   --color-focus-ring: var(--color-accent);
+
+  /* Activity levels (dormant -> quiet -> active -> festival) */
+  --color-activity-dormant: #564a68;
+  --color-activity-quiet: #7ba6c9;
+  --color-activity-active: #6fcf97;
+  --color-activity-festival: #ff9d3d;
 
   /* Type */
   --font-display: "Pixelify Sans", ui-monospace, monospace;
@@ -45,6 +52,8 @@
   --radius-md: 10px;
   --radius-lg: 20px;
   --radius-pill: 999px;
+  /* Cover-art corners: explicitly 4px on phone, 8px on desktop (see media query below). */
+  --cover-radius: 4px;
 
   /* Motion */
   --duration-fast: 120ms;
@@ -52,8 +61,8 @@
   --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
 
   /* Layout */
-  --stage-max-width: 960px;
   --tabbar-height: 60px;
+  --sidebar-width: 400px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
@@ -63,9 +72,15 @@
   --z-topbar: 10;
   --z-tabbar: 20;
   --z-backdrop: 25;
-  --z-sheet: 30;
+  --z-sidebar: 30;
 
   color-scheme: dark;
+}
+
+@media (min-width: 900px) {
+  :root {
+    --cover-radius: 8px;
+  }
 }
 
 /* ==========================================================================
@@ -87,8 +102,8 @@ body {
   font-family: var(--font-body);
   font-size: var(--text-base);
   line-height: var(--leading-normal);
-  min-height: 100dvh;
-  overflow-x: hidden;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 button {
@@ -105,6 +120,12 @@ p {
 
 img {
   max-width: 100%;
+}
+
+input,
+select {
+  font: inherit;
+  color: inherit;
 }
 
 /* Several elements below also set their own `display` (flex/grid) for when
@@ -137,17 +158,29 @@ img {
 }
 
 /* ==========================================================================
-   App shell
+   App shell — a fixed-height layout (no page scroll) so the map always fits
+   the viewport. Only the roster grid and the sidebar's own panel scroll.
    ========================================================================== */
 .app {
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.layout {
+  display: flex;
+  height: 100%;
+}
+
+.content {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
+  height: 100%;
 }
 
 .topbar {
-  position: sticky;
-  top: 0;
+  flex: none;
   z-index: var(--z-topbar);
   display: flex;
   align-items: center;
@@ -167,13 +200,20 @@ img {
 }
 
 .main {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-4) var(--space-4) calc(var(--tabbar-height) + var(--safe-bottom) + var(--space-4));
   width: 100%;
+}
+
+@media (min-width: 900px) {
+  .main {
+    padding: var(--space-4);
+  }
 }
 
 /* ==========================================================================
@@ -207,7 +247,7 @@ img {
   font-weight: 600;
 }
 
-@media (max-width: 719px) {
+@media (max-width: 899px) {
   .view-switch {
     position: fixed;
     left: 0;
@@ -237,12 +277,12 @@ img {
    District toolbar (prev / readout / next)
    ========================================================================== */
 .district-toolbar {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-3);
   width: 100%;
-  max-width: var(--stage-max-width);
 }
 
 .icon-btn {
@@ -295,57 +335,64 @@ img {
 }
 
 .village-caption {
+  flex: none;
   font-size: var(--text-sm);
   color: var(--color-text-muted);
   text-align: center;
 }
 
 /* ==========================================================================
-   Stage — the pixel-art canvas. Sized in main.ts for integer-ish scaling;
-   CSS just keeps it crisp and never lets it overflow or crop.
+   Stage — the pixel-art canvas. main.ts sizes its backing store to an
+   integer fraction of the container so the browser's own upscaling (with
+   image-rendering: pixelated) lands on exact-pixel zoom. This box fills all
+   remaining height, so the map always fits the viewport with no page scroll.
    ========================================================================== */
 .stage-area {
   position: relative;
-  display: flex;
-  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 0;
   width: 100%;
-  max-width: var(--stage-max-width);
-}
-
-.stage-wrap {
-  max-width: 100%;
-  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
-  border: 1px solid var(--color-border);
-  box-shadow: 0 12px 32px -16px rgba(0, 0, 0, 0.6);
 }
 
 #game {
   display: block;
-  width: 100%;
-  height: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 12px 32px -16px rgba(0, 0, 0, 0.6);
   background: var(--color-canvas-bg);
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  touch-action: manipulation;
+  touch-action: none;
+  cursor: grab;
+}
+
+#game:active {
+  cursor: grabbing;
 }
 
 .recolor-note {
+  flex: none;
   font-size: var(--text-xs);
   color: var(--color-text-faint);
   text-align: center;
-  max-width: var(--stage-max-width);
 }
 
 /* ==========================================================================
-   Roster grid
+   Roster grid — the one part of .main that's allowed to scroll.
    ========================================================================== */
 .roster {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
   gap: var(--space-3);
   width: 100%;
-  max-width: var(--stage-max-width);
 }
 
 .rcell {
@@ -388,14 +435,15 @@ img {
 }
 
 /* ==========================================================================
-   Info card — a bottom sheet on phones, an anchored popover on desktop.
+   Sidebar — a right-side panel on desktop (the map stays visible and
+   interactive beside it) and a full-height slide-up sheet on phones.
    Closed state uses transform + visibility so it never blocks input, and
    the transition is skipped entirely under prefers-reduced-motion (see reset).
    ========================================================================== */
-.sheet-backdrop {
+.sidebar-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 6, 12, 0.5);
+  background: rgba(8, 6, 12, 0.55);
   z-index: var(--z-backdrop);
   opacity: 0;
   visibility: hidden;
@@ -403,69 +451,50 @@ img {
   transition: opacity var(--duration-base) var(--ease-standard);
 }
 
-.sheet-backdrop.is-open {
+.sidebar-backdrop.is-open {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
 }
 
-.sheet {
+.sidebar {
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: var(--z-sheet);
-  max-height: 75vh;
-  overflow-y: auto;
+  inset: 0;
+  z-index: var(--z-sidebar);
+  display: flex;
+  flex-direction: column;
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border);
-  border-bottom: none;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  padding: var(--space-3) var(--space-5) calc(var(--space-5) + var(--safe-bottom));
+  padding: var(--space-3) var(--space-4) calc(var(--space-4) + var(--safe-bottom));
   visibility: hidden;
-  transform: translateY(12px);
   opacity: 0;
+  transform: translateY(100%);
   transition: transform var(--duration-base) var(--ease-standard), opacity var(--duration-base) var(--ease-standard),
     visibility 0s linear var(--duration-base);
 }
 
-.sheet.is-open {
+.sidebar.is-open {
   visibility: visible;
-  transform: translateY(0);
   opacity: 1;
+  transform: translateY(0);
   transition: transform var(--duration-base) var(--ease-standard), opacity var(--duration-base) var(--ease-standard);
 }
 
-@media (max-width: 719px) {
-  .sheet {
-    transform: translateY(100%);
-  }
-  .sheet.is-open {
-    transform: translateY(0);
-  }
+.sidebar__grabber {
+  flex: none;
+  width: 36px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border);
+  margin: 0 auto var(--space-2);
 }
 
-.sheet__grabber {
-  display: none;
-}
-
-@media (max-width: 719px) {
-  .sheet__grabber {
-    display: block;
-    width: 36px;
-    height: 4px;
-    border-radius: var(--radius-pill);
-    background: var(--color-border);
-    margin: 0 auto var(--space-3);
-  }
-}
-
-.sheet__close {
+.sidebar__close {
   position: absolute;
   top: var(--space-2);
   right: var(--space-2);
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--radius-pill);
   border: none;
   background: transparent;
@@ -477,23 +506,47 @@ img {
   justify-content: center;
 }
 
-.sheet__close:hover {
+.sidebar__close:hover {
   color: var(--color-text);
 }
 
-.sheet__name {
-  font-family: var(--font-display);
-  font-size: var(--text-lg);
-  color: var(--color-accent);
+.sidebar__header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   padding-right: var(--space-6);
 }
 
-.sheet__meta {
+.sidebar__portrait {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-md);
+  background: var(--color-canvas-bg);
+  border: 1px solid var(--color-border);
+  image-rendering: pixelated;
+}
+
+.sidebar__header-text {
+  min-width: 0;
+}
+
+.sidebar__name {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--color-accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar__meta {
+  margin-top: var(--space-1);
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: var(--space-2);
-  margin-top: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .pill {
@@ -503,108 +556,291 @@ img {
   border-radius: var(--radius-pill);
   padding: 2px var(--space-2);
   font-weight: 600;
+  white-space: nowrap;
 }
 
-.sheet__location {
+.sidebar__location {
   font-size: var(--text-sm);
   color: var(--color-text-muted);
-}
-
-.sheet__now-playing {
-  margin-top: var(--space-3);
-  font-size: var(--text-base);
-}
-
-.sheet__now-playing em {
-  color: var(--color-leaf);
-  font-style: normal;
-  font-weight: 600;
-}
-
-.sheet__activity {
-  margin-top: var(--space-1);
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-}
-
-.sheet__artists {
-  margin-top: var(--space-4);
-}
-
-.sheet__artists-heading {
-  font-size: var(--text-xs);
-  color: var(--color-text-faint);
-  margin: 0 0 var(--space-2);
-}
-
-.sheet__artist-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) 0;
-  font-size: var(--text-sm);
-}
-
-.sheet__artist-name {
-  flex: 1;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sheet__artist-plays {
-  color: var(--color-text-faint);
+.sidebar__footer {
+  flex: none;
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
   font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  min-width: 70px;
 }
 
-.sheet__share-track {
+/* ---- tablist ---- */
+.sidebar-tablist {
+  flex: none;
+  display: flex;
+  gap: var(--space-1);
   margin-top: var(--space-3);
-  height: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sidebar-tablist::-webkit-scrollbar {
+  display: none;
+}
+
+.sidebar-tab {
+  appearance: none;
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  padding: var(--space-3) var(--space-3);
+  min-height: 44px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.sidebar-tab:hover {
+  color: var(--color-text);
+}
+
+.sidebar-tab[aria-selected="true"] {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+  font-weight: 600;
+}
+
+.sidebar-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: var(--space-3);
+}
+
+.sidebar-heading {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+.sidebar-empty {
+  font-size: var(--text-sm);
+  color: var(--color-text-faint);
+  padding: var(--space-3) 0;
+}
+
+/* ---- overview ---- */
+.activity-pill {
+  display: inline-block;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-pill);
-  background: var(--color-border);
+  color: var(--color-bg);
+}
+.activity-pill--dormant {
+  background: var(--color-activity-dormant);
+  color: var(--color-text);
+}
+.activity-pill--quiet {
+  background: var(--color-activity-quiet);
+}
+.activity-pill--active {
+  background: var(--color-activity-active);
+}
+.activity-pill--festival {
+  background: var(--color-activity-festival);
+}
+
+.overview-stats {
+  display: flex;
+  gap: var(--space-5);
+  margin-top: var(--space-3);
+}
+
+.overview-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-stat strong {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--color-text);
+}
+
+.overview-stat span {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+}
+
+/* ---- artist list ---- */
+.artist-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.artist-row {
+  appearance: none;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  text-align: left;
+}
+
+.artist-row:last-child {
+  border-bottom: none;
+}
+
+.artist-row__name {
+  color: var(--color-text);
+  font-size: var(--text-sm);
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.sheet__share-fill {
+.artist-row__plays {
+  flex: none;
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+
+/* ---- songs tab ---- */
+.songs-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.songs-search {
+  flex: 1 1 160px;
+  min-height: 40px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.songs-filter {
+  flex: 1 1 120px;
+  min-height: 40px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.song-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.song-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+  color: inherit;
+  text-decoration: none;
+  min-height: 44px;
+}
+
+.song-row:last-child {
+  border-bottom: none;
+}
+
+.song-row__cover {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--cover-radius);
+  overflow: hidden;
+  background: var(--color-canvas-bg);
+}
+
+.song-row__cover-img {
+  width: 100%;
   height: 100%;
-  background: var(--color-leaf);
-  border-radius: var(--radius-pill);
+  object-fit: contain;
 }
 
-.sheet__share-label {
-  margin-top: var(--space-1);
+.song-row__info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.song-row__title {
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-row__meta {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-row__plays {
+  flex: none;
   font-size: var(--text-xs);
   color: var(--color-text-faint);
 }
 
-.sheet__note {
-  margin-top: var(--space-4);
-  font-size: var(--text-xs);
-  color: var(--color-text-faint);
-  font-style: italic;
-}
+/* ---- Now playing row (Overview) reuses .song-row styling ---- */
 
-/* Desktop: the sheet becomes a compact popover anchored near the tapped
-   sprite (left/top set inline by main.ts), not a full-width bottom sheet. */
-@media (min-width: 720px) {
-  .sheet-backdrop {
+/* ==========================================================================
+   Desktop: sidebar is a fixed-width column beside the map, not a full-screen
+   sheet. The map (.content) shrinks to fill the rest via flex, so it stays
+   visible and interactive next to the open panel.
+   ========================================================================== */
+@media (min-width: 900px) {
+  .sidebar-backdrop {
     display: none;
   }
 
-  .sheet {
-    left: auto;
-    right: auto;
-    bottom: auto;
-    width: min(300px, calc(100vw - var(--space-6)));
-    max-height: min(70vh, 480px);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 20px 48px -20px rgba(0, 0, 0, 0.65);
-    padding: var(--space-4) var(--space-5);
+  .sidebar {
+    position: relative;
+    inset: auto;
+    flex: none;
+    width: 0;
+    border-left: none;
+    padding: 0;
+    transform: none;
+    overflow: hidden;
+    transition: width var(--duration-base) var(--ease-standard);
   }
 
-  .sheet.is-open {
-    transform: translateY(0);
+  .sidebar.is-open {
+    width: var(--sidebar-width);
+    border-left: 1px solid var(--color-border);
+    padding: var(--space-4);
+  }
+
+  .sidebar__grabber {
+    display: none;
   }
 }

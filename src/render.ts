@@ -3,7 +3,10 @@
 import type { CharacterAnims, Rect } from "../data/types";
 import type { Direction, Npc } from "./npc";
 
-export type ImageMap = Record<string, HTMLImageElement>;
+/** A loaded sprite/map image, or a pre-baked recolored copy of one (see
+ * src/recolor.ts) — both are valid CanvasRenderingContext2D.drawImage sources. */
+export type DrawableImage = HTMLImageElement | HTMLCanvasElement;
+export type ImageMap = Record<string, DrawableImage>;
 
 /** Loads every asset key -> URL pair, resolving once all images have settled
  * (loaded or failed — a failed load is logged but does not block the app). */
@@ -54,7 +57,7 @@ export function drawNpc(
   canvasWidth: number,
 ): void {
   const { character } = npc;
-  let img: HTMLImageElement;
+  let img: DrawableImage;
   let rect: Rect;
 
   if (npc.state === "performing") {
@@ -126,4 +129,38 @@ function drawCaption(
 export function hitTestNpc(npc: Npc, wx: number, wy: number): boolean {
   const half = 22;
   return wx > npc.x - half && wx < npc.x + half && wy > npc.y - 40 && wy < npc.y + 10;
+}
+
+/** A soft ground ring under the selected NPC (the one whose sidebar is open). */
+export function drawSelectionRing(ctx: CanvasRenderingContext2D, npc: Npc): void {
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(npc.x, npc.y + 2, 16, 6, 0, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255, 157, 61, 0.35)";
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "rgba(255, 157, 61, 0.85)";
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Draws a character's idle frame centered into a small square canvas, for
+ * the sidebar header portrait. Pixelated, unscaled beyond an integer factor. */
+export function drawPortrait(
+  ctx: CanvasRenderingContext2D,
+  images: ImageMap,
+  character: { sheet: string; idle: Rect },
+): void {
+  const { width, height } = ctx.canvas;
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, width, height);
+  const img = images[character.sheet];
+  if (!img) return;
+  const [sx, sy, ex, ey] = character.idle;
+  const sw = ex - sx;
+  const sh = ey - sy;
+  const k = Math.max(1, Math.floor(Math.min(width / sw, height / sh)));
+  const dw = sw * k;
+  const dh = sh * k;
+  ctx.drawImage(img, sx, sy, sw, sh, Math.round((width - dw) / 2), Math.round((height - dh) / 2), dw, dh);
 }

@@ -80,10 +80,18 @@ export function setCaption(npc: Npc, text: string, seconds: number): void {
   npc.captionTimer = seconds;
 }
 
+export interface NowPlayingInfo {
+  artist: string;
+  song: string;
+}
+
 export interface UpdateOptions {
   /** When true, this NPC may trigger its own now-playing moment (single-district view). */
   isActive: boolean;
   nowPlayingIntervalMs: number;
+  /** Looked up from src/sample-data.ts by the caller — npc.ts stays data-source agnostic.
+   * Returning null (a dormant slot with no songs) means this NPC never performs. */
+  getNowPlaying: () => NowPlayingInfo | null;
 }
 
 export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions): void {
@@ -92,7 +100,8 @@ export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions
   if (
     opts.isActive &&
     now - npc.lastNowPlaying > opts.nowPlayingIntervalMs &&
-    (npc.state === "idle" || npc.state === "walk")
+    (npc.state === "idle" || npc.state === "walk") &&
+    opts.getNowPlaying()
   ) {
     npc.lastNowPlaying = now;
     npc.state = "traveling_home";
@@ -119,7 +128,8 @@ export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions
     stepToward(npc, npc.home, dt, () => {
       npc.x = npc.home.x;
       npc.y = npc.home.y;
-      setCaption(npc, `Now playing: ${npc.district.artist} – ${npc.district.song}`, 3.2);
+      const info = opts.getNowPlaying();
+      if (info) setCaption(npc, `Now playing: ${info.artist} – ${info.song}`, 3.2);
       startPerform(npc, "traveling_back");
     });
     return;
@@ -141,8 +151,11 @@ export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions
       npc.state = "walk";
     }
     if (opts.isActive && Math.random() < 0.0006) {
-      startPerform(npc, "idle");
-      setCaption(npc, `${character.name.split(" ")[0]} is vibing to ${npc.district.artist}`, 2.4);
+      const info = opts.getNowPlaying();
+      if (info) {
+        startPerform(npc, "idle");
+        setCaption(npc, `${character.name.split(" ")[0]} is vibing to ${info.artist}`, 2.4);
+      }
     }
     return;
   }

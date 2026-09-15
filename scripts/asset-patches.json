@@ -1,0 +1,93 @@
+[
+  {
+    "file": "academy_dojo.png",
+    "keyColors": [
+      "teal"
+    ],
+    "boundingBox": [
+      512,
+      0,
+      520,
+      540
+    ],
+    "pixelsPatched": 4320
+  },
+  {
+    "file": "forest_bg.png",
+    "keyColors": [
+      "magenta"
+    ],
+    "boundingBox": [
+      0,
+      0,
+      1025,
+      540
+    ],
+    "pixelsPatched": 47406
+  },
+  {
+    "file": "hokage_monument.png",
+    "keyColors": [
+      "teal"
+    ],
+    "boundingBox": [
+      0,
+      0,
+      451,
+      540
+    ],
+    "pixelsPatched": 60882
+  },
+  {
+    "file": "hospital_yard.png",
+    "keyColors": [
+      "teal"
+    ],
+    "boundingBox": [
+      0,
+      0,
+      466,
+      360
+    ],
+    "pixelsPatched": 18750
+  },
+  {
+    "file": "house_interior.png",
+    "keyColors": [
+      "teal"
+    ],
+    "boundingBox": [
+      0,
+      0,
+      4,
+      390
+    ],
+    "pixelsPatched": 1560
+  },
+  {
+    "file": "konoha_east_bg.png",
+    "keyColors": [
+      "teal"
+    ],
+    "boundingBox": [
+      508,
+      674,
+      550,
+      845
+    ],
+    "pixelsPatched": 7182
+  },
+  {
+    "file": "town_bg.png",
+    "keyColors": [
+      "teal"
+    ],
+    "boundingBox": [
+      0,
+      0,
+      767,
+      567
+    ],
+    "pixelsPatched": 37957
+  }
+]

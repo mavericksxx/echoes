@@ -1,16 +1,22 @@
 #!/usr/bin/env node
-// Validates data/*.json (ported from prototypes/konoha-demo/verify.js):
-//  - every asset file referenced exists on disk (public/assets/, after sync)
-//  - every frame rect (anims/idle/specials) fits within its sheet's pixel bounds
-//  - every district's declared bgSize matches the actual PNG, and its
-//    home/patrol waypoints fall inside it
-//  - all 17 slots are present (one character per district, no duplicate genre)
-//  - every village anchor falls inside the village map bounds
+// Validates data/*.json (ported from prototypes/konoha-demo/verify.js), split
+// into two tiers:
+//
+//  - Data-only checks: every frame rect (anims/idle/specials) fits within its
+//    sheet's *declared* size (assets.json's own w/h — no PNG file needed),
+//    every district/village reference resolves, all 17 slots are present, and
+//    every slot has exactly one village anchor. These always run, so this
+//    script is CI-safe even without the (copyrighted, gitignored) PNGs.
+//  - Local-only PNG check: if public/assets/ has been populated by
+//    `npm run assets:sync`, also verifies each file actually exists and its
+//    real PNG dimensions match what assets.json declares (catches drift if
+//    the source rip ever changes). Skipped — not failed — when the PNGs
+//    aren't present locally.
 //
 // Usage: npm run check:data
 "use strict";
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,91 +29,59 @@ const ASSETS_DIR = path.join(ROOT, "public", "assets");
 
 const EXPECTED_SLOT_COUNT = 17;
 
-function pngSize(file) {
-  const buf = readFileSync(file);
-  const width = buf.readUInt32BE(16);
-  const height = buf.readUInt32BE(20);
-  return { width, height };
-}
-
 async function loadJson(name) {
   return JSON.parse(await readFile(path.join(DATA_DIR, name), "utf8"));
 }
 
-async function main() {
-  await syncAssets();
+function checkRectInSize(errors, label, w, h, rect) {
+  const [x0, y0, x1, y1] = rect;
+  if (x0 < 0 || y0 < 0 || x1 <= x0 || y1 <= y0 || x1 > w || y1 > h) {
+    errors.push(`${label}: rect [${rect.join(",")}] out of bounds for a ${w}x${h} sheet`);
+  }
+}
 
-  const characters = await loadJson("characters.json");
-  const districts = await loadJson("districts.json");
-  const village = await loadJson("village.json");
-  const assetManifest = await loadJson("assets.json");
-
+/** Tier 1 — pure data checks, never touches the filesystem for PNGs. */
+function checkDataOnly({ characters, districts, village, assets }) {
   const errors = [];
   let checks = 0;
 
-  // 1. Every asset file referenced exists and is a readable PNG.
-  const sizes = {};
-  for (const [key, filename] of Object.entries(assetManifest)) {
+  function assetSize(key, label) {
     checks++;
-    const p = path.join(ASSETS_DIR, filename);
-    if (!existsSync(p)) {
-      errors.push(`MISSING asset file: public/assets/${filename} (key=${key})`);
-      continue;
+    const entry = assets[key];
+    if (!entry || typeof entry.w !== "number" || typeof entry.h !== "number") {
+      errors.push(`${label}: asset key '${key}' is missing from assets.json (or has no w/h)`);
+      return null;
     }
-    try {
-      sizes[key] = pngSize(p);
-    } catch (e) {
-      errors.push(`Could not read PNG dims for ${filename}: ${e.message}`);
-    }
+    return [entry.w, entry.h];
   }
 
-  function checkRect(label, sheetKey, rect) {
-    checks++;
-    if (!sizes[sheetKey]) {
-      errors.push(`${label}: sheet '${sheetKey}' has no known size (missing/broken image)`);
-      return;
-    }
-    const { width: w, height: h } = sizes[sheetKey];
-    const [x0, y0, x1, y1] = rect;
-    if (x0 < 0 || y0 < 0 || x1 <= x0 || y1 <= y0 || x1 > w || y1 > h) {
-      errors.push(
-        `${label}: rect [${rect.join(",")}] out of bounds for sheet '${sheetKey}' (${w}x${h})`,
-      );
-    }
-  }
-
-  // 2. Every character's anim/idle/special rects are within their sheet's bounds.
+  // Every character's anim/idle/special rects are within their sheet's declared bounds.
   for (const def of characters) {
+    const sheetSize = assetSize(def.sheet, `${def.id}.sheet`);
     for (const animName of Object.keys(def.anims)) {
       def.anims[animName].forEach((rect, i) => {
-        checkRect(`${def.id}.${animName}[${i}]`, def.sheet, rect);
+        checks++;
+        if (sheetSize) checkRectInSize(errors, `${def.id}.${animName}[${i}]`, ...sheetSize, rect);
       });
     }
-    checkRect(`${def.id}.idle`, def.sheet, def.idle);
+    checks++;
+    if (sheetSize) checkRectInSize(errors, `${def.id}.idle`, ...sheetSize, def.idle);
+
+    const battleSize = assetSize(def.battleSheet, `${def.id}.battleSheet`);
     (def.specials || []).forEach((rect, i) => {
-      checkRect(`${def.id}.specials[${i}]`, def.battleSheet, rect);
+      checks++;
+      if (battleSize) checkRectInSize(errors, `${def.id}.specials[${i}]`, ...battleSize, rect);
     });
   }
 
-  // 3. Every district's declared bgSize matches the actual PNG, and every
-  // patrol/home waypoint falls within it.
+  // Every district's bg resolves, and every patrol/home waypoint falls within it.
   for (const def of districts) {
-    checks++;
-    const actual = sizes[def.bg];
-    if (!actual) {
-      errors.push(`${def.id}: background sheet '${def.bg}' has no known size`);
-      continue;
-    }
-    if (actual.width !== def.bgSize[0] || actual.height !== def.bgSize[1]) {
-      errors.push(
-        `${def.id}: declared bgSize [${def.bgSize.join(",")}] does not match actual PNG ` +
-          `dimensions ${actual.width}x${actual.height} for '${def.bg}'`,
-      );
-    }
-    const [w, h] = def.bgSize;
+    const bgSize = assetSize(def.bg, `${def.id}.bg`);
     const points = [...def.patrol, def.home];
     points.forEach((p, i) => {
       checks++;
+      if (!bgSize) return;
+      const [w, h] = bgSize;
       if (p.x < 0 || p.y < 0 || p.x > w || p.y > h) {
         errors.push(
           `${def.id}: waypoint[${i}] (${p.x},${p.y}) is outside its ${w}x${h} background '${def.bg}'`,
@@ -116,7 +90,7 @@ async function main() {
     });
   }
 
-  // 4. Exactly 17 slots, one character per district, no duplicate genres.
+  // Exactly 17 slots, one character per district, no duplicate genres.
   checks++;
   if (characters.length !== EXPECTED_SLOT_COUNT) {
     errors.push(`expected ${EXPECTED_SLOT_COUNT} characters, found ${characters.length}`);
@@ -139,26 +113,90 @@ async function main() {
     seenGenres.add(d.genre);
   }
 
-  // 5. Village anchors fall inside the village map bounds.
-  const [vw, vh] = village.mapSize;
-  village.anchors.forEach(([x, y], i) => {
+  // Village: map resolves, and every slot has exactly one anchor inside it.
+  const mapSize = assetSize(village.mapImage, "village.mapImage");
+  const anchorIds = new Set(Object.keys(village.anchors));
+  for (const id of characterIds) {
     checks++;
-    if (x < 0 || y < 0 || x > vw || y > vh) {
-      errors.push(`village anchor[${i}] (${x},${y}) is outside the ${vw}x${vh} map`);
+    if (!anchorIds.has(id)) errors.push(`village.anchors is missing an entry for slot '${id}'`);
+  }
+  for (const id of anchorIds) {
+    checks++;
+    if (!characterIds.has(id)) errors.push(`village.anchors has an entry for unknown slot '${id}'`);
+  }
+  for (const [id, p] of Object.entries(village.anchors)) {
+    checks++;
+    if (!mapSize) continue;
+    const [w, h] = mapSize;
+    if (p.x < 0 || p.y < 0 || p.x > w || p.y > h) {
+      errors.push(`village anchor '${id}' (${p.x},${p.y}) is outside the ${w}x${h} map`);
     }
-  });
+  }
 
+  return { errors, checks };
+}
+
+/** Tier 2 — only runs against PNGs actually present in public/assets/. */
+function pngSize(file) {
+  const buf = readFileSync(file);
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+
+function checkLocalPngs(assets) {
+  const errors = [];
+  let checks = 0;
+  for (const [key, entry] of Object.entries(assets)) {
+    checks++;
+    const p = path.join(ASSETS_DIR, entry.file);
+    if (!existsSync(p)) {
+      errors.push(`MISSING local asset file: public/assets/${entry.file} (key=${key})`);
+      continue;
+    }
+    const actual = pngSize(p);
+    if (actual.width !== entry.w || actual.height !== entry.h) {
+      errors.push(
+        `${key}: assets.json declares ${entry.w}x${entry.h} but public/assets/${entry.file} is ` +
+          `actually ${actual.width}x${actual.height}`,
+      );
+    }
+  }
+  return { errors, checks };
+}
+
+async function main() {
+  const characters = await loadJson("characters.json");
+  const districts = await loadJson("districts.json");
+  const village = await loadJson("village.json");
+  const assets = await loadJson("assets.json");
+
+  const dataOnly = checkDataOnly({ characters, districts, village, assets });
   console.log(
-    `Checked ${checks} assertions across ${districts.length} districts, ${characters.length} ` +
-      `characters, and ${Object.keys(assetManifest).length} image files.`,
+    `[data] Checked ${dataOnly.checks} assertions across ${districts.length} districts, ` +
+      `${characters.length} characters, and ${Object.keys(assets).length} asset entries.`,
   );
 
+  await syncAssets().catch(() => {});
+  const hasLocalAssets = existsSync(ASSETS_DIR) && readdirSync(ASSETS_DIR).length > 0;
+
+  let local = { errors: [], checks: 0 };
+  if (hasLocalAssets) {
+    local = checkLocalPngs(assets);
+    console.log(
+      `[local] Checked ${local.checks} PNG file(s) in public/assets/ against assets.json.`,
+    );
+  } else {
+    console.log(
+      "[local] No PNGs found in public/assets/ — skipping local PNG size check (this is fine in CI).",
+    );
+  }
+
+  const errors = [...dataOnly.errors, ...local.errors];
   if (errors.length) {
     console.error(`\nFAILED (${errors.length} problem(s)):`);
     errors.forEach((e) => console.error(`  - ${e}`));
     process.exitCode = 1;
   } else {
-    console.log("All asset paths exist, all frame rects and waypoints are within bounds. OK.");
+    console.log("All data checks passed" + (hasLocalAssets ? " (including local PNGs)." : "."));
   }
 }
 

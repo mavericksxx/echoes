@@ -19,67 +19,53 @@
   </head>
   <body>
     <div class="app" id="app">
-      <header class="topbar">
-        <span class="brand">Echoes</span>
-        <nav class="view-switch" aria-label="View">
-          <button type="button" class="view-tab" data-view="district">
-            <span class="view-tab__label">Districts</span>
-          </button>
-          <button type="button" class="view-tab" data-view="roster">
-            <span class="view-tab__label">Roster</span>
-          </button>
-          <button type="button" class="view-tab" data-view="village">
-            <span class="view-tab__label">Village</span>
-          </button>
-        </nav>
-      </header>
+      <div class="layout">
+        <div class="content">
+          <header class="topbar">
+            <span class="brand">Echoes</span>
+            <nav class="view-switch" aria-label="View">
+              <button type="button" class="view-tab" data-view="village">
+                <span class="view-tab__label">Village</span>
+              </button>
+              <button type="button" class="view-tab" data-view="district">
+                <span class="view-tab__label">Districts</span>
+              </button>
+              <button type="button" class="view-tab" data-view="roster">
+                <span class="view-tab__label">Roster</span>
+              </button>
+            </nav>
+          </header>
 
-      <main class="main" id="main">
-        <div class="district-toolbar" id="districtToolbar">
-          <button type="button" class="icon-btn" id="prevBtn" aria-label="Previous district">
-            &#8249;
-          </button>
-          <div class="district-readout">
-            <span class="district-readout__genre" id="districtGenre"></span>
-            <span class="district-readout__name" id="districtName"></span>
-          </div>
-          <button type="button" class="icon-btn" id="nextBtn" aria-label="Next district">
-            &#8250;
-          </button>
-        </div>
-
-        <p class="village-caption" id="villageCaption" hidden>
-          Every genre, together in Konoha.
-        </p>
-
-        <div class="stage-area" id="stageArea">
-          <div class="stage-wrap" id="stageWrap">
-            <canvas id="game" aria-label="Village stage"></canvas>
-          </div>
-
-          <!-- Nested inside .stage-area (not a sibling) so the desktop popover's
-               position:absolute anchors to the stage, not the viewport. The
-               mobile bottom-sheet variant uses position:fixed, which ignores
-               ancestor placement, so nesting here doesn't affect it. -->
-          <div class="sheet-backdrop" id="cardBackdrop"></div>
-          <div class="sheet" id="card" aria-hidden="true" role="dialog" aria-labelledby="cardName">
-            <div class="sheet__grabber" aria-hidden="true"></div>
-            <button type="button" class="sheet__close" id="cardClose" aria-label="Close">&times;</button>
-            <h2 class="sheet__name" id="cardName"></h2>
-            <div class="sheet__meta">
-              <span class="pill" id="cardGenre"></span>
-              <span class="sheet__location" id="cardLocation"></span>
+          <main class="main" id="main">
+            <div class="district-toolbar" id="districtToolbar" hidden>
+              <button type="button" class="icon-btn" id="prevBtn" aria-label="Previous district">
+                &#8249;
+              </button>
+              <div class="district-readout">
+                <span class="district-readout__genre" id="districtGenre"></span>
+                <span class="district-readout__name" id="districtName"></span>
+              </div>
+              <button type="button" class="icon-btn" id="nextBtn" aria-label="Next district">
+                &#8250;
+              </button>
             </div>
-            <p class="sheet__now-playing" id="cardNowPlaying"></p>
-            <p class="sheet__activity" id="cardActivity"></p>
-            <div class="sheet__artists" id="cardArtists"></div>
-            <p class="sheet__note" id="cardNote" hidden></p>
-          </div>
-        </div>
-        <p class="recolor-note" id="recolorNote" hidden></p>
 
-        <div class="roster" id="roster" hidden></div>
-      </main>
+            <p class="village-caption" id="villageCaption">
+              Drag to look around Konoha. Tap anyone to see their genre.
+            </p>
+
+            <div class="stage-area" id="stageArea">
+              <canvas id="game" tabindex="0" aria-label="Village stage"></canvas>
+            </div>
+            <p class="recolor-note" id="recolorNote" hidden></p>
+
+            <div class="roster" id="roster" hidden></div>
+          </main>
+        </div>
+
+        <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+        <aside class="sidebar" id="sidebar" hidden aria-hidden="true"></aside>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
