@@ -42,6 +42,7 @@ Status legend: **[decided]** locked in · **[default]** proposed, revisit if nee
 - **[decided]** No owner check on the Worker API. Abuse protection = rate limits instead: per-IP limits on every endpoint (Cloudflare rate limiting / Worker counter), a stricter per-IP + global daily cap on any endpoint that triggers a Gemini call, and Spotify-calling endpoints served from the Worker's cache so visitors can't burn the Spotify quota.
 - **[decided]** Gemini free-tier key. Our use is inference only (listening insights), never training. Minimize exposure: send only derived fields (artist names, genre tags, counts), never raw Spotify payloads, user IDs, or tokens.
 - **[default]** Ripped assets stay out of the public git repo (avoids DMCA takedown of the repo); uploaded to the deployment from a local folder or R2 at deploy time.
+- **[decided]** URL: `https://echoes.parthkohale.com` (Worker custom domain; zone already on Cloudflare). Spotify HTTPS redirect: `https://echoes.parthkohale.com/callback`.
 - **[decided]** Deployed from Phase 1 onward; every phase ends with a deploy to the same URL so it can be checked from a phone. Local `wrangler dev` + Vite still used while building.
 
 ### Auth & tokens
