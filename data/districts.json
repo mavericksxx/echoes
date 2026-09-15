@@ -1,0 +1,559 @@
+[
+  {
+    "id": "naruto",
+    "genre": "Hip-Hop",
+    "artist": "Kendrick Lamar",
+    "song": "Not Like Us",
+    "location": "Konoha Village — Ichiraku Ramen",
+    "bg": "town",
+    "bgSize": [767, 758],
+    "home": {
+      "x": 495,
+      "y": 690
+    },
+    "patrol": [
+      {
+        "x": 495,
+        "y": 690
+      },
+      {
+        "x": 450,
+        "y": 655
+      },
+      {
+        "x": 540,
+        "y": 660
+      },
+      {
+        "x": 470,
+        "y": 705
+      }
+    ],
+    "note": "walk_up mirrors walk_down (no back sprite on this sheet)"
+  },
+  {
+    "id": "sakura",
+    "genre": "Pop",
+    "artist": "Taylor Swift",
+    "song": "Cruel Summer",
+    "location": "Konoha Village (Pop recolor)",
+    "bg": "town",
+    "bgSize": [767, 758],
+    "home": {
+      "x": 320,
+      "y": 350
+    },
+    "patrol": [
+      {
+        "x": 320,
+        "y": 350
+      },
+      {
+        "x": 290,
+        "y": 320
+      },
+      {
+        "x": 350,
+        "y": 330
+      },
+      {
+        "x": 300,
+        "y": 375
+      }
+    ],
+    "recolorFilter": "hue-rotate(300deg) saturate(150%) brightness(1.05)",
+    "recolored": true,
+    "note": "walk_up mirrors walk_down (no back sprite); location is Konoha Village recolored, not a distinct map"
+  },
+  {
+    "id": "neji",
+    "genre": "R&B",
+    "artist": "Drake",
+    "song": "Passionfruit",
+    "location": "Konoha House Interior",
+    "bg": "houseInterior",
+    "bgSize": [365, 390],
+    "home": {
+      "x": 180,
+      "y": 200
+    },
+    "patrol": [
+      {
+        "x": 180,
+        "y": 200
+      },
+      {
+        "x": 150,
+        "y": 180
+      },
+      {
+        "x": 210,
+        "y": 190
+      },
+      {
+        "x": 170,
+        "y": 230
+      }
+    ],
+    "note": "walk_up mirrors walk_down (no back sprite on this sheet)"
+  },
+  {
+    "id": "rocklee",
+    "genre": "Rock/Metal",
+    "artist": "Eminem",
+    "song": "Lose Yourself",
+    "location": "Academy Dojo",
+    "bg": "academyDojo",
+    "bgSize": [520, 540],
+    "home": {
+      "x": 260,
+      "y": 280
+    },
+    "patrol": [
+      {
+        "x": 260,
+        "y": 280
+      },
+      {
+        "x": 220,
+        "y": 260
+      },
+      {
+        "x": 300,
+        "y": 300
+      },
+      {
+        "x": 240,
+        "y": 320
+      }
+    ]
+  },
+  {
+    "id": "shikamaru",
+    "genre": "Lo-fi",
+    "artist": "Mac Miller",
+    "song": "Good News",
+    "location": "Konoha Village (Lo-fi recolor)",
+    "bg": "town",
+    "bgSize": [767, 758],
+    "home": {
+      "x": 300,
+      "y": 150
+    },
+    "patrol": [
+      {
+        "x": 300,
+        "y": 150
+      },
+      {
+        "x": 270,
+        "y": 170
+      },
+      {
+        "x": 330,
+        "y": 180
+      },
+      {
+        "x": 290,
+        "y": 120
+      }
+    ],
+    "recolorFilter": "sepia(0.5) saturate(65%) brightness(0.92)",
+    "recolored": true,
+    "note": "location is Konoha Village recolored, not a distinct map"
+  },
+  {
+    "id": "gaara",
+    "genre": "Emo/Alt",
+    "artist": "Travis Scott",
+    "song": "SICKO MODE",
+    "location": "Hidden Leaf Forest",
+    "bg": "forest",
+    "bgSize": [1025, 540],
+    "home": {
+      "x": 512,
+      "y": 270
+    },
+    "patrol": [
+      {
+        "x": 512,
+        "y": 270
+      },
+      {
+        "x": 460,
+        "y": 250
+      },
+      {
+        "x": 570,
+        "y": 290
+      },
+      {
+        "x": 500,
+        "y": 230
+      }
+    ]
+  },
+  {
+    "id": "sasuke",
+    "genre": "Darkwave",
+    "artist": "The Weeknd",
+    "song": "Blinding Lights",
+    "location": "Konoha Village (Darkwave recolor)",
+    "bg": "town",
+    "bgSize": [767, 758],
+    "home": {
+      "x": 150,
+      "y": 100
+    },
+    "patrol": [
+      {
+        "x": 150,
+        "y": 100
+      },
+      {
+        "x": 120,
+        "y": 130
+      },
+      {
+        "x": 180,
+        "y": 140
+      },
+      {
+        "x": 140,
+        "y": 70
+      }
+    ],
+    "recolorFilter": "hue-rotate(220deg) saturate(130%) brightness(0.55) contrast(1.15)",
+    "recolored": true,
+    "note": "overworld sheet is his Cursed-Seal-2 form (no plain-clothes overworld sheet found in POTN1/POTN2); location is Konoha Village recolored"
+  },
+  {
+    "id": "kakashi",
+    "genre": "Electronic",
+    "artist": "Frank Ocean",
+    "song": "Pink + White",
+    "location": "Konoha Hospital",
+    "bg": "hospitalYard",
+    "bgSize": [466, 360],
+    "home": {
+      "x": 230,
+      "y": 180
+    },
+    "patrol": [
+      {
+        "x": 230,
+        "y": 180
+      },
+      {
+        "x": 190,
+        "y": 160
+      },
+      {
+        "x": 270,
+        "y": 200
+      },
+      {
+        "x": 220,
+        "y": 130
+      }
+    ],
+    "note": "walk_up mirrors walk_down (no back sprite on this sheet)"
+  },
+  {
+    "id": "kiba",
+    "genre": "Punk",
+    "artist": "​Machine Gun Kelly",
+    "song": "bloody valentine",
+    "location": "Konoha East Market",
+    "bg": "konohaEast",
+    "bgSize": [550, 845],
+    "home": {
+      "x": 275,
+      "y": 400
+    },
+    "patrol": [
+      {
+        "x": 275,
+        "y": 400
+      },
+      {
+        "x": 230,
+        "y": 380
+      },
+      {
+        "x": 330,
+        "y": 420
+      },
+      {
+        "x": 260,
+        "y": 450
+      }
+    ]
+  },
+  {
+    "id": "hinata",
+    "genre": "Folk",
+    "artist": "Noah Kahan",
+    "song": "Stick Season",
+    "location": "Konoha Village (Folk recolor)",
+    "bg": "town",
+    "bgSize": [767, 758],
+    "home": {
+      "x": 90,
+      "y": 460
+    },
+    "patrol": [
+      {
+        "x": 90,
+        "y": 460
+      },
+      {
+        "x": 60,
+        "y": 440
+      },
+      {
+        "x": 120,
+        "y": 480
+      },
+      {
+        "x": 80,
+        "y": 500
+      }
+    ],
+    "recolorFilter": "hue-rotate(60deg) saturate(85%) brightness(1.0)",
+    "recolored": true,
+    "note": "location is Konoha Village recolored, not a distinct map"
+  },
+  {
+    "id": "shino",
+    "genre": "Ambient",
+    "artist": "Brian Eno",
+    "song": "An Ending (Ascent)",
+    "location": "Konoha Village (Ambient recolor)",
+    "bg": "town",
+    "bgSize": [767, 758],
+    "home": {
+      "x": 650,
+      "y": 300
+    },
+    "patrol": [
+      {
+        "x": 650,
+        "y": 300
+      },
+      {
+        "x": 620,
+        "y": 280
+      },
+      {
+        "x": 690,
+        "y": 320
+      },
+      {
+        "x": 640,
+        "y": 340
+      }
+    ],
+    "recolorFilter": "grayscale(0.35) hue-rotate(180deg) brightness(0.92) saturate(55%)",
+    "recolored": true,
+    "note": "location is Konoha Village recolored, not a distinct map"
+  },
+  {
+    "id": "guy",
+    "genre": "Jazz",
+    "artist": "Louis Armstrong",
+    "song": "What a Wonderful World",
+    "location": "Hokage Monument Training Yard",
+    "bg": "hokageMonument",
+    "bgSize": [451, 540],
+    "home": {
+      "x": 225,
+      "y": 330
+    },
+    "patrol": [
+      {
+        "x": 225,
+        "y": 330
+      },
+      {
+        "x": 190,
+        "y": 310
+      },
+      {
+        "x": 260,
+        "y": 350
+      },
+      {
+        "x": 220,
+        "y": 380
+      }
+    ]
+  },
+  {
+    "id": "ino",
+    "genre": "Indie",
+    "artist": "Phoebe Bridgers",
+    "song": "Motion Sickness",
+    "location": "Konoha Village (Indie recolor)",
+    "bg": "town",
+    "bgSize": [767, 758],
+    "home": {
+      "x": 350,
+      "y": 480
+    },
+    "patrol": [
+      {
+        "x": 350,
+        "y": 480
+      },
+      {
+        "x": 320,
+        "y": 460
+      },
+      {
+        "x": 380,
+        "y": 500
+      },
+      {
+        "x": 340,
+        "y": 520
+      }
+    ],
+    "recolorFilter": "hue-rotate(260deg) saturate(115%) brightness(1.03)",
+    "recolored": true,
+    "note": "location is Konoha Village recolored, not a distinct map"
+  },
+  {
+    "id": "choji",
+    "genre": "Soul/Funk",
+    "artist": "Stevie Wonder",
+    "song": "Superstition",
+    "location": "Ichiraku Ramen (interior)",
+    "bg": "ramenInterior",
+    "bgSize": [208, 216],
+    "home": {
+      "x": 100,
+      "y": 140
+    },
+    "patrol": [
+      {
+        "x": 100,
+        "y": 140
+      },
+      {
+        "x": 80,
+        "y": 120
+      },
+      {
+        "x": 130,
+        "y": 150
+      },
+      {
+        "x": 95,
+        "y": 170
+      }
+    ]
+  },
+  {
+    "id": "tenten",
+    "genre": "Latin",
+    "artist": "Bad Bunny",
+    "song": "Titítí Me Preguntó",
+    "location": "Konoha Village (Latin recolor)",
+    "bg": "town",
+    "bgSize": [767, 758],
+    "home": {
+      "x": 150,
+      "y": 620
+    },
+    "patrol": [
+      {
+        "x": 150,
+        "y": 620
+      },
+      {
+        "x": 120,
+        "y": 600
+      },
+      {
+        "x": 180,
+        "y": 640
+      },
+      {
+        "x": 140,
+        "y": 660
+      }
+    ],
+    "recolorFilter": "hue-rotate(-25deg) saturate(160%) brightness(1.05)",
+    "recolored": true,
+    "note": "walk_up mirrors walk_down (no back sprite on this sheet); location is Konoha Village recolored"
+  },
+  {
+    "id": "temari",
+    "genre": "Classical",
+    "artist": "Ludovico Einaudi",
+    "song": "Nuvole Bianche",
+    "location": "Konoha Village (Classical recolor)",
+    "bg": "town",
+    "bgSize": [767, 758],
+    "home": {
+      "x": 510,
+      "y": 110
+    },
+    "patrol": [
+      {
+        "x": 510,
+        "y": 110
+      },
+      {
+        "x": 480,
+        "y": 90
+      },
+      {
+        "x": 540,
+        "y": 130
+      },
+      {
+        "x": 500,
+        "y": 150
+      }
+    ],
+    "recolorFilter": "sepia(0.3) saturate(115%) brightness(1.1) contrast(0.95)",
+    "recolored": true,
+    "note": "location is Konoha Village recolored, not a distinct map"
+  },
+  {
+    "id": "kankuro",
+    "genre": "Metalcore",
+    "artist": "Bring Me the Horizon",
+    "song": "Can You Feel My Heart",
+    "location": "Konoha Village (Metalcore recolor)",
+    "bg": "town",
+    "bgSize": [767, 758],
+    "home": {
+      "x": 645,
+      "y": 615
+    },
+    "patrol": [
+      {
+        "x": 645,
+        "y": 615
+      },
+      {
+        "x": 615,
+        "y": 630
+      },
+      {
+        "x": 670,
+        "y": 640
+      },
+      {
+        "x": 630,
+        "y": 590
+      }
+    ],
+    "recolorFilter": "grayscale(0.65) contrast(1.35) brightness(0.82)",
+    "recolored": true,
+    "note": "walk_up mirrors walk_down (no back sprite on this sheet); location is Konoha Village recolored"
+  }
+]
