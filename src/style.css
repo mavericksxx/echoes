@@ -1,0 +1,610 @@
+/* ==========================================================================
+   Design tokens — the single source of truth for color, type, space, motion.
+   Breakpoint: 720px is the mobile/desktop split used throughout this file
+   and mirrored in main.ts's matchMedia("(min-width: 720px)") check.
+   ========================================================================== */
+:root {
+  /* Color — a dusk-over-Konoha palette: plum-indigo ground, lantern amber
+     accent, leaf-green as the "listening" signal. Not generic grey/near-black. */
+  --color-bg: #181322;
+  --color-surface: #241c30;
+  --color-surface-raised: #2d2438;
+  --color-border: #3a2f49;
+  --color-accent: #ff9d3d;
+  --color-accent-strong: #ffb35c;
+  --color-leaf: #6fcf97;
+  --color-text: #f3ecf7;
+  --color-text-muted: #a89bb8;
+  --color-text-faint: #7c6f8d;
+  --color-canvas-bg: #100c17;
+  --color-focus-ring: var(--color-accent);
+
+  /* Type */
+  --font-display: "Pixelify Sans", ui-monospace, monospace;
+  --font-body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --text-xs: 0.7rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-md: 1.0625rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+  --leading-tight: 1.2;
+  --leading-normal: 1.55;
+
+  /* Space scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* Shape */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-base: 220ms;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Layout */
+  --stage-max-width: 960px;
+  --tabbar-height: 60px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  /* Z-index */
+  --z-topbar: 10;
+  --z-tabbar: 20;
+  --z-backdrop: 25;
+  --z-sheet: 30;
+
+  color-scheme: dark;
+}
+
+/* ==========================================================================
+   Reset & base
+   ========================================================================== */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+img {
+  max-width: 100%;
+}
+
+/* Several elements below also set their own `display` (flex/grid) for when
+   they're visible, which would otherwise out-specificity the UA [hidden]
+   rule since author styles win cascade ties against user-agent styles. */
+[hidden] {
+  display: none !important;
+}
+
+/* Visible keyboard focus everywhere, mouse/touch users don't see it. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* UI chrome transitions are decorative and are cut entirely. The canvas
+     game loop (sprite walk cycles, "now playing" moments) keeps running —
+     it is the app's actual content, not motion added for flourish. */
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
+}
+
+/* ==========================================================================
+   App shell
+   ========================================================================== */
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-topbar);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: calc(var(--space-3) + var(--safe-top)) var(--space-4) var(--space-3);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.brand {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 500;
+  color: var(--color-accent);
+  letter-spacing: 0.02em;
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) calc(var(--tabbar-height) + var(--safe-bottom) + var(--space-4));
+  width: 100%;
+}
+
+/* ==========================================================================
+   View switch — a bottom tab bar on phones, an inline segmented control on
+   desktop. Same markup, repositioned by media query.
+   ========================================================================== */
+.view-switch {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.view-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.view-tab:hover {
+  color: var(--color-text);
+}
+
+.view-tab.is-active {
+  background: var(--color-accent);
+  color: var(--color-bg);
+  font-weight: 600;
+}
+
+@media (max-width: 719px) {
+  .view-switch {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-tabbar);
+    display: flex;
+    gap: 0;
+    background: var(--color-surface);
+    border-top: 1px solid var(--color-border);
+    padding: var(--space-1) calc(var(--space-2) + var(--safe-left)) calc(var(--space-1) + var(--safe-bottom))
+      calc(var(--space-2) + var(--safe-right));
+  }
+
+  .view-tab {
+    flex: 1 1 0;
+    min-height: 44px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+}
+
+/* ==========================================================================
+   District toolbar (prev / readout / next)
+   ========================================================================== */
+.district-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: var(--stage-max-width);
+}
+
+.icon-btn {
+  appearance: none;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-xl);
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard);
+}
+
+.icon-btn:hover {
+  background: var(--color-surface-raised);
+}
+
+.icon-btn:active {
+  transform: scale(0.94);
+}
+
+.district-readout {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+  text-align: center;
+}
+
+.district-readout__genre {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.district-readout__name {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.village-caption {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* ==========================================================================
+   Stage — the pixel-art canvas. Sized in main.ts for integer-ish scaling;
+   CSS just keeps it crisp and never lets it overflow or crop.
+   ========================================================================== */
+.stage-area {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  max-width: var(--stage-max-width);
+}
+
+.stage-wrap {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 12px 32px -16px rgba(0, 0, 0, 0.6);
+}
+
+#game {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--color-canvas-bg);
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  touch-action: manipulation;
+}
+
+.recolor-note {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  text-align: center;
+  max-width: var(--stage-max-width);
+}
+
+/* ==========================================================================
+   Roster grid
+   ========================================================================== */
+.roster {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: var(--space-3);
+  width: 100%;
+  max-width: var(--stage-max-width);
+}
+
+.rcell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  min-height: 44px;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.rcell:hover {
+  border-color: var(--color-accent);
+}
+
+.rcell canvas {
+  width: 100%;
+  aspect-ratio: 1;
+  image-rendering: pixelated;
+  background: var(--color-canvas-bg);
+  border-radius: var(--radius-sm);
+}
+
+.rcell__genre {
+  font-family: var(--font-display);
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  text-align: center;
+}
+
+.rcell__name {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* ==========================================================================
+   Info card — a bottom sheet on phones, an anchored popover on desktop.
+   Closed state uses transform + visibility so it never blocks input, and
+   the transition is skipped entirely under prefers-reduced-motion (see reset).
+   ========================================================================== */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 6, 12, 0.5);
+  z-index: var(--z-backdrop);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+.sheet-backdrop.is-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-sheet);
+  max-height: 75vh;
+  overflow-y: auto;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-bottom: none;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: var(--space-3) var(--space-5) calc(var(--space-5) + var(--safe-bottom));
+  visibility: hidden;
+  transform: translateY(12px);
+  opacity: 0;
+  transition: transform var(--duration-base) var(--ease-standard), opacity var(--duration-base) var(--ease-standard),
+    visibility 0s linear var(--duration-base);
+}
+
+.sheet.is-open {
+  visibility: visible;
+  transform: translateY(0);
+  opacity: 1;
+  transition: transform var(--duration-base) var(--ease-standard), opacity var(--duration-base) var(--ease-standard);
+}
+
+@media (max-width: 719px) {
+  .sheet {
+    transform: translateY(100%);
+  }
+  .sheet.is-open {
+    transform: translateY(0);
+  }
+}
+
+.sheet__grabber {
+  display: none;
+}
+
+@media (max-width: 719px) {
+  .sheet__grabber {
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--color-border);
+    margin: 0 auto var(--space-3);
+  }
+}
+
+.sheet__close {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-lg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sheet__close:hover {
+  color: var(--color-text);
+}
+
+.sheet__name {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--color-accent);
+  padding-right: var(--space-6);
+}
+
+.sheet__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.pill {
+  font-size: var(--text-xs);
+  color: var(--color-bg);
+  background: var(--color-accent);
+  border-radius: var(--radius-pill);
+  padding: 2px var(--space-2);
+  font-weight: 600;
+}
+
+.sheet__location {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.sheet__now-playing {
+  margin-top: var(--space-3);
+  font-size: var(--text-base);
+}
+
+.sheet__now-playing em {
+  color: var(--color-leaf);
+  font-style: normal;
+  font-weight: 600;
+}
+
+.sheet__activity {
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.sheet__artists {
+  margin-top: var(--space-4);
+}
+
+.sheet__artists-heading {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  margin: 0 0 var(--space-2);
+}
+
+.sheet__artist-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
+}
+
+.sheet__artist-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet__artist-plays {
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+
+.sheet__share-track {
+  margin-top: var(--space-3);
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.sheet__share-fill {
+  height: 100%;
+  background: var(--color-leaf);
+  border-radius: var(--radius-pill);
+}
+
+.sheet__share-label {
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+}
+
+.sheet__note {
+  margin-top: var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  font-style: italic;
+}
+
+/* Desktop: the sheet becomes a compact popover anchored near the tapped
+   sprite (left/top set inline by main.ts), not a full-width bottom sheet. */
+@media (min-width: 720px) {
+  .sheet-backdrop {
+    display: none;
+  }
+
+  .sheet {
+    left: auto;
+    right: auto;
+    bottom: auto;
+    width: min(300px, calc(100vw - var(--space-6)));
+    max-height: min(70vh, 480px);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 20px 48px -20px rgba(0, 0, 0, 0.65);
+    padding: var(--space-4) var(--space-5);
+  }
+
+  .sheet.is-open {
+    transform: translateY(0);
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "echoes",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit",
+    "check:data": "node scripts/check-data.mjs",
+    "assets:sync": "node scripts/sync-assets.mjs",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260915.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "wrangler": "^4.131.2"
+  }
+}
