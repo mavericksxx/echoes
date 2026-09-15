@@ -34,7 +34,7 @@ See `IDEA.md` for the concept. This spec breaks the build into **vertical slices
 Status legend: **[decided]** locked in · **[default]** proposed, revisit if needed · **[open]** needs a decision.
 
 ### Setup
-- **[decided]** Spotify developer app with two redirect URIs: `http://127.0.0.1:PORT/callback` (local) and the deployed HTTPS origin (from Phase 2).
+- **[decided]** Spotify developer app with one redirect URI: `http://127.0.0.1:PORT/callback` (used only by the local connect script).
 - **[decided]** Gemini API key, stored only as a Worker secret.
 - **[decided]** Cloudflare account: Worker + D1 + cron.
 - **[decided]** `git init` + public GitHub repo; `CHANGELOG.md` and `BACKLOG.md` kept current.
@@ -44,12 +44,12 @@ Status legend: **[decided]** locked in · **[default]** proposed, revisit if nee
 - **[decided]** No owner check on the Worker API. Abuse protection = rate limits instead: per-IP limits on every endpoint (Cloudflare rate limiting / Worker counter), a stricter per-IP + global daily cap on any endpoint that triggers a Gemini call, and Spotify-calling endpoints served from the Worker's cache so visitors can't burn the Spotify quota.
 - **[decided]** Gemini free-tier key. Our use is inference only (listening insights), never training. Minimize exposure: send only derived fields (artist names, genre tags, counts), never raw Spotify payloads, user IDs, or tokens.
 - **[default]** Ripped assets stay out of the public git repo (avoids DMCA takedown of the repo); uploaded to the deployment from a local folder or R2 at deploy time.
-- **[decided]** URL: `https://echoes.parthkohale.com` (Worker custom domain; zone already on Cloudflare). Spotify HTTPS redirect: `https://echoes.parthkohale.com/callback`.
+- **[decided]** URL: `https://echoes.parthkohale.com` (Worker custom domain; zone already on Cloudflare).
 - **[decided]** Deployed from Phase 1 onward; every phase ends with a deploy to the same URL so it can be checked from a phone. Local `wrangler dev` + Vite still used while building.
 
 ### Auth & tokens
-- **[decided]** Visitors never log in. The owner connects Spotify **once** via a hidden `/connect` page; the Worker stores the refresh token encrypted in D1 and refreshes access tokens automatically (saving the rotated refresh token each time). Refresh tokens don't expire on their own — only revoking access, changing password, or losing Premium breaks it.
-- **[decided]** The site never depends on a live token: it always renders from D1 (last known village + songs). If refresh fails, visitors still see the village with a subtle "live updates paused" state; the owner gets a notice (email/log) to reconnect. `/connect` is protected so visitors can't swap in their own account (owner-only secret or Spotify user ID check on the callback).
+- **[decided]** Visitors never log in, and there is **no public connect page**. The owner runs `npm run spotify:connect` locally: PKCE login against `http://127.0.0.1:PORT/callback`, then the script writes the encrypted refresh token straight into the remote D1 (`wrangler d1 execute --remote`). The Worker refreshes access tokens automatically and saves the rotated refresh token each time. Refresh tokens don't expire on their own — only revoking access, changing password, or losing Premium breaks it; fix = rerun the script.
+- **[decided]** The site never depends on a live token: it always renders from D1 (last known village + songs). If refresh fails, visitors still see the village with a subtle "live updates paused" state; the owner gets a notice (email/log) to reconnect.
 
 ### Data model (D1, derived data only)
 - **[default]** Tables: `genre_slot_map` (raw genre/tag → one of the 17 slots, with source + confidence), `artist_cache` (artist id → slot, mood/energy, NPC text; TTL), `daily_snapshot` (rolled up from `play_event` + top-items per time range), `play_event` (derived: timestamp, artist id, slot; **source of truth**), `world_state` (current district states), `agent_event` (evolution-agent actions, reasoning, before/after diff), `llm_cache` (prompt hash → output), `usage_log` (Spotify requests + 429s, Gemini tokens/cost).
@@ -102,7 +102,7 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 **You'll see:** the Konoha village live at a real URL, driven by fake data.
 
 ### Phase 2 — Log in and see your real top artists
-- One-time owner connect at `/connect` (PKCE, deployed HTTPS + local `127.0.0.1` redirects); Worker stores + auto-refreshes the token. Visitors see data without logging in.
+- Local `npm run spotify:connect` script (PKCE on `127.0.0.1`) seeds the refresh token into remote D1; Worker auto-refreshes. No login UI on the site; visitors see data without logging in.
 - Rate-aware Spotify wrapper (429 handling, backoff, request log).
 - Fetch top artists (medium_term); show them in a simple in-game panel.
 
