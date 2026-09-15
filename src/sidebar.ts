@@ -115,6 +115,45 @@ function buildSongRow(song: Song): HTMLElement {
   return row;
 }
 
+/** The Overview tab's "now playing" card — a small panel with a cover, the
+ * track's title/artist, and a purely decorative equalizer glyph (a visual
+ * "this is playing" cue, not audio-driven). */
+function buildNowPlayingCard(song: Song): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "nowplaying-card";
+
+  const cover = document.createElement("div");
+  cover.className = "np-cover";
+  if (song.coverUrl) {
+    const img = document.createElement("img");
+    img.className = "np-cover-img";
+    img.src = song.coverUrl;
+    img.alt = "";
+    img.loading = "lazy";
+    cover.appendChild(img);
+  } else {
+    cover.style.background = coverPlaceholderGradient(`${song.title}|${song.artist}`);
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "np-meta";
+  const title = document.createElement("p");
+  title.className = "np-title";
+  title.textContent = song.title;
+  const sub = document.createElement("p");
+  sub.className = "np-sub";
+  sub.textContent = song.artist;
+  meta.append(title, sub);
+
+  const eq = document.createElement("span");
+  eq.className = "eq";
+  eq.setAttribute("aria-hidden", "true");
+  eq.append(document.createElement("i"), document.createElement("i"), document.createElement("i"));
+
+  card.append(cover, meta, eq);
+  return card;
+}
+
 /** Shared artist row for Overview's "top artists" and the Artists tab — built
  * with textContent (not innerHTML) since the artist name is data, not markup. */
 function buildArtistRow(artist: ArtistTotal, onSelect: () => void): HTMLButtonElement {
@@ -184,7 +223,7 @@ function renderOverview(container: HTMLElement, ctx: SectionContext): void {
 
   const now = nowPlayingSong(listening);
   if (now) {
-    container.appendChild(buildSongRow(now));
+    container.appendChild(buildNowPlayingCard(now));
   } else {
     const empty = document.createElement("p");
     empty.className = "sidebar-empty";

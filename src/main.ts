@@ -15,7 +15,7 @@ import {
   type Npc,
   type NowPlayingInfo,
 } from "./npc";
-import { drawNpc, drawSelectionRing, getWalkFrames, hitTestNpc, loadImages, type ImageMap } from "./render";
+import { drawCaptions, drawNpc, drawSelectionRing, getWalkFrames, hitTestNpc, loadImages, type ImageMap } from "./render";
 import { bakeRecolor } from "./recolor";
 import {
   close as closeSidebar,
@@ -49,6 +49,13 @@ if (!ctx2d) throw new Error("Canvas 2D context unavailable");
 // Re-bound with an explicit (non-nullable) type: narrowing a `const` from a
 // null check doesn't carry into functions declared further down the file.
 const ctx: CanvasRenderingContext2D = ctx2d;
+
+// Screen-space overlay for "now playing" caption pills — a separate canvas
+// so its text renders at full device-pixel resolution (crisp, not pixelated)
+// regardless of #game's low-res, integer-zoomed backing store. Sized and
+// positioned in fitCanvas() to exactly cover #game's rendered box.
+const captionCanvas = el<HTMLCanvasElement>("captionLayer");
+const captionCtx = captionCanvas.getContext("2d");
 
 const stageArea = el<HTMLDivElement>("stageArea");
 const recolorNote = el<HTMLParagraphElement>("recolorNote");
@@ -216,6 +223,30 @@ function fitCanvas(): void {
   canvas.style.height = `${viewH * zoom}px`;
   ctx.imageSmoothingEnabled = false;
   clampCamera();
+  fitCaptionLayer(availW, availH);
+}
+
+/** Sizes and positions the caption overlay to exactly cover #game's
+ * (possibly letterboxed, since it's floor()'d to an integer zoom) rendered
+ * box, at full device-pixel resolution so its text stays crisp. */
+function fitCaptionLayer(availW: number, availH: number): void {
+  const cssW = viewW * zoom;
+  const cssH = viewH * zoom;
+  const dpr = window.devicePixelRatio || 1;
+  captionCanvas.style.left = `${Math.round((availW - cssW) / 2)}px`;
+  captionCanvas.style.top = `${Math.round((availH - cssH) / 2)}px`;
+  captionCanvas.style.width = `${cssW}px`;
+  captionCanvas.style.height = `${cssH}px`;
+  captionCanvas.width = Math.max(1, Math.round(cssW * dpr));
+  captionCanvas.height = Math.max(1, Math.round(cssH * dpr));
+  captionCtx?.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+/** Redraws the caption overlay for whichever NPCs are relevant to the
+ * current mode (empty in roster mode, which has no map). */
+function renderCaptions(npcs: Npc[]): void {
+  if (!captionCtx) return;
+  drawCaptions(captionCtx, npcs, { camX, camY, zoom }, viewW * zoom, viewH * zoom);
 }
 
 function centerCamera(): void {
@@ -707,11 +738,14 @@ function frame(ts: number): void {
     applyKeyPan(dt);
     tickVillage(ts, dt);
     renderVillage();
+    renderCaptions(villageNpcs);
   } else if (mode === "roster") {
     renderRoster(ts);
+    renderCaptions([]);
   } else {
     followActiveDistrictNpc(dt);
     renderDistrict();
+    renderCaptions([districtNpcs[currentIdx]!]);
   }
 
   requestAnimationFrame(frame);
