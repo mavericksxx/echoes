@@ -5,7 +5,7 @@ See `IDEA.md` for the concept. This spec breaks the build into **vertical slices
 **Rule for every phase:** it ends with a runnable demo and a short "what you'll see" check. If a phase can't be demoed, it's scoped wrong.
 
 ## Spotify API constraints (researched 2026-09)
-- **Feb 2026 Dev Mode rules:** app owner needs active Premium; max 5 users. Verify in the dashboard before Phase 2.
+- **Feb 2026 Dev Mode rules:** app owner needs active Premium; max 5 users. Owner has Premium Student (confirmed 2026-09-15).
 - **Storage:** no databases of Spotify content. Store track/artist **IDs + derived counts** only; fetch names/art live (batch `/tracks`) when rendering. Delete everything within 5 days of disconnect.
 - **Dev Mode forever:** max 5 allowlisted users; Extended Quota needs 250k+ MAU. Fine for personal use; public sharing = images/read-only views, not logins.
 - **Redirect URI:** `localhost` is banned — use `http://127.0.0.1:PORT/callback`.
