@@ -179,7 +179,7 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 **You'll see:** exactly what the agent changed and why.
 
 ### Phase 13 — Show it off
-- PNG export / recorded clip, sound, onboarding, edge-state polish (empty account, private session, reconnect banner), disconnect-deletes-everything.
+- PNG export / recorded clip, sound, onboarding, edge-state polish (empty account, private session, "live paused" state), disconnect script deletes everything.
 - README with architecture + agent write-up.
 
 **You'll see:** a polished app and something to post.
@@ -190,7 +190,7 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 - **Design is first-class, every phase.** Polished UI on both desktop and mobile browsers (phone ~390px → wide desktop), touch + mouse/keyboard, design tokens in one place, coherent visual identity. Each phase's "You'll see" must look finished on both, not just work.
 - All LLM outputs cached; no uncached LLM call on page load.
 - API keys only in the Worker.
-- Disconnect button deletes all stored user data.
+- `npm run spotify:disconnect` (local script) deletes all stored user data + the token.
 - Each phase: typecheck + build pass, demo checklist verified, changelog entry.
 - Spotify client centralizes all API calls behind one rate-aware wrapper (429 handling, backoff, request counter/logging) so limits can be measured and enforced everywhere.
 
