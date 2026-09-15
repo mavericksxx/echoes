@@ -49,13 +49,17 @@ export function getWalkFrames(anims: CharacterAnims, dir: Direction): Rect[] {
   }
 }
 
+/** The visible camera rect in world space, used to clamp on-screen overlays
+ * (like caption bubbles) so they never draw outside the viewport. */
+export interface ViewRect {
+  camX: number;
+  camY: number;
+  viewW: number;
+  viewH: number;
+}
+
 /** Draws one NPC (sprite + caption bubble, if any) onto ctx. */
-export function drawNpc(
-  ctx: CanvasRenderingContext2D,
-  images: ImageMap,
-  npc: Npc,
-  canvasWidth: number,
-): void {
+export function drawNpc(ctx: CanvasRenderingContext2D, images: ImageMap, npc: Npc, view: ViewRect): void {
   const { character } = npc;
   let img: DrawableImage;
   let rect: Rect;
@@ -79,20 +83,27 @@ export function drawNpc(
   const dy = Math.round(npc.y - sh);
   ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
 
-  if (npc.caption) drawCaption(ctx, npc.caption, npc.x, dy, canvasWidth);
+  if (npc.caption) drawCaption(ctx, npc.caption, npc.x, dy, view);
 }
 
+// Visual styling (colors/font) is intentionally left as-is here — a separate
+// UI redesign pass is planned. This only fixes the bubble's positioning: it
+// used to clamp against the whole map width, so a caption near a map edge
+// (or in a district larger than the viewport) could drift off screen. It
+// now clamps against the camera's current view rect instead.
 function drawCaption(
   ctx: CanvasRenderingContext2D,
   text: string,
   anchorX: number,
   spriteTopY: number,
-  canvasWidth: number,
+  view: ViewRect,
 ): void {
   ctx.save();
   ctx.font = "9px monospace";
   ctx.textAlign = "center";
-  const maxW = Math.min(150, canvasWidth - 12);
+
+  // Shrink to fit a narrow viewport rather than overflowing it.
+  const maxW = Math.max(40, Math.min(150, view.viewW - 12));
   const words = text.split(" ");
   const lines: string[] = [];
   let line = "";
@@ -109,8 +120,12 @@ function drawCaption(
 
   const boxW = Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width))) + 10;
   const boxH = lines.length * 11 + 6;
-  const bx = Math.max(boxW / 2 + 2, Math.min(canvasWidth - boxW / 2 - 2, anchorX));
-  const by = Math.max(2, spriteTopY - boxH - 6);
+
+  // Clamp to the camera's current view rect, not the whole map.
+  const minX = view.camX + boxW / 2 + 2;
+  const maxX = view.camX + view.viewW - boxW / 2 - 2;
+  const bx = minX > maxX ? view.camX + view.viewW / 2 : Math.max(minX, Math.min(maxX, anchorX));
+  const by = Math.max(view.camY + 2, spriteTopY - boxH - 6);
 
   ctx.fillStyle = "rgba(255,255,255,0.92)";
   ctx.strokeStyle = "#333";
