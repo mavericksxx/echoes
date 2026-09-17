@@ -128,6 +128,7 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 - Gemini call (Flash-Lite) mapping genres/tags → the 17 slots, cached in D1 `genre_slot_map`; Gemini inference for artists with no tags.
 - Rate limits land with the first Gemini call: per-IP on every endpoint, Gemini per-IP + global daily cap, Spotify-backed endpoints served from cache.
 - Replace sample data: each slot's **activity level** from your listening share; your top artists per slot become that district's residents and fill the sidebar.
+- **The room says what the panel can't:** resident placement encodes play count (most-played stands centre/front, rarer ones at the edges), a faded/absent resident for an artist you've stopped playing, and the room's light/props/crowd follow the activity level. Entering a district must tell you something at a glance, not just re-show the sidebar.
 
 **You'll see:** the village reflects your actual taste — busy districts for what you play, quiet ones for what you don't.
 
