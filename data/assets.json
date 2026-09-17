@@ -28,5 +28,18 @@
   "kankuroBattle": { "file": "kankuro_battle2.png", "w": 489, "h": 474 },
   "kibaBattle": { "file": "kiba_battle2.png", "w": 261, "h": 391 },
   "hinataBattle": { "file": "hinata_battle2.png", "w": 261, "h": 391 },
-  "shinoBattle": { "file": "shino_battle2.png", "w": 261, "h": 456 }
+  "shinoBattle": { "file": "shino_battle2.png", "w": 261, "h": 456 },
+
+  "hiddenLeafNinja": { "file": "hiddenleafninja_79019.png", "w": 124, "h": 493 },
+
+  "shopSweets": { "file": "shop_sweets.png", "w": 200, "h": 231 },
+  "shopWeapons": { "file": "shop_weapons.png", "w": 224, "h": 248 },
+  "shopFlower": { "file": "shop_flower.png", "w": 240, "h": 297 },
+  "shopNinja": { "file": "shop_ninja.png", "w": 240, "h": 273 },
+  "shopGeneral": { "file": "shop_general.png", "w": 224, "h": 272 },
+  "houseGarden": { "file": "house_garden.png", "w": 407, "h": 271 },
+  "houseStudy": { "file": "house_study.png", "w": 176, "h": 256 },
+  "houseDining": { "file": "house_dining.png", "w": 376, "h": 401 },
+  "houseBedroom": { "file": "house_bedroom.png", "w": 336, "h": 352 },
+  "houseBathhouse": { "file": "house_bathhouse.png", "w": 472, "h": 328 }
 }

@@ -138,9 +138,27 @@ export function supportsCanvasFilter(): boolean {
   return cachedFilterSupport;
 }
 
-/** Pre-bakes a recolored copy of `source` into a new canvas, once, so the
- * main render loop never calls ctx.filter per frame. */
+// Cache of baked canvases, keyed by (source image, filter string) — so
+// repeated calls for the same pair (e.g. several residents sharing one rig
+// sheet + tint, see src/residents.ts) reuse one canvas instead of re-baking.
+// Keyed on the source image's identity (not its URL) since recolored
+// characters/districts and resident tint variants all recolor from
+// already-loaded <img> elements, never raw URLs.
+const recolorCache = new WeakMap<HTMLImageElement, Map<string, HTMLCanvasElement>>();
+
+/** Pre-bakes a recolored copy of `source` into a new canvas, once per
+ * (source, filter) pair — cached so the main render loop never calls
+ * ctx.filter per frame, and so multiple callers asking for the same tint of
+ * the same sheet share one baked canvas. */
 export function bakeRecolor(source: HTMLImageElement, filter: string): HTMLCanvasElement {
+  let byFilter = recolorCache.get(source);
+  if (!byFilter) {
+    byFilter = new Map();
+    recolorCache.set(source, byFilter);
+  }
+  const cached = byFilter.get(filter);
+  if (cached) return cached;
+
   const canvas = document.createElement("canvas");
   canvas.width = source.naturalWidth || source.width;
   canvas.height = source.naturalHeight || source.height;
@@ -151,12 +169,13 @@ export function bakeRecolor(source: HTMLImageElement, filter: string): HTMLCanva
     ctx.filter = filter;
     ctx.drawImage(source, 0, 0);
     ctx.filter = "none";
-    return canvas;
+  } else {
+    ctx.drawImage(source, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    applyFilterToImageData(imageData, filter);
+    ctx.putImageData(imageData, 0, 0);
   }
 
-  ctx.drawImage(source, 0, 0);
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  applyFilterToImageData(imageData, filter);
-  ctx.putImageData(imageData, 0, 0);
+  byFilter.set(filter, canvas);
   return canvas;
 }

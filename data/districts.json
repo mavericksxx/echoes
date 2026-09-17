@@ -31,33 +31,31 @@
   {
     "id": "sakura",
     "genre": "Pop",
-    "location": "Konoha Village (Pop recolor)",
-    "bg": "town",
-    "recolorFilter": "hue-rotate(300deg) saturate(150%) brightness(1.05)",
-    "recolored": true,
+    "location": "Konoha Sweets Shop",
+    "bg": "shopSweets",
     "home": {
-      "x": 320,
-      "y": 350
+      "x": 95,
+      "y": 150
     },
     "patrol": [
       {
-        "x": 320,
-        "y": 350
+        "x": 95,
+        "y": 150
       },
       {
-        "x": 290,
-        "y": 320
+        "x": 75,
+        "y": 140
       },
       {
-        "x": 350,
-        "y": 330
+        "x": 115,
+        "y": 145
       },
       {
-        "x": 300,
-        "y": 375
+        "x": 85,
+        "y": 170
       }
     ],
-    "note": "walk_up mirrors walk_down (no back sprite); location is Konoha Village recolored, not a distinct map"
+    "note": "walk_up mirrors walk_down (no back sprite on this sheet)"
   },
   {
     "id": "neji",
@@ -119,33 +117,30 @@
   {
     "id": "shikamaru",
     "genre": "Lo-fi",
-    "location": "Konoha Village (Lo-fi recolor)",
-    "bg": "town",
-    "recolorFilter": "sepia(0.5) saturate(65%) brightness(0.92)",
-    "recolored": true,
+    "location": "Konoha House — Study",
+    "bg": "houseStudy",
     "home": {
-      "x": 300,
-      "y": 150
+      "x": 75,
+      "y": 180
     },
     "patrol": [
       {
-        "x": 300,
-        "y": 150
-      },
-      {
-        "x": 270,
-        "y": 170
-      },
-      {
-        "x": 330,
+        "x": 75,
         "y": 180
       },
       {
-        "x": 290,
-        "y": 120
+        "x": 55,
+        "y": 170
+      },
+      {
+        "x": 95,
+        "y": 175
+      },
+      {
+        "x": 65,
+        "y": 205
       }
-    ],
-    "note": "location is Konoha Village recolored, not a distinct map"
+    ]
   },
   {
     "id": "gaara",
@@ -178,33 +173,31 @@
   {
     "id": "sasuke",
     "genre": "Darkwave",
-    "location": "Konoha Village (Darkwave recolor)",
-    "bg": "town",
-    "recolorFilter": "hue-rotate(220deg) saturate(130%) brightness(0.55) contrast(1.15)",
-    "recolored": true,
+    "location": "Konoha Ninja Shop",
+    "bg": "shopNinja",
     "home": {
-      "x": 150,
-      "y": 100
+      "x": 130,
+      "y": 175
     },
     "patrol": [
       {
-        "x": 150,
-        "y": 100
+        "x": 130,
+        "y": 175
       },
       {
-        "x": 120,
-        "y": 130
+        "x": 105,
+        "y": 165
       },
       {
-        "x": 180,
-        "y": 140
+        "x": 160,
+        "y": 170
       },
       {
-        "x": 140,
-        "y": 70
+        "x": 115,
+        "y": 195
       }
     ],
-    "note": "overworld sheet is his Cursed-Seal-2 form (no plain-clothes overworld sheet found in POTN1/POTN2); location is Konoha Village recolored"
+    "note": "overworld sheet is his Cursed-Seal-2 form (no plain-clothes overworld sheet found in POTN1/POTN2)"
   },
   {
     "id": "kakashi",
@@ -266,64 +259,58 @@
   {
     "id": "hinata",
     "genre": "Folk",
-    "location": "Konoha Village (Folk recolor)",
-    "bg": "town",
-    "recolorFilter": "hue-rotate(60deg) saturate(85%) brightness(1.0)",
-    "recolored": true,
+    "location": "Konoha House — Garden Room",
+    "bg": "houseGarden",
     "home": {
-      "x": 90,
-      "y": 460
+      "x": 150,
+      "y": 150
     },
     "patrol": [
       {
-        "x": 90,
-        "y": 460
-      },
-      {
-        "x": 60,
-        "y": 440
+        "x": 150,
+        "y": 150
       },
       {
         "x": 120,
-        "y": 480
+        "y": 140
       },
       {
-        "x": 80,
-        "y": 500
+        "x": 180,
+        "y": 145
+      },
+      {
+        "x": 135,
+        "y": 170
       }
-    ],
-    "note": "location is Konoha Village recolored, not a distinct map"
+    ]
   },
   {
     "id": "shino",
     "genre": "Ambient",
-    "location": "Konoha Village (Ambient recolor)",
-    "bg": "town",
-    "recolorFilter": "grayscale(0.35) hue-rotate(180deg) brightness(0.92) saturate(55%)",
-    "recolored": true,
+    "location": "Konoha General Store",
+    "bg": "shopGeneral",
     "home": {
-      "x": 650,
-      "y": 300
+      "x": 115,
+      "y": 175
     },
     "patrol": [
       {
-        "x": 650,
-        "y": 300
+        "x": 115,
+        "y": 175
       },
       {
-        "x": 620,
-        "y": 280
+        "x": 90,
+        "y": 165
       },
       {
-        "x": 690,
-        "y": 320
+        "x": 145,
+        "y": 170
       },
       {
-        "x": 640,
-        "y": 340
+        "x": 100,
+        "y": 195
       }
-    ],
-    "note": "location is Konoha Village recolored, not a distinct map"
+    ]
   },
   {
     "id": "guy",
@@ -356,33 +343,30 @@
   {
     "id": "ino",
     "genre": "Indie",
-    "location": "Konoha Village (Indie recolor)",
-    "bg": "town",
-    "recolorFilter": "hue-rotate(260deg) saturate(115%) brightness(1.03)",
-    "recolored": true,
+    "location": "Yamanaka Flower Shop",
+    "bg": "shopFlower",
     "home": {
-      "x": 350,
-      "y": 480
+      "x": 175,
+      "y": 225
     },
     "patrol": [
       {
-        "x": 350,
-        "y": 480
+        "x": 175,
+        "y": 225
       },
       {
-        "x": 320,
-        "y": 460
+        "x": 150,
+        "y": 215
       },
       {
-        "x": 380,
-        "y": 500
+        "x": 200,
+        "y": 220
       },
       {
-        "x": 340,
-        "y": 520
+        "x": 160,
+        "y": 250
       }
-    ],
-    "note": "location is Konoha Village recolored, not a distinct map"
+    ]
   },
   {
     "id": "choji",
@@ -415,94 +399,87 @@
   {
     "id": "tenten",
     "genre": "Latin",
-    "location": "Konoha Village (Latin recolor)",
-    "bg": "town",
-    "recolorFilter": "hue-rotate(-25deg) saturate(160%) brightness(1.05)",
-    "recolored": true,
+    "location": "Konoha Weapons Shop",
+    "bg": "shopWeapons",
     "home": {
-      "x": 150,
-      "y": 620
+      "x": 110,
+      "y": 180
     },
     "patrol": [
       {
-        "x": 150,
-        "y": 620
+        "x": 110,
+        "y": 180
       },
       {
-        "x": 120,
-        "y": 600
-      },
-      {
-        "x": 180,
-        "y": 640
+        "x": 85,
+        "y": 170
       },
       {
         "x": 140,
-        "y": 660
+        "y": 175
+      },
+      {
+        "x": 95,
+        "y": 205
       }
     ],
-    "note": "walk_up mirrors walk_down (no back sprite on this sheet); location is Konoha Village recolored"
+    "note": "walk_up mirrors walk_down (no back sprite on this sheet)"
   },
   {
     "id": "temari",
     "genre": "Classical",
-    "location": "Konoha Village (Classical recolor)",
-    "bg": "town",
-    "recolorFilter": "sepia(0.3) saturate(115%) brightness(1.1) contrast(0.95)",
-    "recolored": true,
+    "location": "Konoha House — Dining Hall",
+    "bg": "houseDining",
     "home": {
-      "x": 510,
-      "y": 110
+      "x": 150,
+      "y": 260
     },
     "patrol": [
       {
-        "x": 510,
-        "y": 110
+        "x": 150,
+        "y": 260
       },
       {
-        "x": 480,
-        "y": 90
+        "x": 120,
+        "y": 250
       },
       {
-        "x": 540,
-        "y": 130
+        "x": 180,
+        "y": 255
       },
       {
-        "x": 500,
-        "y": 150
+        "x": 135,
+        "y": 285
       }
-    ],
-    "note": "location is Konoha Village recolored, not a distinct map"
+    ]
   },
   {
     "id": "kankuro",
     "genre": "Metalcore",
-    "location": "Konoha Village (Metalcore recolor)",
-    "bg": "town",
-    "recolorFilter": "grayscale(0.65) contrast(1.35) brightness(0.82)",
-    "recolored": true,
+    "location": "Konoha Bathhouse",
+    "bg": "houseBathhouse",
     "home": {
-      "x": 645,
-      "y": 615
+      "x": 230,
+      "y": 160
     },
     "patrol": [
       {
-        "x": 645,
-        "y": 615
+        "x": 230,
+        "y": 160
       },
       {
-        "x": 615,
-        "y": 630
+        "x": 190,
+        "y": 150
       },
       {
-        "x": 670,
-        "y": 640
+        "x": 280,
+        "y": 155
       },
       {
-        "x": 630,
-        "y": 590
+        "x": 210,
+        "y": 185
       }
     ],
-    "note": "walk_up mirrors walk_down (no back sprite on this sheet); location is Konoha Village recolored"
+    "note": "walk_up mirrors walk_down (no back sprite on this sheet)"
   }
 ]

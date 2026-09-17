@@ -6,7 +6,8 @@ import charactersJson from "./characters.json";
 import districtsJson from "./districts.json";
 import villageJson from "./village.json";
 import assetsJson from "./assets.json";
-import type { AssetManifest, CharacterDef, DistrictDef, VillageDef } from "./types";
+import npcRigsJson from "./npcRigs.json";
+import type { AssetManifest, CharacterDef, DistrictDef, NpcRigManifest, VillageDef } from "./types";
 
 // JSON imports are inferred as plain arrays/objects (e.g. rects come back as
 // `number[]`, not the `Rect` tuple), so we assert through `unknown` once here
@@ -15,6 +16,8 @@ export const CHARACTERS = charactersJson as unknown as CharacterDef[];
 export const DISTRICTS = districtsJson as unknown as DistrictDef[];
 export const VILLAGE = villageJson as unknown as VillageDef;
 export const ASSET_MANIFEST = assetsJson as unknown as AssetManifest;
+/** Generic NPC rigs used to build district resident NPCs (see src/residents.ts). */
+export const NPC_RIGS = npcRigsJson as unknown as NpcRigManifest;
 
 export interface Slot {
   character: CharacterDef;

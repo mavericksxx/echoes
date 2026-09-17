@@ -303,7 +303,7 @@ select {
 /* ---- "Your top artists" panel (Phase 2) — a small floating card, not the
    full genre sidebar (different data: the account's overall top artists,
    not one district's). Reuses the same glass-panel chrome as
-   .village-caption/.district-toolbar. ---- */
+   .village-caption. ---- */
 .top-artists-backdrop {
   position: fixed;
   inset: 0;
@@ -451,93 +451,9 @@ select {
 }
 
 /* ==========================================================================
-   View switch — a segmented pill (cyan active state) inline on desktop; a
-   fixed bottom tab bar on phones, styled to match the same glass HUD chrome.
-   Same markup, repositioned by media query.
+   .icon-btn — small round icon buttons (currently: the top-artists panel's
+   close button; see src/top-artists.ts).
    ========================================================================== */
-.view-switch {
-  display: flex;
-  gap: 2px;
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 2px;
-}
-
-.view-tab {
-  appearance: none;
-  border: 1px solid transparent;
-  background: transparent;
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-3);
-  cursor: pointer;
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
-}
-
-.view-tab:hover {
-  color: var(--color-text);
-}
-
-.view-tab.is-active {
-  background: var(--color-accent);
-  color: #0b1116;
-  font-weight: 600;
-}
-
-@media (max-width: 899px) {
-  .view-switch {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: var(--z-tabbar);
-    display: flex;
-    gap: 0;
-    background: var(--color-glass);
-    border-top: 1px solid var(--color-glass-border);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    border-radius: 0;
-    padding: var(--space-1) calc(var(--space-2) + var(--safe-left)) calc(var(--space-1) + var(--safe-bottom))
-      calc(var(--space-2) + var(--safe-right));
-  }
-
-  .view-tab {
-    flex: 1 1 0;
-    min-height: 44px;
-    border-radius: var(--radius-sm);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-  }
-}
-
-/* ==========================================================================
-   District toolbar (prev / readout / next) — a floating glass HUD pill
-   above the map, not a full-width bar.
-   ========================================================================== */
-.district-toolbar {
-  position: relative;
-  z-index: var(--z-floating);
-  flex: none;
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-1) var(--space-2);
-  background: var(--color-glass);
-  border: 1px solid var(--color-glass-border);
-  border-radius: var(--radius-pill);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 16px 32px -18px rgba(0, 0, 0, 0.6);
-  max-width: 100%;
-}
-
 .icon-btn {
   appearance: none;
   min-width: 44px;
@@ -607,11 +523,13 @@ select {
 }
 
 /* ==========================================================================
-   Stage — the pixel-art canvas. Edge-to-edge within .main (the app bar and
-   district toolbar float translucently on top of it). main.ts sizes the
-   canvas's backing store to an integer fraction of the container so the
-   browser's own upscaling (with image-rendering: pixelated) lands on
-   exact-pixel zoom.
+   Stage — the pixel-art canvas. Edge-to-edge within .main (the app bar
+   floats translucently on top of it). main.ts sizes the canvas's backing
+   store to an integer fraction of the container so the browser's own
+   upscaling (with image-rendering: pixelated) lands on exact-pixel zoom.
+   Fades briefly to transparent on village <-> district transitions (see
+   main.ts's transitionScene()); the global prefers-reduced-motion rule
+   above already collapses this to near-instant.
    ========================================================================== */
 .stage-area {
   position: absolute;
@@ -620,6 +538,12 @@ select {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  opacity: 1;
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+.stage-area.is-transitioning {
+  opacity: 0;
 }
 
 #game {
@@ -702,73 +626,6 @@ select {
   }
 }
 
-.recolor-note {
-  position: relative;
-  z-index: var(--z-floating);
-  align-self: center;
-  flex: none;
-  font-size: var(--text-xs);
-  color: var(--color-text-faint);
-  text-align: center;
-}
-
-/* ==========================================================================
-   Roster grid — the one part of .main that's allowed to scroll.
-   ========================================================================== */
-.roster {
-  position: relative;
-  z-index: var(--z-floating);
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  align-content: start;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
-  gap: var(--space-3);
-  width: 100%;
-}
-
-.rcell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-2);
-  background: var(--color-glass);
-  border: 1px solid var(--color-glass-border);
-  border-radius: var(--radius-panel);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  cursor: pointer;
-  min-height: 44px;
-  transition: border-color var(--duration-fast) var(--ease-standard);
-}
-
-.rcell:hover {
-  border-color: var(--color-accent);
-}
-
-.rcell canvas {
-  width: 100%;
-  aspect-ratio: 1;
-  image-rendering: pixelated;
-  background: var(--color-canvas-bg);
-  border-radius: var(--radius-sm);
-}
-
-.rcell__genre {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: var(--text-xs);
-  color: var(--color-accent);
-  text-align: center;
-}
-
-.rcell__name {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  text-align: center;
-}
 
 /* ==========================================================================
    Sidebar — a floating glass panel over the map on desktop (the map stays
@@ -859,8 +716,34 @@ select {
   flex: none;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
   gap: var(--space-3);
   padding-right: var(--space-6);
+}
+
+/* "Enter district" (Phase 2.5) — the only way into a district's own scene;
+   shown only when the sidebar was opened from the village. Reuses the
+   filled-accent look of an active view tab / expanded topbar toggle. */
+.sidebar__enter {
+  flex: none;
+  margin-left: auto;
+  appearance: none;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  border: none;
+  background: var(--color-accent);
+  color: #0b1116;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.sidebar__enter:hover {
+  opacity: 0.88;
 }
 
 .sidebar__portrait {

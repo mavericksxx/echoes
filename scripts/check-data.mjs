@@ -134,6 +134,58 @@ function checkDataOnly({ characters, districts, village, assets }) {
     }
   }
 
+  // Village doors (Phase 2.5): same one-per-slot, in-bounds rules as anchors.
+  const doorIds = new Set(Object.keys(village.doors || {}));
+  for (const id of characterIds) {
+    checks++;
+    if (!doorIds.has(id)) errors.push(`village.doors is missing an entry for slot '${id}'`);
+  }
+  for (const id of doorIds) {
+    checks++;
+    if (!characterIds.has(id)) errors.push(`village.doors has an entry for unknown slot '${id}'`);
+  }
+  for (const [id, p] of Object.entries(village.doors || {})) {
+    checks++;
+    if (!mapSize) continue;
+    const [w, h] = mapSize;
+    if (p.x < 0 || p.y < 0 || p.x > w || p.y > h) {
+      errors.push(`village door '${id}' (${p.x},${p.y}) is outside the ${w}x${h} map`);
+    }
+  }
+
+  return { errors, checks };
+}
+
+/** Resident NPC rigs (Phase 2.5, data/npcRigs.json): each rig's down/side/up
+ * frame rects must be 3-long and fit within its sheet's declared bounds. */
+function checkNpcRigs(npcRigs, assets) {
+  const errors = [];
+  let checks = 0;
+
+  for (const [rigId, rig] of Object.entries(npcRigs)) {
+    checks++;
+    const entry = assets[rig.sheet];
+    if (!entry || typeof entry.w !== "number" || typeof entry.h !== "number") {
+      errors.push(`npcRigs.${rigId}: asset key '${rig.sheet}' is missing from assets.json (or has no w/h)`);
+      continue;
+    }
+    for (const dir of ["down", "side", "up"]) {
+      checks++;
+      const frames = rig[dir] || [];
+      if (frames.length !== 3) {
+        errors.push(`npcRigs.${rigId}.${dir}: expected 3 frames, found ${frames.length}`);
+      }
+      frames.forEach((rect, i) => {
+        checks++;
+        checkRectInSize(errors, `npcRigs.${rigId}.${dir}[${i}]`, entry.w, entry.h, rect);
+      });
+    }
+    checks++;
+    if (rig.facing !== "left" && rig.facing !== "right") {
+      errors.push(`npcRigs.${rigId}.facing: expected "left" or "right", found ${JSON.stringify(rig.facing)}`);
+    }
+  }
+
   return { errors, checks };
 }
 
@@ -404,11 +456,17 @@ async function main() {
   const districts = await loadJson("districts.json");
   const village = await loadJson("village.json");
   const assets = await loadJson("assets.json");
+  const npcRigs = await loadJson("npcRigs.json");
 
   const dataOnly = checkDataOnly({ characters, districts, village, assets });
   console.log(
     `[data] Checked ${dataOnly.checks} assertions across ${districts.length} districts, ` +
       `${characters.length} characters, and ${Object.keys(assets).length} asset entries.`,
+  );
+
+  const rigs = checkNpcRigs(npcRigs, assets);
+  console.log(
+    `[data] Checked ${rigs.checks} assertion(s) across ${Object.keys(npcRigs).length} resident NPC rig(s).`,
   );
 
   await syncAssets().catch(() => {});
@@ -433,7 +491,7 @@ async function main() {
     );
   }
 
-  const errors = [...dataOnly.errors, ...local.errors, ...content.errors];
+  const errors = [...dataOnly.errors, ...rigs.errors, ...local.errors, ...content.errors];
   if (errors.length) {
     console.error(`\nFAILED (${errors.length} problem(s)):`);
     errors.forEach((e) => console.error(`  - ${e}`));

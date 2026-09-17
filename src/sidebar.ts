@@ -39,6 +39,21 @@ interface Section {
 interface SidebarHooks {
   /** Called after the panel closes, so the caller can e.g. return focus to the map. */
   onClose: () => void;
+  /** Called when "Enter district" is clicked — the caller (main.ts) owns the
+   * village⇄district scene transition. */
+  onEnterDistrict: (slotId: string) => void;
+}
+
+/** Extra options for openSidebar beyond "which slot" — used when opening from
+ * within a district (residents) or deciding whether "Enter district" makes
+ * sense (only from the village, not from inside the district already). */
+export interface OpenSidebarOptions {
+  /** Jump straight to this section (e.g. "songs") instead of the default. */
+  section?: string;
+  /** Pre-filter the Songs tab to this artist (tapping a resident). */
+  filterArtist?: string;
+  /** Show the "Enter district" button — true only when opened from the village. */
+  showEnter?: boolean;
 }
 
 // ---- module state ----
@@ -52,6 +67,7 @@ let locationEl: HTMLElement;
 let tablistEl: HTMLElement;
 let panelHost: HTMLElement;
 let closeBtn: HTMLButtonElement;
+let enterBtn: HTMLButtonElement;
 
 let currentSlot: Slot | null = null;
 let activeSectionId = "overview";
@@ -471,7 +487,16 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
   locationEl.className = "sidebar__location";
   meta.append(genrePill, locationEl);
   headerText.append(nameEl, meta);
-  header.append(portraitCanvas, headerText);
+
+  enterBtn = document.createElement("button");
+  enterBtn.type = "button";
+  enterBtn.className = "sidebar__enter";
+  enterBtn.textContent = "Enter district";
+  enterBtn.addEventListener("click", () => {
+    if (currentSlot) hooks.onEnterDistrict(currentSlot.district.id);
+  });
+
+  header.append(portraitCanvas, headerText, enterBtn);
 
   tablistEl = document.createElement("div");
   tablistEl.className = "sidebar-tablist";
@@ -509,7 +534,7 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
   backdrop.addEventListener("click", () => close());
 }
 
-export function openSidebar(slot: Slot): void {
+export function openSidebar(slot: Slot, opts: OpenSidebarOptions = {}): void {
   const isFirstOpen = !root.classList.contains("is-open");
   const districtChanged = isFirstOpen || currentSlot?.district.id !== slot.district.id;
   currentSlot = slot;
@@ -523,7 +548,14 @@ export function openSidebar(slot: Slot): void {
     songsAlbumFilter = "";
     songsSort = "plays";
   }
+  if (opts.filterArtist !== undefined) {
+    songsArtistFilter = opts.filterArtist;
+    songsSearch = "";
+    songsAlbumFilter = "";
+  }
   if (isFirstOpen) activeSectionId = "overview";
+  if (opts.section) activeSectionId = opts.section;
+  enterBtn.hidden = !opts.showEnter;
   renderHeader(slot);
   renderSection(activeSectionId);
 

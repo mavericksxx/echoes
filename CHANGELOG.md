@@ -115,3 +115,57 @@
     `src/sample-data.ts`; real per-genre listening data lands in Phase 3.
   - README: "Connect your Spotify account" section (generate + set `TOKEN_KEY`, migrate the remote
     D1, run `spotify:connect` including paste mode) and disconnect instructions.
+
+- **Phase 2.5 — One village, doors into districts:**
+  - **Real interiors, not a tinted town map.** `scripts/crop-interiors.py` (sibling to
+    `clean-assets.py`, sources documented crop rects, run before `assets:sync`) crops the 12
+    shop/house interiors out of `raw/konoha_shops_589804.png` (6 shops) and
+    `raw/konoha_houses_589805.png` (6 houses) — 2 overlap Phase 1's `ramen_interior.png`/
+    `house_interior.png` and are skipped, the other 10 are new assets. The same script keys out
+    `raw/hiddenleafninja_79019.png`'s solid sky-blue background (128,184,248) to real transparency —
+    unlike the map sheets, a global color-distance key is correct here (a "border-connected inpaint"
+    would smear color blobs onto sprites instead of leaving them transparent); the nearest non-key
+    color is 144 apart, so a threshold of 20 can't clip real art (verified against the actual sheet).
+    `data/assets.json` gains `hiddenLeafNinja` plus 10 interior keys; the 9 previously-recolored
+    districts (Pop/Lo-fi/Darkwave/Folk/Ambient/Indie/Latin/Classical/Metalcore — SPEC.md says 10, the
+    actual count in `districts.json` is 9) now point `bg` at a real interior instead of `town` +
+    `recolorFilter`, with `home`/`patrol` rewritten to fit the (much smaller) interior's bounds and
+    `location`/`note` updated to match (Ino → Yamanaka Flower Shop, Tenten → the weapons shop — both
+    canon — and so on). `recolorFilter`/`recolored` stay in `data/types.ts` as an unused hook for a
+    later *activity-level* tint, not a district's base identity.
+  - **Scene stack**: village ⇄ one district, with a short opacity fade (`.stage-area.is-transitioning`
+    in `src/style.css`; `prefers-reduced-motion` already collapses all transitions globally, so
+    `main.ts`'s `transitionScene()` also skips the fade delay outright rather than just relying on
+    CSS). Entering is explicit only — the sidebar header's new "Enter district" button
+    (`src/sidebar.ts`'s `SidebarHooks.onEnterDistrict`, shown only when opened from the village); a
+    bare tap still only opens the sidebar. Exits: the app bar's Back button, Esc (after the sidebar,
+    if one is open), browser back (`history.pushState`/`popstate` in `main.ts`), and zooming out below
+    the minimum while inside a district.
+  - **`village.json` gains `doors`** — one point per slot, one per anchor, same in-bounds validation.
+    Reuses each slot's existing anchor coordinates (already placed at that character's named spot,
+    e.g. Naruto's is Ichiraku Ramen) rather than inventing new building coordinates — data plumbing
+    for Phase 4's walk-to-door pathing; Phase 2.5 doesn't render a separate door marker or walk there,
+    it fades immediately on "Enter district".
+  - **Resident NPCs**: inside a district, the genre leader plus up to 3 of that slot's top artists
+    (from `src/sample-data.ts`; dormant slots with no plays get no residents) wander using the
+    existing NPC state machine, built from the 4 generic rigs in `raw/hiddenleafninja_79019.png`
+    (`data/npcRigs.json`, `src/residents.ts`). Each gets a persistent name-label in the caption
+    overlay; tapping one opens the sidebar for that district with Songs pre-filtered to them
+    (`sidebar.ts`'s `openSidebar(slot, { section, filterArtist })`).
+  - **Size check** (done before building the rest): a leader + 4 labeled residents in the smallest
+    shop interior (200x231) at a 390px phone view is cramped once every label is persistent, not
+    transient — so residents are capped at **3** everywhere (not varied by interior size) and
+    `drawCaptions()` now does collision-aware layout: each label tries a few staggered heights above
+    its NPC before giving up and simply not drawing (see `MAX_STAGGER_TIERS` in `src/render.ts`).
+  - **Mirroring + per-NPC tints**: `CharacterDef.mirrorDirs` (new, optional) tells `drawNpc()` to flip
+    a direction's frames horizontally instead of drawing them as-is — the generic rigs only have one
+    side pose. `src/recolor.ts`'s `bakeRecolor()` gained its own `(source image, filter)` cache (used
+    to be baked fresh every call), so residents can each get a subtle tint (small hue-rotate +
+    brightness/saturate — never a full hue sweep, so skin tones don't go alien) without re-baking the
+    same tint twice.
+  - **View switch removed**: the Village/Districts/Roster tab bar and the roster grid are gone.
+    The app bar now shows "Konoha Village" or the current district's genre + character name, plus a
+    Back button that only appears inside a district.
+  - `scripts/check-data.mjs` gained `village.doors` validation (mirrors `anchors`: one per slot,
+    in-bounds) and a resident-rig check (`data/npcRigs.json`: each rig's down/side/up frame rects are
+    3-long and fit their sheet's declared bounds, `facing` is "left"/"right").

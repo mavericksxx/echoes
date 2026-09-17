@@ -23,18 +23,14 @@
         <div class="content">
           <header class="topbar">
             <div class="topbar-nav">
+              <button type="button" class="topbar-btn" id="backBtn" aria-label="Back to village" hidden>
+                &#8249; Back
+              </button>
               <span class="brand">Echoes</span>
-              <nav class="view-switch" aria-label="View">
-                <button type="button" class="view-tab" data-view="village">
-                  <span class="view-tab__label">Village</span>
-                </button>
-                <button type="button" class="view-tab" data-view="district">
-                  <span class="view-tab__label">Districts</span>
-                </button>
-                <button type="button" class="view-tab" data-view="roster">
-                  <span class="view-tab__label">Roster</span>
-                </button>
-              </nav>
+              <div class="district-readout" id="topbarContext">
+                <span class="district-readout__genre" id="districtGenre"></span>
+                <span class="district-readout__name" id="districtName">Konoha Village</span>
+              </div>
             </div>
             <div class="topbar-actions">
               <span class="status-chip" id="statusChip">Not connected</span>
@@ -57,26 +53,9 @@
               </div>
             </div>
 
-            <div class="district-toolbar" id="districtToolbar" hidden>
-              <button type="button" class="icon-btn" id="prevBtn" aria-label="Previous district">
-                &#8249;
-              </button>
-              <div class="district-readout">
-                <span class="district-readout__genre" id="districtGenre"></span>
-                <span class="district-readout__name" id="districtName"></span>
-              </div>
-              <button type="button" class="icon-btn" id="nextBtn" aria-label="Next district">
-                &#8250;
-              </button>
-            </div>
-
             <p class="village-caption" id="villageCaption">
               Drag to look around Konoha. Tap anyone to see their genre.
             </p>
-
-            <p class="recolor-note" id="recolorNote" hidden></p>
-
-            <div class="roster" id="roster" hidden></div>
 
             <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
             <aside class="sidebar" id="sidebar" hidden aria-hidden="true"></aside>

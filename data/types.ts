@@ -39,6 +39,14 @@ export interface CharacterDef {
    * asymmetric lunge whose tight bbox isn't centered on the actual feet).
    */
   pivots?: Record<string, Point>;
+  /**
+   * Directions that should be drawn horizontally mirrored from the *other*
+   * horizontal direction's frames, rather than from their own art — for
+   * sheets with only one side pose (see data/npcRigs.json / src/residents.ts).
+   * Not used by the 17 roster characters, which already have real art (or an
+   * explicit walk_up-mirrors-walk_down note) for every direction.
+   */
+  mirrorDirs?: ("left" | "right")[];
 }
 
 /** One genre's district: where the character stands. Listening data (artist,
@@ -66,6 +74,14 @@ export interface VillageDef {
   mapImage: string;
   /** One anchor point per CharacterDef/DistrictDef id — every slot must have one. */
   anchors: Record<string, Point>;
+  /**
+   * One "door" point per slot — on/near the matching building where one
+   * exists (e.g. Ichiraku Ramen for Naruto/Hip-Hop) — where the "Enter
+   * district" action (Phase 2.5) conceptually enters from, and where Phase
+   * 4's walk-to-door pathing will eventually send the camera. Every slot
+   * must have one, same as anchors.
+   */
+  doors: Record<string, Point>;
 }
 
 /** One entry per asset key (used by CharacterDef.sheet/battleSheet,
@@ -77,3 +93,22 @@ export interface AssetEntry {
   h: number;
 }
 export type AssetManifest = Record<string, AssetEntry>;
+
+/**
+ * One generic NPC rig (see raw/hiddenleafninja_79019.png): a 3-frame walk
+ * cycle for down/side/up only — there's no separate left/right art, so
+ * src/residents.ts builds a CharacterDef whose walk_left and walk_right both
+ * point at `side`, with `facing` telling the renderer (CharacterDef.mirrorDirs)
+ * which of the two to flip. Used only for district resident NPCs (Phase 2.5),
+ * never for the 17 roster characters.
+ */
+export interface NpcRigDef {
+  /** Key into assets.json for the rig sheet. */
+  sheet: string;
+  down: Rect[];
+  side: Rect[];
+  up: Rect[];
+  /** Which horizontal direction `side`'s art faces natively. */
+  facing: "left" | "right";
+}
+export type NpcRigManifest = Record<string, NpcRigDef>;
