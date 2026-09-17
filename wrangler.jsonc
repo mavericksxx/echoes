@@ -7,6 +7,16 @@
     "directory": "./dist",
     "binding": "ASSETS"
   },
+  // Wrangler runs this before bundling on *every* `wrangler dev`/`wrangler
+  // deploy` — including one typed directly, with no npm script (and
+  // therefore no `npm run check:data`) anywhere in the loop. Fails loudly
+  // (non-zero exit aborts the deploy) if dist/assets/ is missing any sprite
+  // PNG data/assets.json expects — a `wrangler deploy` run this way already
+  // shipped a spriteless village once. See scripts/check-dist-assets.mjs's
+  // doc comment for why this can't just be an npm `predeploy` script.
+  "build": {
+    "command": "node scripts/check-dist-assets.mjs"
+  },
   "routes": [{ "pattern": "echoes.parthkohale.com", "custom_domain": true }],
   "observability": {
     "enabled": true

@@ -296,3 +296,37 @@
     scripts/styles/fonts that never had a CSP. Added the official Spotify logo
     (`public/brand/spotify-logo-white.png`, downloaded from Spotify's press asset bucket) once in the
     sidebar footer, ≥70px wide, per SPEC.md's cover-art attribution rules.
+
+- **Phase 3.5 fix pass** (architecture review found two real defects; a third was hit live during
+  deploy; a fourth was direct user feedback on the deployed site):
+  - **The CSP never fired.** `wrangler.jsonc`'s `assets` config has no `run_worker_first`, so a
+    request for `/` is served straight off Cloudflare's static-asset layer *before* the Worker is
+    ever invoked — the `Content-Security-Policy` header the previous entry describes, set inside
+    `worker/index.ts`'s `fetch` handler on `env.ASSETS.fetch()`'s result, was dead code for exactly
+    the response it needed to reach. Moved to `public/_headers` (Vite copies `public/` into `dist/`
+    verbatim; Workers Static Assets honors `_headers` at that same asset layer) and removed the dead
+    block from `worker/index.ts`.
+  - **The Songs artist filter could strand the user.** `src/sidebar.ts`'s `matchesArtistFilter` was
+    correct, but the Songs tab's own "Filter by artist" `<select>` only ever offered display-string
+    options (`song.artist`), never the artist *id* a resident/artist-row tap actually sets on real
+    data — so the control silently reset its displayed selection to "All artists" while the list
+    stayed filtered, and (since the control's value was already `""`) re-picking "All artists" fired
+    no `change` event, leaving no way to clear the filter. Fixed with a synthetic `<option>` (id as
+    value, the artist's real name as label) inserted whenever the active filter isn't among the
+    built-in options — rebuilt fresh every render, so it can't accumulate or leak across districts.
+  - **A deploy could silently ship a village with no sprites** (this happened once in production: a
+    `wrangler deploy` run directly, bypassing `npm run deploy`'s `check:data` step, uploaded `dist/`
+    without `public/assets/`'s 41 ripped PNGs — a dark, empty screen live). Added
+    `scripts/check-dist-assets.mjs` (also `npm run check:dist-assets`): a fast, existence-only check
+    of `dist/assets/` against `data/assets.json`, wired into `wrangler.jsonc`'s new `build.command` —
+    Wrangler runs this before bundling on *every* `wrangler dev`/`wrangler deploy`, including one
+    typed directly with no npm script in the loop, and a non-zero exit aborts the deploy.
+  - **Sidebar glass read as a wash, not frosted glass**, over the bright village map (fine over the
+    darker district interiors) — direct user feedback on the live site. Added
+    `--color-glass-panel` (`src/style.css`; same hue as `--color-glass`, alpha 0.55 → 0.82) for the
+    two text-dense surfaces that float over the map (the sidebar and the top-artists panel) only,
+    plus `blur(30px) saturate(140%)` and a faint top-down highlight/1px inset edge so the effect
+    reads as diffusing glass. The lighter chrome (topbar, village caption, zoom controls) keeps the
+    original token — cranking it everywhere would have made those heavy for no readability gain. The
+    raised alpha alone (before any blur/saturate) keeps text legible even without `backdrop-filter`
+    support.

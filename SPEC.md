@@ -172,12 +172,50 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
   every song where that artist is a feature (not the primary credit) silently vanish. Real songs now
   carry `artistIds: string[]` (every artist on the track) and the filter matches by membership.
 - Cover art follows the same Phase 2 rules (hotlinked `i.scdn.co`, unmodified, 4px/8px corners,
-  each row links to `external_urls.spotify`), now with a real CSP (`img-src` on the Worker's HTML
-  response) and the official Spotify logo asset (`public/brand/spotify-logo-white.png`, downloaded
-  from Spotify's press asset bucket) in the sidebar footer, ≥70px wide.
+  each row links to `external_urls.spotify`), a `Content-Security-Policy: img-src` on the HTML shell
+  (see the fix pass below for where this actually lives), and the official Spotify logo asset
+  (`public/brand/spotify-logo-white.png`, downloaded from Spotify's press asset bucket) in the
+  sidebar footer, ≥70px wide.
 
 **You'll see:** the Songs tab lists your actual top tracks per district, with real cover art, ranked
 instead of a fake play count, and tapping a featured artist's row no longer empties the list.
+
+**Fix pass (2026-09-17, before this shipped to production):**
+- **The CSP never fired.** `worker/index.ts` set `Content-Security-Policy` on the `env.ASSETS.fetch()`
+  result inside the Worker's `fetch` handler, but `wrangler.jsonc`'s `assets` config has no
+  `run_worker_first`: a request for `/` matches a real file in `./dist` and is served straight off
+  Cloudflare's static-asset layer *before the Worker is invoked at all* — that code path was dead
+  except on the asset-not-found fallthrough. Moved to `public/_headers` (Vite copies `public/` into
+  `dist/` verbatim; Workers Static Assets honors `_headers` at the same asset layer that was
+  bypassing the Worker), and the dead block removed from `worker/index.ts` rather than left as a
+  second, non-functional mechanism.
+- **The Songs artist filter could strand the user.** `matchesArtistFilter` itself was correct, but
+  on real data the filter *value* is an artist id (set by tapping a resident or artist row) while the
+  Songs tab's own "Filter by artist" `<select>` only ever offered display-string options built from
+  `song.artist` — the id was never among them, so the control silently reset its displayed selection
+  to "All artists" while the list stayed filtered, and — because the control's value was already
+  `""` at that point — picking "All artists" fired no `change` event, so there was no way to clear
+  the filter from the UI at all. Fixed by inserting a synthetic `<option>` (id as value, the artist's
+  real display name as label) whenever the active filter isn't among the built-in options; it's
+  rebuilt fresh on every render, so it never accumulates or survives a district switch.
+- **A deploy could silently ship a village with no sprites.** `public/assets/` (the ripped Naruto
+  PNGs) is gitignored/local-only; `npm run deploy` chains `check:data` (which populates and validates
+  it) before `build` and `wrangler deploy`, but `wrangler deploy` run directly skips all of that — and
+  did, once, in production. `npm run check:data`'s local-PNG tier is also deliberately *soft* (skipped,
+  not failed, when the rip isn't present, so CI stays green without it) and only ever looks at
+  `public/assets/`, never the `dist/` output that actually gets uploaded. Added
+  `scripts/check-dist-assets.mjs` — a fast, existence-only check of `dist/assets/` against
+  `data/assets.json` — wired into `wrangler.jsonc`'s `build.command`, which Wrangler runs before
+  bundling on *every* `wrangler dev`/`wrangler deploy`, including a bare `wrangler deploy` with no
+  npm script in the loop. A non-zero exit from `build.command` aborts the deploy. This only catches
+  missing files, not wrong/corrupt ones — pixel-level validation stays `check:data`'s job, run
+  locally before a build.
+- Also fixed, from direct user feedback on the live site: the shared `--color-glass` token (0.55
+  alpha) read as frosted glass over a dark district interior but washed out over the bright village
+  map. Added `--color-glass-panel` (same hue, 0.82 alpha) for the two text-dense surfaces that float
+  over the map (sidebar, top-artists panel) only, plus `blur(30px) saturate(140%)` and a faint
+  top-down highlight so the effect reads as diffusing glass rather than fog or an opaque slab. The
+  lighter chrome (topbar, village caption, zoom controls) keeps the original token.
 
 ### Phase 4 — Characters walk properly
 - Walkability grid per map + A* pathfinding; spawn points validated in the data check.

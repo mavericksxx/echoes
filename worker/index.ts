@@ -4,8 +4,13 @@
 // (top-artists.ts). Phase 3 adds /api/village (village.ts, genre resolution
 // via Gemini) and per-IP rate limiting (rate-limit.ts), applied here to
 // every /api/* route before it's dispatched. Phase 3.5 adds real top tracks
-// to /api/village (worker/tracks.ts) and, since the sidebar now hotlinks
-// Spotify album art, a CSP on the HTML shell response below.
+// to /api/village (worker/tracks.ts). Its CSP (the sidebar now hotlinks
+// Spotify album art) lives in public/_headers, not here — wrangler.jsonc's
+// `assets` config has no `run_worker_first`, so a request for "/" is served
+// straight off Cloudflare's static-asset layer without this fetch handler
+// running at all; a header set here on env.ASSETS.fetch()'s result would be
+// dead code for exactly the response it needs to reach (fix pass, 2026-09-17
+// — a first attempt tried exactly that and it silently never fired).
 
 import { handleTopArtists } from "./top-artists";
 import { handleVillage } from "./village";
@@ -66,22 +71,11 @@ export default {
       return handleVillage(request, env);
     }
 
-    const assetResponse = await env.ASSETS.fetch(request);
-    // CSP scoped to img-src only (Phase 3.5): the sidebar now hotlinks real
-    // Spotify album/artist art from i.scdn.co (SPEC.md's cover-art rules —
-    // hotlinked, never re-hosted), plus every other directive left
-    // unspecified so this can't regress scripts/styles/fonts (Google Fonts,
-    // the Vite module bundle, etc.) that never had a CSP to begin with.
-    // Only applied to the HTML shell, not JS/CSS/asset responses.
-    if (assetResponse.headers.get("Content-Type")?.includes("text/html")) {
-      const headers = new Headers(assetResponse.headers);
-      headers.set("Content-Security-Policy", "img-src 'self' https://i.scdn.co");
-      return new Response(assetResponse.body, {
-        status: assetResponse.status,
-        statusText: assetResponse.statusText,
-        headers,
-      });
-    }
-    return assetResponse;
+    // Reached only when a request matches neither a rate-limited /api/*
+    // route above nor a real static file (those are served directly off
+    // Cloudflare's asset layer without invoking this handler at all) — i.e.
+    // effectively just the "asset not found" fallthrough. See public/_headers
+    // for the CSP that used to be (incorrectly) applied here.
+    return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<Env>;

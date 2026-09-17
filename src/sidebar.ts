@@ -314,6 +314,22 @@ function renderSongs(container: HTMLElement, ctx: SectionContext): void {
   artistSelect.className = "songs-filter songs-filter--artist";
   artistSelect.setAttribute("aria-label", "Filter by artist");
   artistSelect.append(new Option("All artists", ""));
+  // A filter set from an artist row/resident tap on real data is an artist
+  // id (see matchesArtistFilter's doc comment above), which is never one of
+  // the display-string options built below — left alone, `artistSelect.value
+  // = songsArtistFilter` fails to match anything, so the browser silently
+  // resets the *displayed* selection to "All artists" while the list stays
+  // filtered, and — since the control's value is already "" at that point —
+  // clicking "All artists" fires no change event, stranding the filter with
+  // no way to clear it. A synthetic option keyed by that id (rebuilt fresh
+  // every render, so it never accumulates or survives a district switch —
+  // see renderSection's panelHost.innerHTML reset) fixes both: the control
+  // shows the real active filter, and re-selecting "All artists" now
+  // actually changes the control's value.
+  if (songsArtistFilter && !artists.includes(songsArtistFilter)) {
+    const activeArtist = getArtists(ctx.slot.district.id).find((a) => a.id === songsArtistFilter);
+    if (activeArtist) artistSelect.append(new Option(activeArtist.name, songsArtistFilter));
+  }
   artists.forEach((a) => artistSelect.append(new Option(a, a)));
   artistSelect.value = songsArtistFilter;
 

@@ -8,6 +8,7 @@
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit",
     "check:data": "node scripts/check-data.mjs",
+    "check:dist-assets": "node scripts/check-dist-assets.mjs",
     "assets:sync": "node scripts/sync-assets.mjs",
     "db:migrate:local": "wrangler d1 migrations apply echoes --local",
     "db:migrate:remote": "wrangler d1 migrations apply echoes --remote",
