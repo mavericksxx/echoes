@@ -95,6 +95,107 @@ function resetKeyboardCursor(): void {
   keyboardSelectedNpc = null;
 }
 
+// Cheap, deterministic string hash (FNV-1a) used to derive each character's
+// patrol shape below. Deliberately NOT Math.random(): the shape must come
+// out identical on every load, or an NPC's wander loop would visibly jump
+// to a new size/direction on every reload/re-render, which reads as broken
+// rather than "alive".
+function hashSeed(id: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+// Characters whose overworld sheet has no genuine back-facing pose — see
+// data/characters.json, where their walk_up is a byte-identical duplicate
+// of walk_down (a documented, checked-for limitation; see check-data.mjs's
+// KNOWN_DUPLICATE_DIRECTIONS). For these four, a patrol leg that resolves
+// "up" doesn't turn the character around — it slides their FRONT-facing art
+// backwards ("moonwalking"), which looks far more broken than just never
+// walking away from camera. patrolFor() below never gives these four an
+// up-resolving leg, no matter what the id hash comes out to.
+const NO_BACK_FACING_ART = new Set(["naruto", "neji", "tenten", "kankuro"]);
+
+/**
+ * Builds one character's 4-point patrol loop (offsets from `anchor`,
+ * `anchor` itself always first — see makeNpc/updateNpc's patrol cycling).
+ *
+ * Replaces a single hard-coded loop previously shared by all 17 village
+ * characters. That loop had two problems, found while chasing the "NPCs
+ * mostly walk showing their back" report: every character moved in
+ * identical lockstep (same shape, same phase), AND — worse — run through
+ * pickDir's hysteresis (src/npc.ts), its four legs resolved to
+ * left/right/left/UP for every single character: three side legs, then a
+ * closing leg back to anchor whose vertical component happened to dominate
+ * (data/districts.json's hand-authored interior loops had the same bias
+ * independently, at up:15/down:2 across all 17 measured the same way).
+ * Since that closing leg runs every single patrol cycle, it meant NPCs
+ * showed their back on a very predictable, frequent beat.
+ *
+ * This shape is tuned — and checked against the REAL pickDir, not paper
+ * arithmetic, see the fix report's throwaway sim script — so that per
+ * character it resolves to mostly side legs, usually one clear down
+ * (front-facing) leg, and for a minority of characters (`wantsUpLeg`,
+ * ~1-in-5, deterministic per id) exactly one deliberate up leg — "never
+ * moving up" reads as robotic, but it should be the exception, not the
+ * pattern. data/districts.json's per-district interior loops were authored
+ * offline from this exact same shape, uniformly scaled down to fit each
+ * room (pickDir only compares the RATIO of dx to dy, so scaling every
+ * offset by the same factor never changes which direction a leg resolves
+ * to) — see the fix report for the scale factor used per district.
+ */
+function patrolFor(characterId: string, anchor: Point): Point[] {
+  const seed = hashSeed(characterId);
+  const f1 = (seed & 0xff) / 255;
+  const f2 = ((seed >>> 8) & 0xff) / 255;
+  const f3 = ((seed >>> 16) & 0xff) / 255;
+  const f4 = ((seed >>> 24) & 0xff) / 255;
+  const noBackFacingArt = NO_BACK_FACING_ART.has(characterId);
+  const swingDir = seed & 1 ? 1 : -1; // which side the loop swings out to first
+
+  // leg 0 (anchor -> p1): a comfortable side step with a slight step toward
+  // camera. dx dominates hugely here regardless of jitter -> always side.
+  const p1x = swingDir * (20 + f1 * 6);
+  const p1y = 3 + f2 * 4;
+
+  // leg 1 (p1 -> p2): swings back past center while dipping further toward
+  // camera. no-back-facing-art characters get a gentler dip so the next
+  // leg's margin (below) stays safely clear of pickDir's up threshold;
+  // everyone else dips enough that this leg usually resolves "down".
+  const p2x = swingDir * (6 + f2 * 6);
+  const p2y = p1y + (noBackFacingArt ? 14 + f3 * 6 : 22 + f3 * 8);
+
+  // leg 2 (p2 -> p3) and the closing leg (p3 -> anchor): the pair that used
+  // to be the guaranteed-upward closer. `wantsUpLeg` (never true for the
+  // no-back-facing-art set) gives roughly 1-in-5 characters a p3 placed so
+  // this leg's dy genuinely dominates -> a deliberate, minority "up". Every
+  // other character (and always the no-back-facing-art four) gets a p3
+  // padded well clear of the horizontal/vertical threshold, so both this
+  // leg and the closing one resolve as side no matter which way the
+  // hysteresis from the previous leg leans.
+  const wantsUpLeg = !noBackFacingArt && seed % 5 === 0;
+  let p3x: number;
+  let p3y: number;
+  if (wantsUpLeg) {
+    p3x = -swingDir * (4 + f4 * 6);
+    p3y = p1y - (24 + f4 * 8);
+  } else {
+    const marginPad = noBackFacingArt ? 8 : 0;
+    p3x = -swingDir * (22 + marginPad + f4 * 6);
+    p3y = p2y - (2 + f4 * 4);
+  }
+
+  return [
+    anchor,
+    { x: anchor.x + Math.round(p1x), y: anchor.y + Math.round(p1y) },
+    { x: anchor.x + Math.round(p2x), y: anchor.y + Math.round(p2y) },
+    { x: anchor.x + Math.round(p3x), y: anchor.y + Math.round(p3y) },
+  ];
+}
+
 const districtNpcsBySlot = new Map<string, Npc>(
   SLOTS.map((slot) => [slot.district.id, makeNpc(slot.character, slot.district)]),
 );
@@ -102,12 +203,7 @@ const districtNpcsBySlot = new Map<string, Npc>(
 const villageNpcs: Npc[] = SLOTS.map((slot) => {
   const anchor = VILLAGE.anchors[slot.character.id];
   if (!anchor) throw new Error(`village.json has no anchor for "${slot.character.id}"`);
-  const patrol: Point[] = [
-    anchor,
-    { x: anchor.x - 30, y: anchor.y - 15 },
-    { x: anchor.x + 30, y: anchor.y + 10 },
-    { x: anchor.x - 10, y: anchor.y + 25 },
-  ];
+  const patrol: Point[] = patrolFor(slot.character.id, anchor);
   const npc = makeNpc(slot.character, slot.district, anchor, patrol);
   npc.x = anchor.x;
   npc.y = anchor.y;
