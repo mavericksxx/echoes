@@ -124,7 +124,11 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 **You'll see:** one village you move through — walk up to a door, enter a genre's place, and find that genre's artists living there.
 
 ### Phase 3 — Your genres become characters
-- Genre gap-fill: Spotify genres → Last.fm tags.
+- **Deviation (built 2026-09-17):** no Last.fm API key exists, so the genre gap-fill chain is
+  Spotify genres → (if empty) Gemini inference from the artist name directly — Last.fm/MusicBrainz
+  tags are skipped entirely, not just deprioritized. In practice this account's artists come back
+  with **empty `genres` from Spotify** (see "Spotify API constraints" above), so almost all
+  classification is Gemini-from-name rather than Gemini-from-tags.
 - Gemini call (Flash-Lite) mapping genres/tags → the 17 slots, cached in D1 `genre_slot_map`; Gemini inference for artists with no tags.
 - Rate limits land with the first Gemini call: per-IP on every endpoint, Gemini per-IP + global daily cap, Spotify-backed endpoints served from cache.
 - Replace sample data: each slot's **activity level** from your listening share; your top artists per slot become that district's residents and fill the sidebar.

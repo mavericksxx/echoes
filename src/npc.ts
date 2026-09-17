@@ -117,6 +117,10 @@ export interface UpdateOptions {
   /** Looked up from src/sample-data.ts by the caller — npc.ts stays data-source agnostic.
    * Returning null (a dormant slot with no songs) means this NPC never performs. */
   getNowPlaying: () => NowPlayingInfo | null;
+  /** Multiplies the spontaneous "vibing" chance below (default 1) — a
+   * district's activity level (see shared/activity.ts's ACTIVITY_TREATMENT)
+   * makes its leader perform more or less often while you're inside it. */
+  performChanceMul?: number;
 }
 
 export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions): void {
@@ -175,7 +179,7 @@ export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions
       npc.patrolIdx = (npc.patrolIdx + 1) % npc.patrol.length;
       npc.state = "walk";
     }
-    if (opts.isActive && Math.random() < 0.0006) {
+    if (opts.isActive && Math.random() < 0.0006 * (opts.performChanceMul ?? 1)) {
       const info = opts.getNowPlaying();
       if (info) {
         startPerform(npc, "idle");

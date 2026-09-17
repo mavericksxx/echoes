@@ -1,9 +1,11 @@
-// Hard-coded sample listening data (Phase 1 has no Spotify connection yet).
-// Real per-user data replaces this in Phase 3 (see SPEC.md). Artist/song/
-// "now playing" content lives here rather than in data/districts.json since
-// it's listening data, not sprite/map data.
+// Hard-coded sample listening data — the offline/not-connected fallback as
+// of Phase 3 (see SPEC.md and src/listening-source.ts, which picks between
+// this and /api/village's real data per tab). Artist/song/"now playing"
+// content lives here rather than in data/districts.json since it's
+// listening data, not sprite/map data.
 
-export type ActivityLevel = "dormant" | "quiet" | "active" | "festival";
+export type { ActivityLevel } from "../shared/activity";
+export { activityLevel } from "../shared/activity";
 
 export interface Song {
   id: string;
@@ -163,13 +165,6 @@ export function topArtists(listening: SlotListening | undefined): ArtistTotal[] 
   return Array.from(byArtist, ([name, plays]) => ({ name, plays })).sort(
     (a, b) => b.plays - a.plays,
   );
-}
-
-export function activityLevel(playShare: number): ActivityLevel {
-  if (playShare <= 0) return "dormant";
-  if (playShare < 0.05) return "quiet";
-  if (playShare < 0.2) return "active";
-  return "festival";
 }
 
 export function nowPlayingSong(listening: SlotListening | undefined): Song | null {

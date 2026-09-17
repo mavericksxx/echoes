@@ -19,6 +19,7 @@ const SQL = `
 DELETE FROM spotify_token;
 DELETE FROM artist_cache;
 DELETE FROM usage_log;
+DELETE FROM genre_slot_map;
 `;
 
 async function main() {
@@ -35,7 +36,9 @@ async function main() {
   } finally {
     await unlink(sqlFile).catch(() => {});
   }
-  console.log("\nDisconnected: spotify_token, artist_cache, and usage_log are now empty in the remote D1 database.");
+  console.log(
+    "\nDisconnected: spotify_token, artist_cache, usage_log, and genre_slot_map are now empty in the remote D1 database.",
+  );
 }
 
 main().catch((err) => {

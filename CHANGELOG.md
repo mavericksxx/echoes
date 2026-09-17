@@ -169,3 +169,47 @@
   - `scripts/check-data.mjs` gained `village.doors` validation (mirrors `anchors`: one per slot,
     in-bounds) and a resident-rig check (`data/npcRigs.json`: each rig's down/side/up frame rects are
     3-long and fit their sheet's declared bounds, `facing` is "left"/"right").
+
+- **Phase 3 — Your genres become characters:**
+  - **Deviation:** no Last.fm API key exists, so the genre chain is Spotify genres → (if empty)
+    Gemini inference from the artist name — Last.fm/MusicBrainz tags are skipped entirely (see
+    SPEC.md's Phase 3 bullet). In practice this account's artists come back with empty `genres`
+    from Spotify, so almost every classification goes through Gemini-from-name.
+  - **`migrations/0002_phase3.sql`** (additive only): `genre_slot_map` (genre string → slot,
+    source, confidence), `artist_cache` gains `slot_id`/`slot_source`/`slot_confidence`/
+    `inferred_at`, `usage_log` gains `ip`, and a new `rate_limit_window` table for the per-IP
+    limiter below.
+  - **Genre resolution** (`worker/gemini.ts`, `worker/genre-resolution.ts`): per top artist, reuse
+    `artist_cache` if already resolved; else resolve Spotify-supplied genres via `genre_slot_map`
+    (one batched Gemini Flash-Lite call — pinned `gemini-3.5-flash-lite`, verified against
+    ai.google.dev's model list — for whatever genre strings aren't cached yet); else batch the
+    artist *names* straight to Gemini. Every real classification is cached in D1, so a given
+    artist/genre string only ever costs one Gemini call. Only names/genre strings/counts are ever
+    sent to Gemini, never a raw Spotify payload. A daily Gemini cap (global + per-IP, counted from
+    `usage_log`) falls back to a deterministic (not persisted) nearest-slot guess once hit, and the
+    response says so via `geminiLimited`.
+  - **`GET /api/village`** (`worker/village.ts`): the derived world — every slot's activity level
+    (dormant/quiet/active/festival, from its share of a rank-derived score across up to 50 top
+    artists), share %, and its real artists ordered highest-scoring first. Artists in the
+    `long_term` baseline but missing from the requested range come back `faded: true` instead of
+    disappearing. Cached ~30 min via the Cache API (same pattern as `/api/top-artists`);
+    `{connected:false}` with no token.
+  - **Per-IP rate limiting** (`worker/rate-limit.ts`), applied centrally in `worker/index.ts` before
+    any `/api/*` route runs: a fixed-window counter in D1 (`rate_limit_window`) — chosen over the
+    Cache API so counts are exact and testable with `wrangler d1 execute --local` — stricter on
+    `/api/village` than `/api/health`/`/api/top-artists` since it's the only Gemini-touching route.
+  - **`src/listening-source.ts`** replaces sample data per sidebar tab once connected+live:
+    Overview/Artists switch to real artists + activity; Songs (no per-track fetch yet) and "now
+    playing" (real polling is Phase 5) stay sample-only. The topbar status chip now reads
+    **Sample data** / **Connected** / **Live paused**.
+  - **The room says what the panel can't**: `src/residents.ts`'s resident placement now scales
+    offset distance from the leader by rank (highest-scoring centre/front, lower ones toward the
+    edges); a resident whose artist is `faded` renders dimmed (`drawNpc`'s new `opacity` option) and
+    stands still instead of wandering. `drawActivityTreatment` (new) gives each district a dim wash
+    (dormant/quiet), extra background villagers (active/festival), and bunting (festival only) —
+    the whole set documented as `shared/activity.ts`'s `ACTIVITY_TREATMENT`; the leader's
+    spontaneous "vibing" chance (`npc.ts`'s `performChanceMul`) scales with it too.
+  - **`shared/activity.ts`** (new, imported by both the frontend and the Worker): the single
+    `activityLevel()`/threshold definition, replacing the copy that used to live in
+    `src/sample-data.ts`.
+  - `npm run spotify:disconnect` also clears `genre_slot_map` now.

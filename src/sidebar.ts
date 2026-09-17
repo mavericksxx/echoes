@@ -8,16 +8,16 @@
 
 import type { Slot } from "../data/loader";
 import { drawPortrait, type ImageMap } from "./render";
+import { SAMPLE_NOW, type Song } from "./sample-data";
 import {
-  activityLevel,
-  getListening,
-  nowPlayingSong,
-  SAMPLE_NOW,
-  topArtists,
-  totalPlays,
-  type ArtistTotal,
-  type Song,
-} from "./sample-data";
+  getActivity,
+  getArtists,
+  getNowPlaying,
+  getSamplePlaysLogged,
+  getSongs,
+  isVillageLive,
+  type ArtistEntry,
+} from "./listening-source";
 import { coverPlaceholderGradient } from "./cover-art";
 
 let images: ImageMap = {};
@@ -171,21 +171,26 @@ function buildNowPlayingCard(song: Song): HTMLElement {
 }
 
 /** Shared artist row for Overview's "top artists" and the Artists tab — built
- * with textContent (not innerHTML) since the artist name is data, not markup. */
-function buildArtistRow(artist: ArtistTotal, onSelect: () => void): HTMLButtonElement {
+ * with textContent (not innerHTML) since the artist name is data, not markup.
+ * Sample rows show a play count; real rows (no play counts from Spotify)
+ * show a rank, or "asleep" for a faded/absent-this-range artist. */
+function buildArtistRow(artist: ArtistEntry, onSelect: () => void): HTMLButtonElement {
   const row = document.createElement("button");
   row.type = "button";
   row.className = "artist-row";
+  if (artist.faded) row.classList.add("artist-row--faded");
 
   const name = document.createElement("span");
   name.className = "artist-row__name";
   name.textContent = artist.name;
 
-  const plays = document.createElement("span");
-  plays.className = "artist-row__plays";
-  plays.textContent = `${artist.plays} plays`;
+  const meta = document.createElement("span");
+  meta.className = "artist-row__plays";
+  if (artist.plays !== undefined) meta.textContent = `${artist.plays} plays`;
+  else if (artist.faded) meta.textContent = "asleep";
+  else if (artist.rank != null) meta.textContent = `#${artist.rank}`;
 
-  row.append(name, plays);
+  row.append(name, meta);
   row.addEventListener("click", onSelect);
   return row;
 }
@@ -201,8 +206,9 @@ const ACTIVITY_LABEL: Record<string, string> = {
 };
 
 function renderOverview(container: HTMLElement, ctx: SectionContext): void {
-  const listening = getListening(ctx.slot.district.id);
-  const level = activityLevel(listening?.playShare ?? 0);
+  const slotId = ctx.slot.district.id;
+  const live = isVillageLive();
+  const { level, share } = getActivity(slotId);
 
   const pill = document.createElement("span");
   pill.className = `activity-pill activity-pill--${level}`;
@@ -211,16 +217,22 @@ function renderOverview(container: HTMLElement, ctx: SectionContext): void {
 
   const stats = document.createElement("div");
   stats.className = "overview-stats";
-  const share = document.createElement("div");
-  share.className = "overview-stat";
-  share.innerHTML = `<strong>${Math.round((listening?.playShare ?? 0) * 100)}%</strong><span>of plays</span>`;
-  const plays = document.createElement("div");
-  plays.className = "overview-stat";
-  plays.innerHTML = `<strong>${totalPlays(listening)}</strong><span>plays logged</span>`;
-  stats.append(share, plays);
+  const shareStat = document.createElement("div");
+  shareStat.className = "overview-stat";
+  shareStat.innerHTML = `<strong>${Math.round(share * 100)}%</strong><span>of plays</span>`;
+  const secondStat = document.createElement("div");
+  secondStat.className = "overview-stat";
+  // Spotify gives ranks, not play counts — the "plays logged" stat only
+  // makes sense for the sample fallback (see src/listening-source.ts).
+  if (live) {
+    secondStat.innerHTML = `<strong>${getArtists(slotId).length}</strong><span>artists placed</span>`;
+  } else {
+    secondStat.innerHTML = `<strong>${getSamplePlaysLogged(slotId)}</strong><span>plays logged</span>`;
+  }
+  stats.append(shareStat, secondStat);
   container.appendChild(stats);
 
-  const artists = topArtists(listening).slice(0, 3);
+  const artists = getArtists(slotId).slice(0, 3);
   if (artists.length) {
     const heading = document.createElement("p");
     heading.className = "sidebar-heading";
@@ -237,12 +249,17 @@ function renderOverview(container: HTMLElement, ctx: SectionContext): void {
   npHeading.textContent = "Now playing";
   container.appendChild(npHeading);
 
-  const now = nowPlayingSong(listening);
+  const now = getNowPlaying(slotId);
+  const empty = document.createElement("p");
+  empty.className = "sidebar-empty";
   if (now) {
     container.appendChild(buildNowPlayingCard(now));
+  } else if (live) {
+    // Real currently-playing polling is a later phase (SPEC.md) — say so
+    // rather than showing a stale sample track.
+    empty.textContent = "Live “now playing” arrives in a later phase.";
+    container.appendChild(empty);
   } else {
-    const empty = document.createElement("p");
-    empty.className = "sidebar-empty";
     empty.textContent = "Nothing playing right now.";
     container.appendChild(empty);
   }
@@ -252,8 +269,9 @@ function renderOverview(container: HTMLElement, ctx: SectionContext): void {
 // Songs
 // ---------------------------------------------------------------------------
 function renderSongs(container: HTMLElement, ctx: SectionContext): void {
-  const listening = getListening(ctx.slot.district.id);
-  const songs = listening?.songs ?? [];
+  // Songs stay sample data for every district regardless of connection
+  // state — see src/listening-source.ts's doc comment.
+  const songs = getSongs(ctx.slot.district.id);
 
   const controls = document.createElement("div");
   controls.className = "songs-controls";
@@ -361,8 +379,7 @@ function renderSongs(container: HTMLElement, ctx: SectionContext): void {
 // Artists
 // ---------------------------------------------------------------------------
 function renderArtists(container: HTMLElement, ctx: SectionContext): void {
-  const listening = getListening(ctx.slot.district.id);
-  const artists = topArtists(listening);
+  const artists = getArtists(ctx.slot.district.id);
 
   if (artists.length === 0) {
     const empty = document.createElement("p");

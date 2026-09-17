@@ -984,6 +984,14 @@ select {
   font-size: var(--text-xs);
 }
 
+/* An artist who dropped out of the current range (see /api/village's
+   "faded" artists / src/residents.ts's asleep residents) — same dimming
+   language as the district-interior treatment, applied here in the list. */
+.artist-row--faded .artist-row__name,
+.artist-row--faded .artist-row__plays {
+  opacity: 0.55;
+}
+
 /* ---- now playing card (Overview) ---- */
 .nowplaying-card {
   display: flex;

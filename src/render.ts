@@ -93,8 +93,18 @@ function currentSpriteRect(npc: Npc): Rect {
  * If `npc.character.mirrorDirs` includes the NPC's current direction (rigs
  * with only one side pose — see data/npcRigs.json / src/residents.ts), the
  * frame is flipped horizontally within its own destination box instead of
- * drawn as-is. */
-export function drawNpc(ctx: CanvasRenderingContext2D, images: ImageMap, npc: Npc, _view: ViewRect): void {
+ * drawn as-is.
+ *
+ * `opts.opacity` (default 1) draws the sprite faded — used for a resident
+ * who's stopped charting this range (see src/residents.ts's Resident.faded
+ * and SPEC.md's Phase 3 "faded/asleep" requirement). */
+export function drawNpc(
+  ctx: CanvasRenderingContext2D,
+  images: ImageMap,
+  npc: Npc,
+  _view: ViewRect,
+  opts: { opacity?: number } = {},
+): void {
   const { rect, label, scale, sheet } = currentSprite(npc);
   const img: DrawableImage = images[sheet]!;
   const [sx, sy, rx1, ry1] = rect;
@@ -104,15 +114,17 @@ export function drawNpc(ctx: CanvasRenderingContext2D, images: ImageMap, npc: Np
   const { dx, dy, dw, dh } = drawOrigin(rect, pivot, npc.x, npc.y, scale);
   const mirror =
     npc.state !== "performing" && (npc.character.mirrorDirs?.some((d) => d === npc.dir) ?? false);
+  const opacity = opts.opacity ?? 1;
+  ctx.save();
+  ctx.globalAlpha *= opacity;
   if (mirror) {
-    ctx.save();
     ctx.translate(dx + dw, dy);
     ctx.scale(-1, 1);
     ctx.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
-    ctx.restore();
   } else {
     ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
   }
+  ctx.restore();
 }
 
 /** World-space position of the top-center of an NPC's current sprite —

@@ -2,16 +2,18 @@
 // a handful of that genre's top artists "live" there too, wandering the same
 // interior with the existing NPC state machine (see src/npc.ts), built from
 // the generic "hidden leaf ninja" rig sheet (data/npcRigs.json) since there's
-// no real per-artist sprite yet. Populated from src/sample-data.ts's top
-// artists per slot; Phase 3 swaps in real artist data. See SPEC.md
-// "Phase 2.5" for the size check behind RESIDENT_CAP.
+// no real per-artist sprite yet. Populated from src/listening-source.ts
+// (real /api/village data once connected+live, sample data otherwise). See
+// SPEC.md "Phase 2.5" for the size check behind RESIDENT_CAP, and its
+// Phase 3 bullet for placement-encodes-play-count + faded/asleep residents.
 
 import type { CharacterDef, DistrictDef, Point } from "../data/types";
 import { NPC_RIGS, SLOTS, assetSize } from "../data/loader";
 import { makeNpc, type Npc } from "./npc";
-import { getListening, topArtists } from "./sample-data";
+import { getArtists } from "./listening-source";
 import { bakeRecolor } from "./recolor";
 import type { ImageMap } from "./render";
+import { ACTIVITY_TREATMENT, type ActivityLevel } from "../shared/activity";
 
 /**
  * Phase 2.5 size check: rendered (mentally, against the actual crop
@@ -36,6 +38,9 @@ const RESIDENT_TINTS = ["hue-rotate(14deg) saturate(1.1)", "hue-rotate(-16deg) b
 export interface Resident {
   npc: Npc;
   artistName: string;
+  /** An artist who dropped out of the current range (see /api/village's
+   * "faded" artists) — rendered dimmed and stationary, not wandering. */
+  faded: boolean;
 }
 
 function residentCharacter(rigId: string, sheetKey: string): CharacterDef {
@@ -85,17 +90,26 @@ function clampPoint(x: number, y: number, w: number, h: number, margin = 15): Po
   };
 }
 
-// Home-point offsets from the leader's own home, and each resident's own
-// small patrol box around that home — mirrors the pattern main.ts already
-// uses for whole-village NPCs, scaled down for these much smaller interiors.
-const RESIDENT_OFFSETS: Point[] = [
-  { x: -30, y: 10 },
-  { x: 30, y: -5 },
-  { x: 0, y: 25 },
+// Fixed directions (front-left, front-right, below) from the leader's home —
+// unchanged since Phase 2.5 — but the *distance* along each now grows with
+// index, so index 0 (the highest-scoring/most-played artist) sits closest to
+// the leader (centre/front) and later ones sit progressively further out
+// (the edges): SPEC.md's Phase 3 "resident placement encodes play count".
+const RESIDENT_DIRECTIONS: Point[] = [
+  { x: -0.95, y: 0.32 },
+  { x: 0.99, y: -0.16 },
+  { x: 0, y: 1 },
 ];
+const RESIDENT_DISTANCES = [12, 26, 40];
+
+function residentOffset(i: number): Point {
+  const dir = RESIDENT_DIRECTIONS[i % RESIDENT_DIRECTIONS.length]!;
+  const dist = RESIDENT_DISTANCES[Math.min(i, RESIDENT_DISTANCES.length - 1)]!;
+  return { x: dir.x * dist, y: dir.y * dist };
+}
 
 function buildResidentsForDistrict(district: DistrictDef): Resident[] {
-  const artists = topArtists(getListening(district.id)).slice(0, RESIDENT_CAP);
+  const artists = getArtists(district.id).slice(0, RESIDENT_CAP);
   if (artists.length === 0) return [];
   const [w, h] = assetSize(district.bg);
 
@@ -103,16 +117,22 @@ function buildResidentsForDistrict(district: DistrictDef): Resident[] {
     const rigId = RIG_IDS[i % RIG_IDS.length]!;
     const sheetKey = residentSheetKey(rigId, i);
     const character = residentCharacter(rigId, sheetKey);
-    const offset = RESIDENT_OFFSETS[i % RESIDENT_OFFSETS.length]!;
+    const offset = residentOffset(i);
     const home = clampPoint(district.home.x + offset.x, district.home.y + offset.y, w, h);
-    const patrol = [
-      home,
-      clampPoint(home.x - 12, home.y - 8, w, h),
-      clampPoint(home.x + 12, home.y + 6, w, h),
-      clampPoint(home.x - 6, home.y + 10, w, h),
-    ];
+    const faded = artist.faded ?? false;
+    // A faded resident is asleep, not wandering — a one-point patrol keeps
+    // makeNpc/updateNpc's existing walk logic (it just never has anywhere
+    // else to walk to) instead of needing a separate "asleep" state.
+    const patrol = faded
+      ? [home]
+      : [
+          home,
+          clampPoint(home.x - 12, home.y - 8, w, h),
+          clampPoint(home.x + 12, home.y + 6, w, h),
+          clampPoint(home.x - 6, home.y + 10, w, h),
+        ];
     const npc = makeNpc(character, district, home, patrol);
-    return { npc, artistName: artist.name };
+    return { npc, artistName: artist.name, faded };
   });
 }
 
@@ -127,4 +147,78 @@ export function buildResidents(images: ImageMap): Map<string, Resident[]> {
     if (residents.length > 0) bySlot.set(district.id, residents);
   }
   return bySlot;
+}
+
+// ---------------------------------------------------------------------------
+// Activity treatment: "the room says what the panel can't" (SPEC.md's
+// Phase 3) — a tint wash, a couple of extra non-interactive background
+// villagers, and festival bunting, all sized by shared/activity.ts's
+// ACTIVITY_TREATMENT so the four levels read apart at a glance on a phone.
+// District-interior only (see main.ts's renderDistrict) — the whole-village
+// view has one shared background, so per-slot lighting doesn't apply there.
+// ---------------------------------------------------------------------------
+const CROWD_OFFSETS: Point[] = [
+  { x: -46, y: -16 },
+  { x: 46, y: 18 },
+];
+const BUNTING_COLORS = ["#E86A5C", "#F2C14E", "#5AA9E6", "#7ED6A5"];
+
+function drawFestivalBunting(ctx: CanvasRenderingContext2D, w: number): void {
+  const count = Math.max(3, Math.round(w / 40));
+  const y = 10;
+  ctx.save();
+  for (let i = 0; i < count; i++) {
+    const x = ((i + 0.5) / count) * w;
+    ctx.fillStyle = BUNTING_COLORS[i % BUNTING_COLORS.length]!;
+    ctx.beginPath();
+    ctx.moveTo(x - 6, y);
+    ctx.lineTo(x + 6, y);
+    ctx.lineTo(x, y + 10);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** Draws one district's activity treatment onto its background, in world
+ * space — call right after drawing the bg image and before its leader/
+ * residents, so the wash/crowd sit behind the interactive cast (which stays
+ * at full brightness/contrast for tap targets). */
+export function drawActivityTreatment(
+  ctx: CanvasRenderingContext2D,
+  images: ImageMap,
+  district: DistrictDef,
+  level: ActivityLevel,
+  w: number,
+  h: number,
+): void {
+  const treatment = ACTIVITY_TREATMENT[level];
+
+  if (treatment.crowdExtra > 0) {
+    const rig = NPC_RIGS[RIG_IDS[0]!]!;
+    const img = images[rig.sheet];
+    const frame = rig.down[0];
+    if (img instanceof HTMLImageElement && frame) {
+      const [sx, sy, ex, ey] = frame;
+      const fw = ex - sx;
+      const fh = ey - sy;
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      for (let i = 0; i < treatment.crowdExtra; i++) {
+        const offset = CROWD_OFFSETS[i % CROWD_OFFSETS.length]!;
+        const p = clampPoint(district.home.x + offset.x, district.home.y + offset.y, w, h);
+        ctx.drawImage(img, sx, sy, fw, fh, p.x - fw / 2, p.y - fh, fw, fh);
+      }
+      ctx.restore();
+    }
+  }
+
+  if (treatment.festivalProps) drawFestivalBunting(ctx, w);
+
+  if (treatment.overlay) {
+    ctx.save();
+    ctx.fillStyle = treatment.overlay;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
 }

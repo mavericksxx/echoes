@@ -78,6 +78,16 @@ Worker can no longer decrypt the stored token (rerun `spotify:connect` to
 fix that; the value itself isn't recoverable from Cloudflare after `secret
 put`).
 
+**1b. Set a `GEMINI_API_KEY` Worker secret** (Phase 3 — needed for
+`/api/village`'s genre classification; a free-tier
+[Google AI Studio](https://aistudio.google.com/) key is enough, since
+everything runs on Flash-Lite and is cached in D1 — see SPEC.md's "AI cost
+control"):
+
+```sh
+npx wrangler secret put GEMINI_API_KEY
+```
+
 **2. Apply the D1 schema to the remote database** (only needed once, or
 after a new migration is added):
 
@@ -122,8 +132,9 @@ npm run spotify:disconnect
 ```
 
 Deletes the stored refresh token and everything derived from it
-(`spotify_token`, `artist_cache`, `usage_log`) from the remote D1. The site
-goes back to the **Not connected** state until `spotify:connect` runs again.
+(`spotify_token`, `artist_cache`, `usage_log`, `genre_slot_map`) from the
+remote D1. The site goes back to the **Not connected** state until
+`spotify:connect` runs again.
 
 ## Architecture (Phase 1–2)
 
@@ -174,7 +185,7 @@ goes back to the **Not connected** state until `spotify:connect` runs again.
 - **Top artists panel + status chip** (`src/top-artists.ts`) — a small
   floating panel (topbar "Top artists" button, hidden until connected) with
   a range switcher (Recent / 6 months / All time), plus a `connected` /
-  `not connected` / `live paused` status chip in the topbar. Independent of
+  `Sample data` / `Live paused` status chip in the topbar. Independent of
   the genre sidebar's Overview/Songs/Artists tabs, which still run on
   `src/sample-data.ts` until Phase 3.
 - **D1** (`migrations/0001_init.sql`) — `spotify_token` (single row, the
@@ -182,3 +193,54 @@ goes back to the **Not connected** state until `spotify:connect` runs again.
   starting Phase 3), and `usage_log` (one row per real Spotify HTTP call:
   endpoint, status, 429 count, timestamp — used for the Phase 6 rate-limit
   test). `npm run db:migrate:local` / `db:migrate:remote` apply it.
+
+## Architecture (Phase 3 additions)
+
+- **Genre resolution** (`worker/genre-resolution.ts` + `worker/gemini.ts`) —
+  for each top artist: reuse `artist_cache` if already resolved; else, if
+  Spotify gave genres, resolve each genre string via `genre_slot_map`
+  (itself cached per genre string, one batched Gemini Flash-Lite call for
+  whatever's still unseen); else (the common case for this account — Spotify
+  returns empty `genres` here) batch the artist *names* straight to Gemini.
+  Every real classification is written back to D1 so a given artist or
+  genre string only ever costs one Gemini call, ever. Only artist
+  names/genre strings/counts are ever sent to Gemini — never a raw Spotify
+  payload, user id, or token (SPEC.md's AI policy). Pinned model:
+  `gemini-3.5-flash-lite`.
+- **`GET /api/village`** (`worker/village.ts`) — the derived world: every
+  roster slot's activity level (dormant/quiet/active/festival, from its
+  share of a rank-derived score across up to 50 top artists), share %, and
+  its real artists (ordered highest-scoring first). Artists present in the
+  long_term baseline but missing from the requested range come back with
+  `faded: true` instead of being dropped. Cached ~30 min via the Workers
+  Cache API, same pattern as `/api/top-artists`; `{connected:false}` with no
+  token, a "live paused" dormant payload if a live Spotify/token call fails.
+- **Rate limiting** (`worker/rate-limit.ts`) — a fixed-window per-IP counter
+  **in D1** (`rate_limit_window`), applied centrally in `worker/index.ts`
+  before any route runs, stricter on `/api/village` (the only Gemini-
+  touching endpoint) than `/api/health`/`/api/top-artists`. Chose D1 over the
+  Cache API so counts are exact and inspectable with
+  `wrangler d1 execute --local` rather than best-effort per-colo; the
+  tradeoff (rows accumulate over time) is swept opportunistically on a
+  random sample of requests rather than needing a dedicated cron. Separately,
+  a **daily Gemini cap** (global + per-IP, counted from `usage_log` rows
+  logged as `gemini:genres`/`gemini:artists`) hard-stops Gemini calls; once
+  hit, genre resolution falls back to a deterministic (not Gemini, not
+  persisted) nearest-slot guess and `/api/village` reports `geminiLimited: true`.
+- **`src/listening-source.ts`** — the one place that picks between
+  `/api/village`'s real data and `src/sample-data.ts`'s fallback, split by
+  sidebar tab: Overview/Artists switch to real artists + activity once
+  connected and live; Songs (no per-track fetch yet) and "now playing" (real
+  currently-playing polling is Phase 5) stay sample-only regardless. The
+  topbar status chip says **Sample data** / **Connected** / **Live paused**
+  accordingly.
+- **District "activity treatment"** (`src/residents.ts`'s
+  `drawActivityTreatment`, driven by `shared/activity.ts`'s
+  `ACTIVITY_TREATMENT`) — entering a district shows its activity level, not
+  just its sidebar: a dormant/quiet district gets a dim wash, an
+  active/festival one gets extra background villagers (festival also gets a
+  bunting overlay), and the leader's spontaneous "vibing" chance scales with
+  the level. A resident whose artist dropped out of the current range (vs.
+  the long_term baseline) renders faded and stands still instead of
+  wandering — placement otherwise puts the highest-scoring resident closest
+  to the leader and lower-scoring ones further out.

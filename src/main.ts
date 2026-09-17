@@ -6,7 +6,7 @@
 import "./style.css";
 import type { Point } from "../data/types";
 import { ASSET_MANIFEST, SLOTS, VILLAGE, assetSize, assetUrl, getSlot } from "../data/loader";
-import { getListening, nowPlayingSong, pickWeightedSlotId } from "./sample-data";
+import { pickWeightedSlotId } from "./sample-data";
 import { makeNpc, setCaption, startPerform, updateNpc, type Npc, type NowPlayingInfo } from "./npc";
 import {
   drawCaptions,
@@ -18,9 +18,11 @@ import {
   type ImageMap,
 } from "./render";
 import { bakeRecolor } from "./recolor";
-import { buildResidents, type Resident } from "./residents";
+import { buildResidents, drawActivityTreatment, type Resident } from "./residents";
 import { close as closeSidebar, initSidebar, isSidebarOpen, openSidebar, setSidebarImages } from "./sidebar";
 import { initTopArtists } from "./top-artists";
+import { getActivity, getNowPlaying, initListeningSource } from "./listening-source";
+import { ACTIVITY_TREATMENT } from "../shared/activity";
 
 const NOW_PLAYING_INTERVAL_MS = 8000;
 const VILLAGE_EVENT_INTERVAL_MS = 5000;
@@ -117,9 +119,10 @@ const villageNpcs: Npc[] = SLOTS.map((slot) => {
 let residentsBySlot = new Map<string, Resident[]>();
 let allResidents: Resident[] = [];
 let residentArtistByNpc = new Map<Npc, string>();
+let residentFadedByNpc = new Map<Npc, boolean>();
 
 function getNowPlayingFor(slotId: string): NowPlayingInfo | null {
-  const song = nowPlayingSong(getListening(slotId));
+  const song = getNowPlaying(slotId);
   return song ? { artist: song.artist, song: song.title } : null;
 }
 
@@ -400,16 +403,19 @@ function renderDistrict(): void {
   const residents = residentsBySlot.get(currentDistrictId) ?? [];
   const imgs = (district.recolorFilter && recoloredImagesByDistrict.get(district.id)) || images;
   const view = { camX, camY, viewW, viewH };
+  const [bgW, bgH] = [mapW, mapH]; // renderDistrict only runs while mode==="district", so these are this district's bg size
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
   ctx.translate(-camX, -camY);
   ctx.drawImage(imgs[district.bg]!, 0, 0);
+  drawActivityTreatment(ctx, imgs, district, getActivity(district.id).level, bgW, bgH);
   const allNpcs = [leader, ...residents.map((r) => r.npc)];
   const sorted = [...allNpcs].sort((a, b) => a.y - b.y);
   sorted.forEach((npc) => {
     if (npc === selectedNpc || npc === keyboardSelectedNpc) drawSelectionRing(ctx, npc);
-    drawNpc(ctx, imgs, npc, view);
+    const opacity = residentFadedByNpc.get(npc) ? 0.4 : 1;
+    drawNpc(ctx, imgs, npc, view, { opacity });
   });
   ctx.restore();
 }
@@ -420,7 +426,7 @@ function districtCaptionLabels(): CaptionLabel[] {
   const residents = residentsBySlot.get(currentDistrictId) ?? [];
   const labels: CaptionLabel[] = [];
   if (leader.caption) labels.push({ npc: leader, text: leader.caption });
-  residents.forEach((r) => labels.push({ npc: r.npc, text: r.artistName }));
+  residents.forEach((r) => labels.push({ npc: r.npc, text: r.faded ? `${r.artistName} (asleep)` : r.artistName }));
   return labels;
 }
 
@@ -733,6 +739,7 @@ function frame(ts: number): void {
       isActive: mode === "district" && slotId === currentDistrictId,
       nowPlayingIntervalMs: NOW_PLAYING_INTERVAL_MS,
       getNowPlaying: () => getNowPlayingFor(npc.district.id),
+      performChanceMul: ACTIVITY_TREATMENT[getActivity(slotId).level].performChanceMul,
     }),
   );
   allResidents.forEach(({ npc }) =>
@@ -763,13 +770,14 @@ const urlsByKey = Object.fromEntries(
 
 history.replaceState({ echoesDistrict: null }, "", `${location.pathname}${location.search}`);
 
-loadImages(urlsByKey).then((loaded) => {
+Promise.all([loadImages(urlsByKey), initListeningSource()]).then(([loaded]) => {
   images = loaded;
   setSidebarImages(images);
   bakeRecolors();
   residentsBySlot = buildResidents(images);
   allResidents = Array.from(residentsBySlot.values()).flat();
   residentArtistByNpc = new Map(allResidents.map((r) => [r.npc, r.artistName]));
+  residentFadedByNpc = new Map(allResidents.map((r) => [r.npc, r.faded]));
   applyVillageScene();
   requestAnimationFrame(frame);
 });

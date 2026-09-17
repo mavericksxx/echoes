@@ -44,7 +44,10 @@ function setStatusChip(state: "not-connected" | "connected" | "paused"): void {
     statusChip.classList.add("status-chip--paused");
     statusChip.textContent = "Live paused";
   } else {
-    statusChip.textContent = "Not connected";
+    // Phase 3: the whole village (districts, residents, activity) now runs
+    // on this same connection state (see src/listening-source.ts) — make
+    // the chip say what's actually on screen, not just the raw auth state.
+    statusChip.textContent = "Sample data";
   }
 }
 

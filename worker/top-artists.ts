@@ -11,24 +11,27 @@ import type { Env } from "./index";
 import { getAccessToken, TokenError } from "./token";
 import { spotifyGet, SpotifyRequestError } from "./spotify-fetch";
 
-const VALID_RANGES = new Set(["short_term", "medium_term", "long_term"]);
+// Exported for worker/village.ts, which fetches the same Spotify endpoint at
+// a larger limit to build the whole-world view — reusing this shape/range
+// validation/derivation rather than redefining them.
+export const VALID_RANGES = new Set(["short_term", "medium_term", "long_term"]);
 const CACHE_TTL_SECONDS = 30 * 60;
 const TOP_ARTISTS_LIMIT = 10;
 
-interface SpotifyImage {
+export interface SpotifyImage {
   url: string;
   height: number | null;
   width: number | null;
 }
 
-interface SpotifyArtist {
+export interface SpotifyArtist {
   id: string;
   name: string;
   genres: string[];
   images: SpotifyImage[];
 }
 
-interface SpotifyTopArtistsResponse {
+export interface SpotifyTopArtistsResponse {
   items: SpotifyArtist[];
 }
 
@@ -44,7 +47,7 @@ export type TopArtistsPayload =
   | { connected: false }
   | { connected: true; live: boolean; range: string; artists: TopArtistOut[]; cachedAt: string | null };
 
-function deriveArtists(items: SpotifyArtist[]): TopArtistOut[] {
+export function deriveArtists(items: SpotifyArtist[]): TopArtistOut[] {
   return items.map((artist, i) => ({
     id: artist.id,
     name: artist.name,
