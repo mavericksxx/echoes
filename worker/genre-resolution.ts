@@ -14,12 +14,17 @@
 // Whichever path resolves an artist, the result is written back to
 // `artist_cache` so step 1 catches it from then on.
 //
-// If the Gemini daily cap (worker/rate-limit.ts) is already hit, no Gemini
-// call is made at all: anything that would have needed one instead gets a
+// If the Gemini daily cap (worker/rate-limit.ts) is already hit, or a
+// Gemini call itself fails (network error, non-OK status, bad response —
+// see worker/gemini.ts's GeminiRequestError), no further Gemini call is
+// made for that batch: anything that would have needed one instead gets a
 // deterministic, low-confidence "nearest slot" guess (hashed from its
 // name/genre — not persisted to the shared caches, since it's a degraded
-// stand-in, not a real classification) and the response says so via
-// `geminiLimited`.
+// stand-in, not a real classification). The response says which happened
+// via `geminiLimited` (quota cap) / `geminiError` (an actual failure) —
+// either way, resolution for every other artist proceeds normally, and
+// `resolveArtistSlots` itself is guaranteed never to throw (see its own
+// try/catch below) so a Gemini problem never turns into a 500.
 
 import type { Env } from "./index";
 import type { TopArtistOut } from "./top-artists";
@@ -46,18 +51,26 @@ export interface GenreResolutionResult {
   /** True if the Gemini daily cap was hit and at least one artist/genre had
    * to use the non-AI fallback instead of a real classification. */
   geminiLimited: boolean;
+  /** Set to the first Gemini call's error message if one actually failed
+   * (as opposed to being skipped because the daily cap was hit). */
+  geminiError: string | null;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 function normalizeGenre(genre: string): string {
   return genre.trim().toLowerCase();
 }
 
-/** Deterministic "nearest slot" for when Gemini can't be called (quota hit)
- * and nothing is cached yet — stable across calls (same string always lands
- * on the same slot) rather than random, so a capped day doesn't visibly
- * shuffle a district's residents on every request. Not a real
- * classification, so callers must not persist it to the shared caches. */
-function fallbackSlot(seed: string): string {
+/** Deterministic "nearest slot" for when Gemini can't be called (quota hit
+ * or an actual failure) and nothing is cached yet — stable across calls
+ * (same string always lands on the same slot) rather than random, so a
+ * degraded response doesn't visibly reshuffle a district's residents on
+ * every request. Not a real classification, so callers must not persist it
+ * to the shared caches. */
+export function fallbackSlot(seed: string): string {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {
     hash = (hash * 31 + seed.charCodeAt(i)) | 0;
@@ -148,16 +161,14 @@ async function upsertArtistCache(
     .run();
 }
 
-/** Resolves every artist in `artists` to a roster slot, reading/writing the
- * D1 caches described above. `ip` is only used for the Gemini daily cap
- * bookkeeping (worker/rate-limit.ts) — never sent to Gemini itself. */
-export async function resolveArtistSlots(
+async function resolveArtistSlotsInner(
   env: Env,
   ip: string,
   artists: TopArtistOut[],
 ): Promise<GenreResolutionResult> {
   const bySlotId = new Map<string, ArtistSlot>();
   let geminiLimited = false;
+  let geminiError: string | null = null;
 
   const cachedArtists = await fetchCachedArtists(
     env,
@@ -173,7 +184,7 @@ export async function resolveArtistSlots(
   }
 
   if (uncached.length === 0) {
-    return { bySlotId, geminiLimited };
+    return { bySlotId, geminiLimited, geminiError };
   }
 
   const withGenres = uncached.filter((a) => a.genres.length > 0);
@@ -191,17 +202,22 @@ export async function resolveArtistSlots(
 
     if (uncachedGenres.length > 0) {
       if (await geminiQuotaAvailable(env, ip)) {
-        await logGeminiCall(env, ip, "genres");
-        const guesses = await classifyGenres(env, uncachedGenres);
+        let guesses: Map<string, SlotGuess> | null = null;
+        try {
+          await logGeminiCall(env, ip, "genres");
+          guesses = await classifyGenres(env, uncachedGenres);
+        } catch (err) {
+          geminiError = geminiError ?? errorMessage(err);
+        }
         for (const genre of uncachedGenres) {
-          const guess = guesses.get(genre);
+          const guess = guesses?.get(genre);
           if (guess) {
             genreToSlot.set(genre, { ...guess, source: "gemini" });
             await insertGenreSlotMap(env, genre, guess, "gemini");
           } else {
-            // Gemini responded but skipped this genre (e.g. a schema/parse
-            // gap) — a real fallback case, not a real classification.
-            geminiLimited = true;
+            // Either the whole call failed (guesses is null — geminiError is
+            // already set above) or Gemini's response just skipped this one
+            // genre (a schema/parse gap) — either way, fall back.
             genreToSlot.set(genre, { slotId: fallbackSlot(genre), confidence: 0.05, source: "fallback" });
           }
         }
@@ -234,19 +250,23 @@ export async function resolveArtistSlots(
 
   // ---- Path 2: artists with no genres at all — classify by name ----
   if (withoutGenres.length > 0) {
-    let nameGuesses = new Map<string, SlotGuess>();
+    let nameGuesses: Map<string, SlotGuess> | null = null;
     if (await geminiQuotaAvailable(env, ip)) {
-      await logGeminiCall(env, ip, "artists");
-      nameGuesses = await classifyArtistNames(
-        env,
-        withoutGenres.map((a) => a.name),
-      );
+      try {
+        await logGeminiCall(env, ip, "artists");
+        nameGuesses = await classifyArtistNames(
+          env,
+          withoutGenres.map((a) => a.name),
+        );
+      } catch (err) {
+        geminiError = geminiError ?? errorMessage(err);
+      }
     } else {
       geminiLimited = true;
     }
 
     for (const artist of withoutGenres) {
-      const guess = nameGuesses.get(artist.name);
+      const guess = nameGuesses?.get(artist.name);
       const slot: ArtistSlot = guess
         ? { slotId: guess.slotId, confidence: guess.confidence, source: "gemini" }
         : { slotId: fallbackSlot(artist.name), confidence: 0.05, source: "fallback" };
@@ -255,5 +275,32 @@ export async function resolveArtistSlots(
     }
   }
 
-  return { bySlotId, geminiLimited };
+  return { bySlotId, geminiLimited, geminiError };
+}
+
+/** Resolves every artist in `artists` to a roster slot, reading/writing the
+ * D1 caches described above. `ip` is only used for the Gemini daily cap
+ * bookkeeping (worker/rate-limit.ts) — never sent to Gemini itself.
+ *
+ * Guaranteed never to throw: Gemini call failures are already caught inside
+ * resolveArtistSlotsInner (see `geminiError`/`geminiLimited`); this outer
+ * try/catch is defense-in-depth against anything else unexpected (e.g. a D1
+ * hiccup), so worker/village.ts can always build *some* village — every
+ * artist just gets the same deterministic fallback slot — rather than
+ * failing the whole request. */
+export async function resolveArtistSlots(
+  env: Env,
+  ip: string,
+  artists: TopArtistOut[],
+): Promise<GenreResolutionResult> {
+  try {
+    return await resolveArtistSlotsInner(env, ip, artists);
+  } catch (err) {
+    console.error("[genre-resolution] unexpected failure, using fallback slots for every artist:", err);
+    const bySlotId = new Map<string, ArtistSlot>();
+    for (const artist of artists) {
+      bySlotId.set(artist.id, { slotId: fallbackSlot(artist.name), confidence: 0.05, source: "fallback" });
+    }
+    return { bySlotId, geminiLimited: false, geminiError: errorMessage(err) };
+  }
 }

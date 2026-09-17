@@ -213,3 +213,22 @@
     `activityLevel()`/threshold definition, replacing the copy that used to live in
     `src/sample-data.ts`.
   - `npm run spotify:disconnect` also clears `genre_slot_map` now.
+
+- **Phase 3 fix pass** (post-deploy: `/api/village` returned HTTP 500 / Cloudflare error 1101 for
+  every range, with no useful `wrangler tail` output):
+  - **`worker/gemini.ts` no longer uses the `@google/genai` SDK** — it's a plain `fetch` against the
+    Gemini REST `generateContent` endpoint now. The SDK almost certainly reached for a Node API
+    `workerd` doesn't provide without the `nodejs_compat` compatibility flag; a raw `fetch` has no
+    such runtime-detection surface. The `@google/genai` dependency is removed entirely.
+  - **`worker/genre-resolution.ts`'s `resolveArtistSlots` is now guaranteed to never throw**: each
+    Gemini call is individually try/caught (a failure behaves like a quota-cap fallback — same
+    deterministic, unpersisted "nearest slot" guess — and is reported via the response's new
+    `geminiError`, kept distinct from `geminiLimited`), and the whole function has an outer
+    catch-all as defense in depth so a D1 hiccup mid-resolution still returns a village (every
+    artist just gets the fallback slot) instead of failing the request.
+  - **`worker/village.ts`** now stages token → cache read → Spotify → Gemini → assemble
+    independently: an unexpected failure at any stage returns `{error, where}` as a plain `200`
+    JSON body (with `console.error` server-side) instead of letting an exception reach the runtime,
+    so a failure is diagnosable from the response itself rather than a bare 1101.
+    `worker/index.ts`'s rate-limit check now also fails *open* (logs and lets the request through)
+    if its D1 counter throws, rather than 500ing every route over an abuse-protection hiccup.

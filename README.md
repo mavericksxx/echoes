@@ -206,7 +206,12 @@ remote D1. The site goes back to the **Not connected** state until
   genre string only ever costs one Gemini call, ever. Only artist
   names/genre strings/counts are ever sent to Gemini — never a raw Spotify
   payload, user id, or token (SPEC.md's AI policy). Pinned model:
-  `gemini-3.5-flash-lite`.
+  `gemini-3.5-flash-lite`, called via a plain `fetch` to the REST
+  `generateContent` endpoint (not the `@google/genai` SDK — see CHANGELOG's
+  Phase 3 fix pass). `resolveArtistSlots` never throws: a Gemini call
+  failure degrades to the same deterministic fallback slot as a quota cap
+  and is reported via `/api/village`'s `geminiError` (distinct from
+  `geminiLimited`), so a Gemini outage never breaks the endpoint.
 - **`GET /api/village`** (`worker/village.ts`) — the derived world: every
   roster slot's activity level (dormant/quiet/active/festival, from its
   share of a rank-derived score across up to 50 top artists), share %, and

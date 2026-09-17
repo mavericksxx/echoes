@@ -67,15 +67,40 @@ export type VillagePayload =
           this response — some artists may be using a low-confidence fallback
           slot instead of a real classification. */
       geminiLimited: boolean;
+      /** Set if a Gemini call actually failed (network/HTTP/parse error) —
+          distinct from geminiLimited (a deliberate cap). Some artists may be
+          using a low-confidence fallback slot instead of a real one. */
+      geminiError: string | null;
       cachedAt: string | null;
     };
+
+/** An unexpected failure at some stage of building the village — returned as
+ * a plain 200 JSON error (never a thrown exception reaching the runtime,
+ * which is what turned into a Cloudflare 1101 in production) so it's
+ * diagnosable from the response body alone. */
+export interface VillageErrorPayload {
+  error: string;
+  where: "token" | "spotify" | "assemble";
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 function dormantSlots(): VillageSlot[] {
   return SLOT_IDS.map((slotId) => ({ slotId, activity: activityLevel(0), share: 0, artists: [] }));
 }
 
 function pausedPayload(range: string): VillagePayload {
-  return { connected: true, live: false, range, slots: dormantSlots(), geminiLimited: false, cachedAt: null };
+  return {
+    connected: true,
+    live: false,
+    range,
+    slots: dormantSlots(),
+    geminiLimited: false,
+    geminiError: null,
+    cachedAt: null,
+  };
 }
 
 function cacheKeyFor(range: string): Request {
@@ -165,12 +190,14 @@ export async function handleVillage(request: Request, env: Env): Promise<Respons
   // `ip` here is only for the Gemini daily-cap bookkeeping below.
   const ip = clientIp(request);
 
+  // ---- stage: token ----
   let accessToken: string | null;
   try {
     accessToken = await getAccessToken(env);
   } catch (err) {
     if (err instanceof TokenError) return Response.json(pausedPayload(range));
-    throw err;
+    console.error("[village] token stage failed unexpectedly:", err);
+    return Response.json({ error: errorMessage(err), where: "token" } satisfies VillageErrorPayload);
   }
 
   if (accessToken === null) {
@@ -178,20 +205,40 @@ export async function handleVillage(request: Request, env: Env): Promise<Respons
   }
 
   const cacheKey = cacheKeyFor(range);
-  const cached = await readCache(cacheKey);
-  if (cached) return Response.json(cached);
-
   try {
-    const current = await fetchTopArtists(env, accessToken, range, VILLAGE_ARTISTS_LIMIT);
-    const baseline =
+    const cached = await readCache(cacheKey);
+    if (cached) return Response.json(cached);
+  } catch (err) {
+    // A broken cache read should never block a fresh build below.
+    console.error("[village] cache read failed, rebuilding:", err);
+  }
+
+  // ---- stage: spotify ----
+  let current: TopArtistOut[];
+  let baseline: TopArtistOut[];
+  try {
+    current = await fetchTopArtists(env, accessToken, range, VILLAGE_ARTISTS_LIMIT);
+    baseline =
       range === "long_term" ? current : await fetchTopArtists(env, accessToken, "long_term", VILLAGE_ARTISTS_LIMIT);
+  } catch (err) {
+    if (err instanceof SpotifyRequestError) return Response.json(pausedPayload(range));
+    console.error("[village] spotify stage failed unexpectedly:", err);
+    return Response.json({ error: errorMessage(err), where: "spotify" } satisfies VillageErrorPayload);
+  }
 
-    const union = new Map<string, TopArtistOut>();
-    for (const a of current) union.set(a.id, a);
-    for (const a of baseline) union.set(a.id, a);
+  const union = new Map<string, TopArtistOut>();
+  for (const a of current) union.set(a.id, a);
+  for (const a of baseline) union.set(a.id, a);
 
-    const { bySlotId, geminiLimited } = await resolveArtistSlots(env, ip, Array.from(union.values()));
+  // ---- stage: gemini — resolveArtistSlots is designed to never throw (see
+  // its own doc comment); every artist gets at least a fallback slot even if
+  // Gemini is capped or broken, so the village below is always real Spotify
+  // data, just possibly with lower-confidence slotting. ----
+  const { bySlotId, geminiLimited, geminiError } = await resolveArtistSlots(env, ip, Array.from(union.values()));
+  if (geminiError) console.error("[village] gemini stage degraded:", geminiError);
 
+  // ---- stage: assemble ----
+  try {
     const slots = buildSlots(current, baseline, bySlotId);
     const payload: VillagePayload = {
       connected: true,
@@ -199,12 +246,17 @@ export async function handleVillage(request: Request, env: Env): Promise<Respons
       range,
       slots,
       geminiLimited,
+      geminiError,
       cachedAt: new Date().toISOString(),
     };
-    await writeCache(cacheKey, payload);
+    try {
+      await writeCache(cacheKey, payload);
+    } catch (err) {
+      console.error("[village] cache write failed (response still returned):", err);
+    }
     return Response.json(payload);
   } catch (err) {
-    if (err instanceof SpotifyRequestError) return Response.json(pausedPayload(range));
-    throw err;
+    console.error("[village] assemble stage failed unexpectedly:", err);
+    return Response.json({ error: errorMessage(err), where: "assemble" } satisfies VillageErrorPayload);
   }
 }

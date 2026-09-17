@@ -45,7 +45,10 @@ export default {
             { status: 429, headers: { "Retry-After": String(err.retryAfterSeconds) } },
           );
         }
-        throw err;
+        // Rate limiting itself is abuse protection, not core functionality —
+        // if its D1 counter fails for some unrelated reason, fail *open*
+        // (let the request through) rather than 500ing every route.
+        console.error(`[rate-limit] enforcement failed for ${bucket}, failing open:`, err);
       }
     }
 
