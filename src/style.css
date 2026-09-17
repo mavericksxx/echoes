@@ -18,6 +18,19 @@
   --color-border-strong: rgba(231, 238, 244, 0.22); /* line-strong */
   --color-glass: rgba(18, 26, 36, 0.55);
   --color-glass-border: rgba(231, 238, 244, 0.16);
+  /* Fix pass (2026-09-17): --color-glass alone reads fine for light chrome
+     (topbar, the village caption pill, zoom controls — short text, or none)
+     but washed out completely on the *text-dense* panels (sidebar, top
+     artists) when they float over the bright/high-chroma village map, not
+     just the darker district interiors. This is a denser variant for those
+     two surfaces only — same hue, alpha raised from 0.55 to 0.82 so body
+     text has a legible, stable ground even in a browser with no
+     backdrop-filter support (Firefox's is partial, and an ancestor filter/
+     stacking context can silently disable it) — the tint must carry
+     contrast on its own, blur/saturate are polish on top of that, not the
+     source of it. Do not widen this to the lighter chrome surfaces; that
+     would make them heavy for no readability gain. */
+  --color-glass-panel: rgba(18, 26, 36, 0.82);
   --color-accent: #55c2ce; /* cyan */
   --color-accent-strong: #7ad3dd;
   --color-secondary: #f0a85e; /* amber */
@@ -322,12 +335,15 @@ select {
   max-height: min(70vh, 520px);
   overflow-y: auto;
   padding: var(--space-4);
-  background: var(--color-glass);
+  /* --color-glass-panel (see :root), plus a faint top-down light wash — the
+     diffused-highlight look that reads as glass rather than fog — layered
+     over it as a second background image. */
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 32%), var(--color-glass-panel);
   border: 1px solid var(--color-glass-border);
   border-radius: var(--radius-panel);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  box-shadow: 0 24px 48px -20px rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(30px) saturate(140%);
+  -webkit-backdrop-filter: blur(30px) saturate(140%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 24px 48px -20px rgba(0, 0, 0, 0.65);
 }
 
 .ta-panel-header {
@@ -660,13 +676,16 @@ select {
   z-index: var(--z-sidebar);
   display: flex;
   flex-direction: column;
-  background: var(--color-glass);
+  /* --color-glass-panel + a faint top-down light wash (see .top-artists-panel
+     above, same reasoning: this is the densest body-text surface in the app,
+     sitting directly over the map, so it needs the readable variant). */
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 32%), var(--color-glass-panel);
   border: 1px solid var(--color-glass-border);
   border-top-left-radius: var(--radius-sheet);
   border-top-right-radius: var(--radius-sheet);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
-  box-shadow: 0 -20px 60px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(30px) saturate(140%);
+  -webkit-backdrop-filter: blur(30px) saturate(140%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 -20px 60px rgba(0, 0, 0, 0.5);
   padding: var(--space-2) var(--space-4) calc(var(--space-4) + var(--safe-bottom));
   visibility: hidden;
   opacity: 0;
@@ -1204,7 +1223,10 @@ select {
     left: auto;
     width: var(--sidebar-width);
     border-radius: var(--radius-panel);
-    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55);
+    /* Desktop's own drop-shadow replaces the mobile sheet's (box-shadow
+       doesn't merge across cascaded rules) — keep the same glass top
+       highlight from the base .sidebar rule alongside it. */
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 30px 70px rgba(0, 0, 0, 0.55);
     padding: var(--space-3) var(--space-4) var(--space-4);
   }
 
