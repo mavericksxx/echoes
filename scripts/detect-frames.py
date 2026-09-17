@@ -167,9 +167,29 @@ def overlap_area(a, b):
     return ox * oy
 
 
+
+# How much bigger a "refined" bbox is allowed to be than the rect it started
+# from, as a fraction of the original's area. Legitimate tightening only ever
+# GROWS a rect to pick up a clipped limb/hair/prop tip, so it should stay
+# close to the original size. A much bigger bbox means MERGE_RADIUS's dilation
+# (see its own comment) bridged the real ~2-4px gap to the *next frame* on a
+# tightly-packed sheet, fusing two or three poses into one blob — this is what
+# silently produced the overlapping walk_down rects the sprite-facing-fix pass
+# found on sasuke, gaara, temari and kakashi (a frame's rect ballooning to
+# ~1.7-2.5x, absorbing part of its neighbour). Rejecting oversized candidates
+# here means a future `refine --write` on a tightly-packed sheet fails loudly
+# ("no plausible tight bbox") instead of silently writing a wider, overlapping
+# rect — see cmd_refine's caller for how this surfaces.
+MAX_AREA_GROWTH = 1.6
+
+
 def refine_rect(alpha, rect):
     """Best tight bbox near `rect`, chosen by overlap with the original guess
-    (falls back to nearest-centroid, then largest, if nothing overlaps)."""
+    (falls back to nearest-centroid, then largest, if nothing overlaps).
+    Returns None if nothing plausible is found nearby, OR if the best
+    candidate is implausibly larger than `rect` (see MAX_AREA_GROWTH) —
+    almost always a sign frames were merged across a real inter-frame gap,
+    not a genuinely tighter box."""
     comps = components_in_window(alpha, *rect, margin=SEARCH_MARGIN)
     if not comps:
         return None
@@ -184,7 +204,12 @@ def refine_rect(alpha, rect):
         dist = ((cx - bcx) ** 2 + (cy - bcy) ** 2) ** 0.5
         return (1, -dist)
     best = max(comps, key=score)
-    return best[0]
+    bbox = best[0]
+    orig_area = max(1, (rect[2] - rect[0]) * (rect[3] - rect[1]))
+    bbox_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+    if bbox_area > orig_area * MAX_AREA_GROWTH:
+        return None
+    return bbox
 
 
 def iter_rects(char_def):
@@ -210,7 +235,8 @@ def cmd_refine(args):
             alpha, _ = sheet_alpha(c[sheet_field], assets)
             new_rect = refine_rect(alpha, rect)
             if new_rect is None:
-                print(f"  ! {c['id']}.{label}: no alpha pixels found near {rect}")
+                print(f"  ! {c['id']}.{label}: no plausible tight bbox found near {rect} "
+                      f"(no alpha pixels, or the only candidate looked merged with a neighbour)")
                 continue
             if list(new_rect) != list(rect):
                 edge_delta = max(abs(a - b) for a, b in zip(new_rect, rect))

@@ -382,17 +382,30 @@ const KNOWN_DUPLICATE_DIRECTIONS = {
   tenten: [["walk_down", "walk_up"]],
 };
 
-function checkDirectionsDistinct(errors, warnings, id, png, anims) {
+// "left" <-> "right" so a character whose data mirrors one direction from
+// the other (mirrorDirs) doesn't get flagged for having identical rects —
+// that's the point, the flip happens at render time (see src/render.ts's
+// drawNpc). "up"/"down" mirroring isn't meaningful (a sideways flip can't
+// turn a front pose into a back one), so it's intentionally not handled here.
+const OPPOSITE_DIR = { walk_left: "walk_right", walk_right: "walk_left" };
+
+function checkDirectionsDistinct(errors, warnings, id, png, anims, mirrorDirs) {
   const dirs = ["walk_down", "walk_left", "walk_right", "walk_up"];
   const known = KNOWN_DUPLICATE_DIRECTIONS[id] || [];
+  const mirrored = (mirrorDirs || []).map((d) => `walk_${d}`);
   for (let i = 0; i < dirs.length; i++) {
     for (let j = i + 1; j < dirs.length; j++) {
       const a = dirs[i];
       const b = dirs[j];
       if (!animPixelsIdentical(png, anims[a], anims[b])) continue;
       const isKnown = known.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
+      const isMirror =
+        (mirrored.includes(a) && OPPOSITE_DIR[a] === b) ||
+        (mirrored.includes(b) && OPPOSITE_DIR[b] === a);
       const msg = `${id}: ${a} and ${b} render identical pixels (not a distinct direction)`;
-      if (isKnown) {
+      if (isMirror) {
+        warnings.push(`${msg} — expected, mirrorDirs flips one from the other at render time`);
+      } else if (isKnown) {
         warnings.push(`${msg} — known limitation, no back-facing art in this rip`);
       } else {
         errors.push(msg);
@@ -437,7 +450,7 @@ function checkLocalSpriteContent(characters, assets) {
       checks++;
       checkFrameContent(errors, warnings, `${c.id}.idle`, sheetPng, c.idle);
       checks++;
-      checkDirectionsDistinct(errors, warnings, c.id, sheetPng, c.anims);
+      checkDirectionsDistinct(errors, warnings, c.id, sheetPng, c.anims, c.mirrorDirs);
     }
 
     const battlePng = loadSheet(c.battleSheet);
