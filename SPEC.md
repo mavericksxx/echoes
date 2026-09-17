@@ -19,7 +19,7 @@ See `IDEA.md` for the concept. This spec breaks the build into **vertical slices
 - **Frontend:** TypeScript + Vite, PixiJS for tile/sprite rendering.
 - **Backend:** Cloudflare Worker (LLM proxy, agent runs, cron) + D1 (SQLite) for history and cached AI output.
 - **Auth:** Spotify Authorization Code + PKCE.
-- **LLM:** Gemini via `@google/genai` in the Worker (same setup as the portfolio site's Cloudflare backend). Flash-Lite for bulk tagging/captions, Flash for writing, Flash/Pro with function calling for agents. Pin exact model IDs at build time.
+- **LLM:** Gemini via `@google/genai` in the Worker (same setup as the portfolio site's Cloudflare backend). **Flash-Lite everywhere by default** (user decision 2026-09-17: far higher free-tier daily request limits, same as their other projects) — tagging, captions, weekly brief, and agent tool-calling. Only escalate a specific feature to Flash if Flash-Lite demonstrably can't do it, and say why. Pin exact model IDs at build time.
 
 ## Art direction (decided 2026-09-15)
 - **Naruto: Path of the Ninja 1/2 (DS) sprites** — chosen over free packs (LPC, Ninja Adventure, Kenney) after side-by-side demos.
