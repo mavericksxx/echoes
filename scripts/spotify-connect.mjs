@@ -120,6 +120,12 @@ ON CONFLICT(id) DO UPDATE SET
   scope = excluded.scope,
   updated_at = excluded.updated_at;
 `;
+  if (process.argv.includes("--print-sql")) {
+    const out = path.join(os.tmpdir(), "echoes-token.sql");
+    await writeFile(out, sql, "utf8");
+    console.log(`SQL written to ${out}`);
+    return;
+  }
   const sqlFile = path.join(os.tmpdir(), `echoes-spotify-token-${Date.now()}.sql`);
   await writeFile(sqlFile, sql, "utf8");
   try {
