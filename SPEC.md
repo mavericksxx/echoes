@@ -70,7 +70,8 @@ Status legend: **[decided]** locked in · **[default]** proposed, revisit if nee
 - **[decided]** Most listeners concentrate in ~4 slots, so most districts will usually be dormant. Accepted: the whole-village view highlights active districts; dormant ones stay visible but quiet.
 
 ### Where artists appear
-- **[open]** Characters are genres, so artists need a representation. Candidates: (a) signs/banners on district buildings named after top artists, (b) "now playing" caption + info card list, (c) small generic background NPCs (Konoha villager sprites) per top artist. Naruto rips have no standalone building sprites, so (a) means labeling existing map buildings. Default: (b) from Phase 3; evaluate (a)/(c) in Phase 7.
+- **[decided 2026-09-17]** Artists appear as **resident NPCs inside their genre's district** (Phase 2.5), listed in the sidebar too. Superseded option list below kept for context.
+- **[superseded]** Characters are genres, so artists need a representation. Candidates: (a) signs/banners on district buildings named after top artists, (b) "now playing" caption + info card list, (c) small generic background NPCs (Konoha villager sprites) per top artist. Naruto rips have no standalone building sprites, so (a) means labeling existing map buildings. Default: (b) from Phase 3; evaluate (a)/(c) in Phase 7.
 
 ### Empty & edge states
 - **[default]** New/low-history account → build the town from `short_term` top artists and show an onboarding note; nothing playing → idle town, polling slows; private session / no data returned → "listening privately" state; podcasts/audiobooks → ignored; artist with no genre → Last.fm → Gemini inference → nearest slot; Spotify down or token revoked → last known town + "live paused" state for visitors, reconnect notice for the owner only.
@@ -111,11 +112,22 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 
 **You'll see:** log in → your real top artists listed inside the village UI.
 
+### Phase 2.5 — One village, doors into districts
+- Crop the unused interior rips (`raw/konoha_shops_589804.png` 6 shops, `raw/konoha_houses_589805.png` 6 houses) so the 10 recolored slots get **real interiors** instead of a tinted copy of the town map.
+- Scene stack + fade transition: village map ⇄ district map. Entering is explicit — an "Enter district" button in the sidebar header, never a bare tap. Back button, Esc, browser back (history.pushState), and zoom-out below min all exit.
+- Each slot gets a `door` position on the village map (on/near the matching building where one exists).
+- Resident NPCs inside a district: the genre character as leader + 3–4 residents from `raw/hiddenleafninja_79019.png` (4 generic rigs, 41×41 grid, key color 128,184,248), name label via the existing caption layer. Tapping a resident opens the sidebar for that artist. Sample data for now.
+- Add horizontal sprite mirroring to the renderer (generic rigs have only one side pose).
+- Remove the Village / Districts / Roster view switch.
+- **Check early:** one shop interior + leader + 4 labeled residents at 390px. If cramped, use the larger house interiors for active slots or cap residents at 3.
+
+**You'll see:** one village you move through — walk up to a door, enter a genre's place, and find that genre's artists living there.
+
 ### Phase 3 — Your genres become characters
 - Genre gap-fill: Spotify genres → Last.fm tags.
 - Gemini call (Flash-Lite) mapping genres/tags → the 17 slots, cached in D1 `genre_slot_map`; Gemini inference for artists with no tags.
 - Rate limits land with the first Gemini call: per-IP on every endpoint, Gemini per-IP + global daily cap, Spotify-backed endpoints served from cache.
-- Replace sample data: each slot's **activity level** from your listening share; info card lists your top artists per slot.
+- Replace sample data: each slot's **activity level** from your listening share; your top artists per slot become that district's residents and fill the sidebar.
 
 **You'll see:** the village reflects your actual taste — busy districts for what you play, quiet ones for what you don't.
 
