@@ -119,6 +119,7 @@ const villageNpcs: Npc[] = SLOTS.map((slot) => {
 let residentsBySlot = new Map<string, Resident[]>();
 let allResidents: Resident[] = [];
 let residentArtistByNpc = new Map<Npc, string>();
+let residentArtistIdByNpc = new Map<Npc, string | undefined>();
 let residentFadedByNpc = new Map<Npc, boolean>();
 
 function getNowPlayingFor(slotId: string): NowPlayingInfo | null {
@@ -486,7 +487,11 @@ function openSidebarForNpc(npc: Npc): void {
   const slot = getSlot(npc.district.id);
   const artist = residentArtistByNpc.get(npc);
   if (artist) {
-    openSidebar(slot, { section: "songs", filterArtist: artist, showEnter: mode === "village" });
+    // Prefer the artist id (real data) over the bare name so the Songs tab
+    // filter matches by artistIds membership, not exact-string equality —
+    // see src/sidebar.ts's doc comment on the multi-artist-track bug.
+    const artistId = residentArtistIdByNpc.get(npc);
+    openSidebar(slot, { section: "songs", filterArtist: artistId ?? artist, showEnter: mode === "village" });
   } else {
     openSidebar(slot, { showEnter: mode === "village" });
   }
@@ -777,6 +782,7 @@ Promise.all([loadImages(urlsByKey), initListeningSource()]).then(([loaded]) => {
   residentsBySlot = buildResidents(images);
   allResidents = Array.from(residentsBySlot.values()).flat();
   residentArtistByNpc = new Map(allResidents.map((r) => [r.npc, r.artistName]));
+  residentArtistIdByNpc = new Map(allResidents.map((r) => [r.npc, r.artistId]));
   residentFadedByNpc = new Map(allResidents.map((r) => [r.npc, r.faded]));
   applyVillageScene();
   requestAnimationFrame(frame);

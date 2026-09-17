@@ -6,7 +6,7 @@ See `IDEA.md` for the concept. This spec breaks the build into **vertical slices
 
 ## Spotify API constraints (researched 2026-09)
 - **Feb 2026 Dev Mode rules:** app owner needs active Premium; max 5 users. Owner has Premium Student (confirmed 2026-09-15).
-- **Storage:** no databases of Spotify content. Store track/artist **IDs + derived counts** only; fetch names/art live (batch `/tracks`) when rendering. Delete everything within 5 days of disconnect.
+- **Storage:** no databases of Spotify content. Store track/artist **IDs + derived counts** only; names/art ride live, inline in the derived `/api/village` payload (built fresh from `/me/top/artists` and `/me/top/tracks` each cache miss) and live only in that 30-minute `caches.default` entry — never written to D1. **Correction (Phase 3.5, 2026-09-17):** the original plan here ("fetch names/art live via the batch `/tracks` endpoint") is stale — Spotify removed the batch `GET /tracks`, `/artists`, and `/albums` endpoints in Feb 2026. See this file's Phase 3.5 section. Delete everything within 5 days of disconnect.
 - **Dev Mode forever:** max 5 allowlisted users; Extended Quota needs 250k+ MAU. Fine for personal use; public sharing = images/read-only views, not logins.
 - **Redirect URI:** `localhost` is banned — use `http://127.0.0.1:PORT/callback`.
 - **Artist `genres` is deprecated and often empty.** Genre source = Spotify genres when present → Last.fm/MusicBrainz tags → LLM inference from artist name. Clustering runs on this merged tag set.
@@ -142,6 +142,42 @@ Each phase is sized to be built in **one prompt**: one visible outcome, a handfu
 - **The room says what the panel can't:** resident placement encodes play count (most-played stands centre/front, rarer ones at the edges), a faded/absent resident for an artist you've stopped playing, and the room's light/props/crowd follow the activity level. Entering a district must tell you something at a glance, not just re-show the sidebar.
 
 **You'll see:** the village reflects your actual taste — busy districts for what you play, quiet ones for what you don't.
+
+### Phase 3.5 — Songs tab goes real (built 2026-09-17)
+- **Why a half-phase:** Phase 3 shipped Overview/Artists on real data but left Songs on
+  `src/sample-data.ts` (SPEC.md's Phase 3 bullet explicitly deferred it — "tracks are a later
+  phase"). This closes that gap without waiting for a full phase slot.
+- `worker/tracks.ts` fetches **only** `GET /me/top/tracks?limit=50&time_range=<range>` through the
+  existing rate-aware `spotifyGet`. No `/me/player/recently-played` (Phase 8 work) and no batch
+  `GET /tracks`/`/artists`/`/albums` (removed by Spotify Feb 2026 — see "Spotify API constraints").
+- **Bucketing, not classification:** a track is placed in a slot only if its *primary* artist
+  already has a resolved slot from the Phase 3 artist pipeline (the current-range top 50 ∪
+  long_term baseline union `worker/village.ts` already resolves). A track whose primary artist
+  isn't a known resident is dropped — never a fresh Gemini call, never a new `artist_cache` row, so
+  this costs **zero** additional AI usage. A resident with no top-50 track just gets an empty Songs
+  tab ("No top tracks in this range"), never a widened fetch.
+- `/api/village`'s existing payload grows a 4th field per slot, `songs[]`, built in a 4th
+  `handleVillage` stage with its own try/catch: a top-tracks failure sets a top-level
+  `songsLive: false` and leaves every slot's `songs: []`, but still returns the *real* village
+  (artists/activity) rather than falling back to `pausedPayload` — the village is the product,
+  songs are one tab. No new endpoint (`getSongs()` is called synchronously during DOM build) and no
+  new D1 table — track titles/art are Spotify Content and live only in the existing 30-minute
+  `caches.default` village entry.
+- **No fabricated play counts.** Spotify's top-tracks endpoint gives rank, not plays or a
+  timestamp — `Song.plays` and `Song.lastPlayed` are now optional, the Songs tab hides both when
+  absent, and the default sort is relabeled "Top tracks" (rank order) with "Recently played" pulled
+  from the sort options entirely when live (not just a no-op).
+- **Bug fixed in the same change:** the Songs tab's artist filter compared `song.artist` (a
+  display string, comma-joined for features) by exact equality, so a resident-tap filter would make
+  every song where that artist is a feature (not the primary credit) silently vanish. Real songs now
+  carry `artistIds: string[]` (every artist on the track) and the filter matches by membership.
+- Cover art follows the same Phase 2 rules (hotlinked `i.scdn.co`, unmodified, 4px/8px corners,
+  each row links to `external_urls.spotify`), now with a real CSP (`img-src` on the Worker's HTML
+  response) and the official Spotify logo asset (`public/brand/spotify-logo-white.png`, downloaded
+  from Spotify's press asset bucket) in the sidebar footer, ≥70px wide.
+
+**You'll see:** the Songs tab lists your actual top tracks per district, with real cover art, ranked
+instead of a fake play count, and tapping a featured artist's row no longer empties the list.
 
 ### Phase 4 — Characters walk properly
 - Walkability grid per map + A* pathfinding; spawn points validated in the data check.

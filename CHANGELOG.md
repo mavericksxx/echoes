@@ -263,3 +263,36 @@
   - Confirmed (by code trace, not just intent): a `"fallback"`-sourced slot is never written to
     `artist_cache` or `genre_slot_map` — every write site is gated on `slot.source !== "fallback"`,
     and this has been true since the very first Phase 3 commit — so no bad rows exist to clean up.
+
+- **Phase 3.5 — Songs tab goes real:**
+  - **`worker/tracks.ts`** (new): fetches `GET /me/top/tracks` (limit 50, current range) through the
+    existing rate-aware `spotifyGet` — no `/me/player/recently-played` (Phase 8) and no batch
+    `GET /tracks`/`/artists`/`/albums` (Spotify removed all three in Feb 2026). Buckets each track
+    into a slot by its *primary* artist's already-resolved slot from the Phase 3 artist union — a
+    track whose primary artist isn't a known resident is dropped, never guessed at, so this is zero
+    additional Gemini calls and zero new `artist_cache` rows.
+  - **`worker/village.ts`** grows a 4th `handleVillage` stage ("tracks"), with its own try/catch:
+    `slots[].songs` and a top-level `songsLive` flag are added to the payload; a top-tracks failure
+    sets `songsLive: false` and leaves every slot's `songs: []` but still returns the real
+    artist/activity data rather than falling back to `pausedPayload`. No new endpoint, no new D1
+    table — songs live only in the existing 30-minute `caches.default` village entry.
+  - **`src/sample-data.ts`'s `Song`** type gains optional `artistIds`/`rank` and makes `plays`/
+    `lastPlayed` optional (Spotify's top-tracks endpoint gives neither play counts nor timestamps) —
+    audited every reader (`slot()`'s now-playing pick, `totalPlays`, `topArtists`, and every
+    `src/sidebar.ts` render path) so none of them silently produce `undefined`/`NaN`.
+  - **`src/listening-source.ts`'s `getSongs()`** now returns real per-slot tracks when
+    connected+live, replacing the "Songs stays sample regardless" doc comment/behavior from Phase 3.
+  - **Bug fix**: `src/sidebar.ts`'s Songs artist filter compared `song.artist` (a display string,
+    comma-joined for features) by exact equality, so tapping a resident who's featured — not
+    primary-credited — on a track made that row silently vanish from the filtered view. Real songs
+    now carry `artistIds: string[]`; the filter matches by membership (`matchesArtistFilter`), and
+    `main.ts`/`src/residents.ts` now thread an artist *id* through the resident-tap → Songs-filter
+    path instead of a bare name.
+  - Sort options relabel to "Top tracks" (rank order) and drop "Recently played" entirely when live
+    (no timestamps to sort by) instead of leaving it as a no-op; the plays/rank badge and the
+    "— time ago" row suffix hide themselves when the underlying data isn't there.
+  - Added a `Content-Security-Policy: img-src 'self' https://i.scdn.co` header on the Worker's HTML
+    response (`worker/index.ts`) — none existed before; scoped to `img-src` only so it can't regress
+    scripts/styles/fonts that never had a CSP. Added the official Spotify logo
+    (`public/brand/spotify-logo-white.png`, downloaded from Spotify's press asset bucket) once in the
+    sidebar footer, ≥70px wide, per SPEC.md's cover-art attribution rules.

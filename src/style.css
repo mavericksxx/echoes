@@ -820,6 +820,16 @@ select {
   flex: none;
 }
 
+/* Official Spotify logo (see src/sidebar.ts) — kept at its source aspect
+   ratio, comfortably over Spotify's own minimum legible width. */
+.sidebar__spotify-logo {
+  display: block;
+  width: 78px;
+  height: auto;
+  flex: none;
+  opacity: 0.9;
+}
+
 /* ---- tablist ---- */
 .sidebar-tablist {
   flex: none;

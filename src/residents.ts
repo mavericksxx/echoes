@@ -38,6 +38,10 @@ const RESIDENT_TINTS = ["hue-rotate(14deg) saturate(1.1)", "hue-rotate(-16deg) b
 export interface Resident {
   npc: Npc;
   artistName: string;
+  /** Real data only — used to open the sidebar's Songs tab filtered to this
+   * artist by id (see main.ts's openSidebarForNpc). Filtering by name alone
+   * breaks on multi-artist tracks — see src/sidebar.ts. */
+  artistId?: string;
   /** An artist who dropped out of the current range (see /api/village's
    * "faded" artists) — rendered dimmed and stationary, not wandering. */
   faded: boolean;
@@ -132,7 +136,7 @@ function buildResidentsForDistrict(district: DistrictDef): Resident[] {
           clampPoint(home.x - 6, home.y + 10, w, h),
         ];
     const npc = makeNpc(character, district, home, patrol);
-    return { npc, artistName: artist.name, faded };
+    return { npc, artistName: artist.name, artistId: artist.id, faded };
   });
 }
 

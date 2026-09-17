@@ -21,12 +21,21 @@
 // anyone who used to place in a slot but is missing from the current range's
 // list; those render with score 0 / rank null / faded true instead of being
 // dropped entirely.
+//
+// Phase 3.5 adds a 4th stage, "tracks": /me/top/tracks for the same range,
+// bucketed into slots by primary-artist membership in the artist union
+// already resolved above (see worker/tracks.ts's doc comment for why this
+// costs zero extra Gemini calls). It has its own try/catch, separate from
+// "assemble" below — a top-tracks failure degrades only the Songs tab
+// (`songsLive: false`, every slot's `songs` stays `[]`) rather than paging
+// back to pausedPayload and losing the whole village.
 
 import type { Env } from "./index";
 import { getAccessToken, TokenError } from "./token";
 import { spotifyGet, SpotifyRequestError } from "./spotify-fetch";
 import { deriveArtists, VALID_RANGES, type SpotifyTopArtistsResponse, type TopArtistOut } from "./top-artists";
 import { resolveArtistSlots } from "./genre-resolution";
+import { fetchTopTracks, bucketTracksBySlot, type SlottedSong } from "./tracks";
 import { clientIp } from "./rate-limit";
 import { activityLevel, type ActivityLevel } from "../shared/activity";
 import { SLOTS } from "../data/loader";
@@ -47,6 +56,13 @@ export interface VillageArtist {
   faded: boolean;
 }
 
+/** A song alias for the /api/village payload — see worker/tracks.ts's
+ * SlottedSong (id/title/artist/artistIds/album/coverUrl/spotifyUrl/rank). No
+ * play count or timestamp: Spotify's top-tracks endpoint gives neither (see
+ * SPEC.md and src/sample-data.ts's Song type, which makes both optional for
+ * exactly this reason). */
+export type VillageSong = SlottedSong;
+
 export interface VillageSlot {
   slotId: string;
   activity: ActivityLevel;
@@ -54,6 +70,10 @@ export interface VillageSlot {
   share: number;
   /** Highest score first; faded artists (score 0) last. */
   artists: VillageArtist[];
+  /** This slot's top tracks, ranked (Spotify order). Empty if songsLive is
+   * false (tracks stage failed) or none of this slot's residents have a
+   * top-50 track this range — never widened to a broader fetch to fill it. */
+  songs: VillageSong[];
 }
 
 export type VillagePayload =
@@ -71,6 +91,10 @@ export type VillagePayload =
           distinct from geminiLimited (a deliberate cap). Some artists may be
           using a low-confidence fallback slot instead of a real one. */
       geminiError: string | null;
+      /** False if the tracks stage (Phase 3.5) failed — every slot's
+       * `songs` is `[]` in that case, distinct from a slot that's genuinely
+       * empty (no top-50 track for its residents this range). */
+      songsLive: boolean;
       cachedAt: string | null;
     };
 
@@ -88,7 +112,7 @@ function errorMessage(err: unknown): string {
 }
 
 function dormantSlots(): VillageSlot[] {
-  return SLOT_IDS.map((slotId) => ({ slotId, activity: activityLevel(0), share: 0, artists: [] }));
+  return SLOT_IDS.map((slotId) => ({ slotId, activity: activityLevel(0), share: 0, artists: [], songs: [] }));
 }
 
 function pausedPayload(range: string): VillagePayload {
@@ -99,6 +123,7 @@ function pausedPayload(range: string): VillagePayload {
     slots: dormantSlots(),
     geminiLimited: false,
     geminiError: null,
+    songsLive: false,
     cachedAt: null,
   };
 }
@@ -174,7 +199,9 @@ function buildSlots(
   return SLOT_IDS.map((slotId) => {
     const artists = (bySlot.get(slotId) ?? []).sort((a, b) => b.score - a.score);
     const share = totalRawScore > 0 ? (slotRawScore.get(slotId) ?? 0) / totalRawScore : 0;
-    return { slotId, activity: activityLevel(share), share, artists };
+    // songs is filled in by handleVillage's separate tracks stage below —
+    // buildSlots only knows about artists.
+    return { slotId, activity: activityLevel(share), share, artists, songs: [] };
   });
 }
 
@@ -238,25 +265,42 @@ export async function handleVillage(request: Request, env: Env): Promise<Respons
   if (geminiError) console.error("[village] gemini stage degraded:", geminiError);
 
   // ---- stage: assemble ----
+  let payload: VillagePayload;
   try {
     const slots = buildSlots(current, baseline, bySlotId);
-    const payload: VillagePayload = {
+    payload = {
       connected: true,
       live: true,
       range,
       slots,
       geminiLimited,
       geminiError,
+      songsLive: true, // tentative — the tracks stage below may flip this
       cachedAt: new Date().toISOString(),
     };
-    try {
-      await writeCache(cacheKey, payload);
-    } catch (err) {
-      console.error("[village] cache write failed (response still returned):", err);
-    }
-    return Response.json(payload);
   } catch (err) {
     console.error("[village] assemble stage failed unexpectedly:", err);
     return Response.json({ error: errorMessage(err), where: "assemble" } satisfies VillageErrorPayload);
   }
+
+  // ---- stage: tracks (Phase 3.5) — its own try/catch, deliberately outside
+  // "assemble": a failure here must never fall back to pausedPayload (that
+  // would throw away real artist/activity data over a Songs-tab problem).
+  // It degrades to songsLive: false with every slot's songs already [] from
+  // buildSlots instead. ----
+  try {
+    const tracks = await fetchTopTracks(env, accessToken, range);
+    const songsBySlot = bucketTracksBySlot(tracks, bySlotId);
+    payload.slots = payload.slots.map((slot) => ({ ...slot, songs: songsBySlot.get(slot.slotId) ?? [] }));
+  } catch (err) {
+    console.error("[village] tracks stage failed, songs disabled for this response:", err);
+    payload.songsLive = false;
+  }
+
+  try {
+    await writeCache(cacheKey, payload);
+  } catch (err) {
+    console.error("[village] cache write failed (response still returned):", err);
+  }
+  return Response.json(payload);
 }

@@ -3,7 +3,9 @@
 // rate-aware fetch wrapper (spotify-fetch.ts), and /api/top-artists
 // (top-artists.ts). Phase 3 adds /api/village (village.ts, genre resolution
 // via Gemini) and per-IP rate limiting (rate-limit.ts), applied here to
-// every /api/* route before it's dispatched.
+// every /api/* route before it's dispatched. Phase 3.5 adds real top tracks
+// to /api/village (worker/tracks.ts) and, since the sidebar now hotlinks
+// Spotify album art, a CSP on the HTML shell response below.
 
 import { handleTopArtists } from "./top-artists";
 import { handleVillage } from "./village";
@@ -64,6 +66,22 @@ export default {
       return handleVillage(request, env);
     }
 
-    return env.ASSETS.fetch(request);
+    const assetResponse = await env.ASSETS.fetch(request);
+    // CSP scoped to img-src only (Phase 3.5): the sidebar now hotlinks real
+    // Spotify album/artist art from i.scdn.co (SPEC.md's cover-art rules —
+    // hotlinked, never re-hosted), plus every other directive left
+    // unspecified so this can't regress scripts/styles/fonts (Google Fonts,
+    // the Vite module bundle, etc.) that never had a CSP to begin with.
+    // Only applied to the HTML shell, not JS/CSS/asset responses.
+    if (assetResponse.headers.get("Content-Type")?.includes("text/html")) {
+      const headers = new Headers(assetResponse.headers);
+      headers.set("Content-Security-Policy", "img-src 'self' https://i.scdn.co");
+      return new Response(assetResponse.body, {
+        status: assetResponse.status,
+        statusText: assetResponse.statusText,
+        headers,
+      });
+    }
+    return assetResponse;
   },
 } satisfies ExportedHandler<Env>;

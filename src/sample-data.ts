@@ -11,10 +11,23 @@ export interface Song {
   id: string;
   title: string;
   artist: string;
+  /** Real data only (Phase 3.5) — every artist id on the track, matching
+   * `artist`'s comma-joined order; [0] is primary. Used to filter the Songs
+   * tab by artist membership (a feature can't be matched by exact string
+   * equality on `artist` — see src/sidebar.ts). Sample rows have none. */
+  artistIds?: string[];
   album: string;
-  plays: number;
-  /** ISO timestamp. Sample data uses a fixed reference "now" so output is deterministic. */
-  lastPlayed: string;
+  /** Sample data only — Spotify's top-tracks endpoint gives no play counts,
+   * only rank (see the "Spotify gives no play counts, only rank" comment in
+   * src/listening-source.ts, made for artists first and now for songs too). */
+  plays?: number;
+  /** ISO timestamp. Sample data only, using a fixed reference "now" so
+   * output is deterministic — Spotify's top-tracks endpoint gives no
+   * timestamp either. */
+  lastPlayed?: string;
+  /** Real data only (Phase 3.5) — this track's 1-based rank within its
+   * slot's top-tracks list. */
+  rank?: number;
   /** Phase 2 fills this with real Spotify artwork; sample rows have none. */
   coverUrl?: string;
   /** Phase 2 fills this with the track's Spotify URL; sample rows aren't links. */
@@ -44,8 +57,11 @@ function song(title: string, artist: string, album: string, plays: number, daysA
 }
 
 function slot(slotId: string, playShare: number, songs: Song[]): SlotListening {
+  // `plays` is optional on Song (real data has none — see the interface's
+  // doc comment), but every sample song is built via song() above, which
+  // always supplies one; the `?? 0` only guards the type, not real data here.
   const nowPlayingSongId = songs.length
-    ? [...songs].sort((a, b) => b.plays - a.plays)[0]!.id
+    ? [...songs].sort((a, b) => (b.plays ?? 0) - (a.plays ?? 0))[0]!.id
     : null;
   return { slotId, playShare, songs, nowPlayingSongId };
 }
@@ -147,7 +163,7 @@ export function getListening(slotId: string): SlotListening | undefined {
 
 export function totalPlays(listening: SlotListening | undefined): number {
   if (!listening) return 0;
-  return listening.songs.reduce((sum, s) => sum + s.plays, 0);
+  return listening.songs.reduce((sum, s) => sum + (s.plays ?? 0), 0);
 }
 
 export interface ArtistTotal {
@@ -160,7 +176,7 @@ export function topArtists(listening: SlotListening | undefined): ArtistTotal[] 
   if (!listening) return [];
   const byArtist = new Map<string, number>();
   for (const s of listening.songs) {
-    byArtist.set(s.artist, (byArtist.get(s.artist) ?? 0) + s.plays);
+    byArtist.set(s.artist, (byArtist.get(s.artist) ?? 0) + (s.plays ?? 0));
   }
   return Array.from(byArtist, ([name, plays]) => ({ name, plays })).sort(
     (a, b) => b.plays - a.plays,

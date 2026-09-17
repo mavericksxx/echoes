@@ -3,13 +3,14 @@
 // "replace sample data when connected" rule lives, so main.ts/residents.ts/
 // sidebar.ts don't each need their own connected/live branching.
 //
-// Split deliberately by *tab*, not just "connected or not": Overview and
-// Artists switch to real artists/activity once connected+live, but Songs
-// stays on sample data regardless (no per-track fetch yet — SPEC.md's Phase
-// 3 bullet explicitly allows this; tracks are a later phase), and "now
-// playing" only ever comes from the sample data (real currently-playing
-// polling is Phase 5), so it's suppressed once real data is driving the
-// district instead of pretending an old sample track is still playing.
+// Split deliberately by *tab*, not just "connected or not": Overview,
+// Artists, and (as of Phase 3.5) Songs all switch to real data once
+// connected+live — /api/village's `slots[].songs` are real top tracks,
+// bucketed server-side by primary-artist membership (see worker/tracks.ts).
+// "Now playing" is the one exception: it only ever comes from the sample
+// data (real currently-playing polling is Phase 5), so it's suppressed once
+// real data is driving the district instead of pretending an old sample
+// track is still playing.
 
 import { activityLevel, type ActivityLevel } from "../shared/activity";
 import { getListening, nowPlayingSong, totalPlays, topArtists as sampleTopArtists, type Song } from "./sample-data";
@@ -34,16 +35,42 @@ export interface VillageArtistIn {
   faded: boolean;
 }
 
+/** Mirrors worker/village.ts's VillageSong (worker/tracks.ts's SlottedSong):
+ * a real top track, no play count or timestamp (Spotify's top-tracks
+ * endpoint gives neither) — see src/sample-data.ts's Song, which makes both
+ * optional for exactly this reason. */
+export interface VillageSongIn {
+  id: string;
+  title: string;
+  artist: string;
+  artistIds: string[];
+  album: string;
+  coverUrl: string | null;
+  spotifyUrl: string;
+  rank: number;
+}
+
 export interface VillageSlotIn {
   slotId: string;
   activity: ActivityLevel;
   share: number;
   artists: VillageArtistIn[];
+  songs: VillageSongIn[];
 }
 
 export type VillagePayload =
   | { connected: false }
-  | { connected: true; live: boolean; range: string; slots: VillageSlotIn[]; geminiLimited: boolean };
+  | {
+      connected: true;
+      live: boolean;
+      range: string;
+      slots: VillageSlotIn[];
+      geminiLimited: boolean;
+      /** False if the tracks stage failed server-side — every slot's
+       * `songs` is `[]` in that case, distinct from a slot that's genuinely
+       * empty this range. */
+      songsLive: boolean;
+    };
 
 let village: VillagePayload = { connected: false };
 let villageBySlot = new Map<string, VillageSlotIn>();
@@ -82,6 +109,13 @@ export function villageGeminiLimited(): boolean {
   return village.connected && village.geminiLimited;
 }
 
+/** True once connected+live, unless the tracks stage itself failed
+ * server-side — distinguishes "the Songs tab is genuinely empty" from
+ * "song data didn't load" so the sidebar can say which. */
+export function villageSongsLive(): boolean {
+  return isVillageLive() && village.connected && village.songsLive;
+}
+
 /** Top artists for a slot: real (ranked, capped only by what /api/village
  * returned) when connected+live, else the sample data's play-count ranking. */
 export function getArtists(slotId: string): ArtistEntry[] {
@@ -113,9 +147,24 @@ export function getActivity(slotId: string): Activity {
   return { level: activityLevel(share), share };
 }
 
-/** Songs stay sample-only for every district regardless of connection state
- * — see this module's doc comment. */
+/** Real top tracks for a slot (Phase 3.5) when connected+live, else the
+ * sample data's fixed song list. A live but empty result can mean either
+ * "no top-50 track this range" or "the tracks stage failed" — callers that
+ * need to tell those apart use villageSongsLive() too (see src/sidebar.ts). */
 export function getSongs(slotId: string): Song[] {
+  if (isVillageLive()) {
+    const slot = villageBySlot.get(slotId);
+    return (slot?.songs ?? []).map((s) => ({
+      id: s.id,
+      title: s.title,
+      artist: s.artist,
+      artistIds: s.artistIds,
+      album: s.album,
+      rank: s.rank,
+      coverUrl: s.coverUrl ?? undefined,
+      spotifyUrl: s.spotifyUrl,
+    }));
+  }
   return getListening(slotId)?.songs ?? [];
 }
 

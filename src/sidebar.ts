@@ -16,6 +16,7 @@ import {
   getSamplePlaysLogged,
   getSongs,
   isVillageLive,
+  villageSongsLive,
   type ArtistEntry,
 } from "./listening-source";
 import { coverPlaceholderGradient } from "./cover-art";
@@ -50,7 +51,9 @@ interface SidebarHooks {
 export interface OpenSidebarOptions {
   /** Jump straight to this section (e.g. "songs") instead of the default. */
   section?: string;
-  /** Pre-filter the Songs tab to this artist (tapping a resident). */
+  /** Pre-filter the Songs tab to this artist (tapping a resident) — an
+   * artist id when one's available (real data), else the bare display name
+   * (sample data). See matchesArtistFilter() below. */
   filterArtist?: string;
   /** Show the "Enter district" button — true only when opened from the village. */
   showEnter?: boolean;
@@ -89,6 +92,20 @@ function fmtRelative(iso: string): string {
   return `${months} month${months > 1 ? "s" : ""} ago`;
 }
 
+/** Songs Artist filter matching: real tracks carry `artistIds` (every artist
+ * on the track, features included), so a filter set from an artist row/
+ * resident tap (an id) matches by membership rather than exact equality on
+ * `artist`'s comma-joined display string — a track like "Kendrick Lamar,
+ * SZA" would never equal the filter "Kendrick Lamar" and silently vanish
+ * from the filtered view otherwise. Falls back to comparing `artist`
+ * directly for sample data (no artistIds) and for the Songs tab's own
+ * "Filter by artist" dropdown, whose values are display strings, not ids. */
+function matchesArtistFilter(song: Song, filter: string): boolean {
+  if (!filter) return true;
+  if (song.artistIds) return song.artistIds.includes(filter) || song.artist === filter;
+  return song.artist === filter;
+}
+
 function buildSongRow(song: Song): HTMLElement {
   const isLink = Boolean(song.spotifyUrl);
   const row = document.createElement(isLink ? "a" : "div");
@@ -123,9 +140,13 @@ function buildSongRow(song: Song): HTMLElement {
   meta.textContent = `${song.artist} — ${song.album}`;
   info.append(title, meta);
 
+  // Real tracks carry no play count, only rank (Spotify's top-tracks
+  // endpoint gives neither plays nor a timestamp) — show whichever the song
+  // has, same fallback order as buildArtistRow's plays/rank/"asleep" badge.
   const plays = document.createElement("span");
   plays.className = "song-row__plays";
-  plays.textContent = `${song.plays} plays`;
+  if (song.plays !== undefined) plays.textContent = `${song.plays} plays`;
+  else if (song.rank !== undefined) plays.textContent = `#${song.rank}`;
 
   row.append(cover, info, plays);
   return row;
@@ -240,7 +261,7 @@ function renderOverview(container: HTMLElement, ctx: SectionContext): void {
     container.appendChild(heading);
     const list = document.createElement("div");
     list.className = "artist-list";
-    artists.forEach((a) => list.appendChild(buildArtistRow(a, () => ctx.switchToSongs(a.name))));
+    artists.forEach((a) => list.appendChild(buildArtistRow(a, () => ctx.switchToSongs(a.id ?? a.name))));
     container.appendChild(list);
   }
 
@@ -269,9 +290,14 @@ function renderOverview(container: HTMLElement, ctx: SectionContext): void {
 // Songs
 // ---------------------------------------------------------------------------
 function renderSongs(container: HTMLElement, ctx: SectionContext): void {
-  // Songs stay sample data for every district regardless of connection
-  // state — see src/listening-source.ts's doc comment.
+  // Real top tracks once connected+live (Phase 3.5), sample data otherwise —
+  // see src/listening-source.ts's getSongs() doc comment.
+  const live = isVillageLive();
   const songs = getSongs(ctx.slot.district.id);
+  // No "Recently played" sort without real timestamps — if a stale "recent"
+  // selection carried over from before this district went live, fall back
+  // to the default rather than sorting on an option that's no longer shown.
+  if (live && songsSort === "recent") songsSort = "plays";
 
   const controls = document.createElement("div");
   controls.className = "songs-controls";
@@ -302,11 +328,12 @@ function renderSongs(container: HTMLElement, ctx: SectionContext): void {
   const sortSelect = document.createElement("select");
   sortSelect.className = "songs-filter songs-filter--sort";
   sortSelect.setAttribute("aria-label", "Sort songs");
-  sortSelect.append(
-    new Option("Most played", "plays"),
-    new Option("Recently played", "recent"),
-    new Option("Title", "title"),
-  );
+  // Real tracks have no timestamp, so "Recently played" isn't just a no-op
+  // when live — it's dropped from the list entirely — and the default sort
+  // is rank order (Spotify's own top-tracks ordering), labeled to match.
+  sortSelect.append(new Option(live ? "Top tracks" : "Most played", "plays"));
+  if (!live) sortSelect.append(new Option("Recently played", "recent"));
+  sortSelect.append(new Option("Title", "title"));
   sortSelect.value = songsSort;
 
   // renderSection() rebuilds this whole tab's DOM (filtering/sorting isn't
@@ -345,14 +372,18 @@ function renderSongs(container: HTMLElement, ctx: SectionContext): void {
   const q = songsSearch.trim().toLowerCase();
   let filtered = songs.filter(
     (s) =>
-      (!songsArtistFilter || s.artist === songsArtistFilter) &&
+      matchesArtistFilter(s, songsArtistFilter) &&
       (!songsAlbumFilter || s.album === songsAlbumFilter) &&
       (!q || s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q)),
   );
   filtered = [...filtered].sort((a, b) => {
-    if (songsSort === "plays") return b.plays - a.plays;
-    if (songsSort === "recent") return Date.parse(b.lastPlayed) - Date.parse(a.lastPlayed);
-    return a.title.localeCompare(b.title);
+    if (songsSort === "recent") return Date.parse(b.lastPlayed ?? "") - Date.parse(a.lastPlayed ?? "");
+    if (songsSort === "title") return a.title.localeCompare(b.title);
+    // Default sort ("Most played" sample / "Top tracks" live): plays when
+    // present, else rank order (real data has no play count — see Song's
+    // doc comment in src/sample-data.ts).
+    if (a.plays !== undefined || b.plays !== undefined) return (b.plays ?? 0) - (a.plays ?? 0);
+    return (a.rank ?? 0) - (b.rank ?? 0);
   });
 
   const list = document.createElement("div");
@@ -360,15 +391,29 @@ function renderSongs(container: HTMLElement, ctx: SectionContext): void {
   if (filtered.length === 0) {
     const empty = document.createElement("p");
     empty.className = "sidebar-empty";
-    empty.textContent = songs.length
-      ? "No songs match those filters."
-      : "No plays yet — this district is quiet.";
+    if (songs.length) {
+      empty.textContent = "No songs match those filters.";
+    } else if (live && !villageSongsLive()) {
+      // Distinct from "genuinely no top tracks" below — the tracks stage
+      // itself failed server-side (see worker/village.ts's songsLive flag).
+      empty.textContent = "Song data is temporarily unavailable.";
+    } else if (live) {
+      // Bucketing never widens the fetch to fill this in (SPEC.md) — a
+      // resident with no top-50 track this range just has an empty tab.
+      empty.textContent = "No top tracks in this range.";
+    } else {
+      empty.textContent = "No plays yet — this district is quiet.";
+    }
     list.appendChild(empty);
   } else {
     filtered.forEach((s) => {
       const row = buildSongRow(s);
       const sub = row.querySelector<HTMLElement>(".song-row__meta");
-      if (sub) sub.textContent = `${s.artist} — ${s.album} — ${fmtRelative(s.lastPlayed)}`;
+      if (sub) {
+        sub.textContent = s.lastPlayed
+          ? `${s.artist} — ${s.album} — ${fmtRelative(s.lastPlayed)}`
+          : `${s.artist} — ${s.album}`;
+      }
       list.appendChild(row);
     });
   }
@@ -391,7 +436,7 @@ function renderArtists(container: HTMLElement, ctx: SectionContext): void {
 
   const list = document.createElement("div");
   list.className = "artist-list";
-  artists.forEach((a) => list.appendChild(buildArtistRow(a, () => ctx.switchToSongs(a.name))));
+  artists.forEach((a) => list.appendChild(buildArtistRow(a, () => ctx.switchToSongs(a.id ?? a.name))));
   container.appendChild(list);
 }
 
@@ -542,10 +587,21 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
   panelHost.setAttribute("role", "tabpanel");
   panelHost.tabIndex = 0;
 
+  // Phase 3.5: the official Spotify logo (public/brand/spotify-logo-white.png,
+  // downloaded from Spotify's own press assets — see SPEC.md's Phase 3.5
+  // section), placed once here in the sidebar chrome rather than per song
+  // row, per SPEC.md's cover-art attribution rules.
   const footer = document.createElement("div");
   footer.className = "sidebar__footer";
-  footer.textContent = "Data from Spotify";
-  footer.title = "Real Spotify attribution logo/branding lands in Phase 2";
+  const footerLabel = document.createElement("span");
+  footerLabel.textContent = "Data from";
+  const footerLogo = document.createElement("img");
+  footerLogo.className = "sidebar__spotify-logo";
+  footerLogo.src = "/brand/spotify-logo-white.png";
+  footerLogo.alt = "Spotify";
+  footerLogo.width = 78;
+  footerLogo.height = 23;
+  footer.append(footerLabel, footerLogo);
 
   root.append(grabber, closeBtn, header, tablistEl, panelHost, footer);
   backdrop.addEventListener("click", () => close());
