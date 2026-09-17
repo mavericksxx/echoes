@@ -51,7 +51,16 @@ export function deriveArtists(items: SpotifyArtist[]): TopArtistOut[] {
   return items.map((artist, i) => ({
     id: artist.id,
     name: artist.name,
-    genres: artist.genres,
+    // Declared as `string[]` (never optional) in SpotifyArtist, but this
+    // field is deprecated on Spotify's side and — found while investigating
+    // a "Cannot read properties of undefined (reading 'length')" in
+    // worker/genre-resolution.ts, which does `artist.genres.length` — can
+    // apparently come back missing entirely for some artists in a larger
+    // /api/village-sized fetch (limit 50), not just empty, despite always
+    // being present in the smaller limit=10 /api/top-artists fetches this
+    // was first observed with. Normalize defensively at the one place every
+    // caller gets artist data from, rather than re-guarding it everywhere.
+    genres: Array.isArray(artist.genres) ? artist.genres : [],
     // images are typically ordered largest-first; [1] is a reasonable
     // panel-sized thumbnail, falling back to whatever's available.
     image: artist.images[1]?.url ?? artist.images[0]?.url ?? null,

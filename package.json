@@ -13,6 +13,7 @@
     "db:migrate:remote": "wrangler d1 migrations apply echoes --remote",
     "spotify:connect": "node scripts/spotify-connect.mjs",
     "spotify:disconnect": "node scripts/spotify-disconnect.mjs",
+    "gemini:smoke": "node scripts/gemini-smoke.mjs",
     "deploy": "npm run check:data && npm run build && wrangler deploy"
   },
   "devDependencies": {

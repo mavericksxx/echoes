@@ -92,20 +92,31 @@ interface GeminiPart {
 }
 interface GeminiCandidate {
   content?: { parts?: GeminiPart[] };
+  finishReason?: string;
 }
 interface GeminiGenerateContentResponse {
   candidates?: GeminiCandidate[];
+  // Present instead of `candidates` when the prompt itself was blocked
+  // before generation (e.g. safety filters) — no candidate/content at all.
+  promptFeedback?: { blockReason?: string };
 }
 
-function extractText(data: GeminiGenerateContentResponse): string {
-  const parts = data.candidates?.[0]?.content?.parts ?? [];
-  return parts.map((p) => p.text ?? "").join("");
+/** Every failure path below throws with the HTTP status plus the first
+ * ~300 chars of the *raw* response body, so a bad shape is self-explanatory
+ * from `geminiError` alone on the next attempt — see worker/village.ts. */
+function snippet(rawBody: string): string {
+  return rawBody.slice(0, 300);
 }
 
-/** POSTs one generateContent call with a JSON-schema-constrained response.
- * Throws `GeminiRequestError` on any failure — network, non-OK status, or
- * an empty/unparseable response — never lets a raw fetch/SDK exception
- * escape this module. */
+/** POSTs one generateContent call with a JSON-schema-constrained response
+ * and pulls the text out, checking every step of the documented response
+ * shape (https://ai.google.dev/api/generate-content) explicitly rather than
+ * silently defaulting through optional chaining — a defaulted `[]`/`""` is
+ * exactly how a real shape mismatch (a blocked prompt, a non-STOP
+ * finishReason, a missing `parts`) previously surfaced as a generic,
+ * undiagnosable failure instead of a specific one. Throws `GeminiRequestError`
+ * on any failure — network, non-OK status, or an unexpected/empty response —
+ * never lets a raw fetch/parse exception escape this module. */
 async function generateJson(env: Env, prompt: string, schema: ReturnType<typeof resultSchema>): Promise<string> {
   let res: Response;
   try {
@@ -118,23 +129,52 @@ async function generateJson(env: Env, prompt: string, schema: ReturnType<typeof 
       }),
     });
   } catch (err) {
-    throw new GeminiRequestError(`Gemini request failed: ${(err as Error).message}`);
+    throw new GeminiRequestError(`Gemini request failed (network error): ${(err as Error).message}`);
   }
 
+  const rawBody = await res.text().catch((err) => {
+    throw new GeminiRequestError(`Gemini response body could not be read (status ${res.status}): ${(err as Error).message}`);
+  });
+
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new GeminiRequestError(`Gemini request failed with status ${res.status}: ${body.slice(0, 300)}`);
+    throw new GeminiRequestError(`Gemini request failed with status ${res.status}: ${snippet(rawBody)}`);
   }
 
   let data: GeminiGenerateContentResponse;
   try {
-    data = (await res.json()) as GeminiGenerateContentResponse;
+    data = JSON.parse(rawBody) as GeminiGenerateContentResponse;
   } catch (err) {
-    throw new GeminiRequestError(`Gemini returned unparseable JSON: ${(err as Error).message}`);
+    throw new GeminiRequestError(
+      `Gemini returned status ${res.status} but unparseable JSON (${(err as Error).message}): ${snippet(rawBody)}`,
+    );
   }
 
-  const text = extractText(data);
-  if (!text) throw new GeminiRequestError("Gemini response had no text content");
+  if (data.promptFeedback?.blockReason) {
+    throw new GeminiRequestError(
+      `Gemini blocked the prompt (${data.promptFeedback.blockReason}, status ${res.status}): ${snippet(rawBody)}`,
+    );
+  }
+
+  const candidate = data.candidates?.[0];
+  if (!candidate) {
+    throw new GeminiRequestError(`Gemini response had no candidates (status ${res.status}): ${snippet(rawBody)}`);
+  }
+
+  if (candidate.finishReason && candidate.finishReason !== "STOP") {
+    throw new GeminiRequestError(
+      `Gemini finished with reason "${candidate.finishReason}" instead of STOP (status ${res.status}): ${snippet(rawBody)}`,
+    );
+  }
+
+  const parts = candidate.content?.parts;
+  if (!parts || parts.length === 0) {
+    throw new GeminiRequestError(`Gemini response had no content parts (status ${res.status}): ${snippet(rawBody)}`);
+  }
+
+  const text = parts.map((p) => p.text ?? "").join("");
+  if (!text) {
+    throw new GeminiRequestError(`Gemini response parts had no text (status ${res.status}): ${snippet(rawBody)}`);
+  }
   return text;
 }
 
@@ -149,6 +189,7 @@ export async function classifyGenres(env: Env, genres: string[]): Promise<Map<st
     "",
     "For each genre string below, pick the single closest bucket id.",
     "If a genre doesn't fit any bucket well, pick the nearest one anyway and give it a low confidence (below 0.4).",
+    'Respond with a JSON array with one object per genre string, each with exactly the fields "genre" (the input string, unchanged), "slot" (one of the bucket ids above), and "confidence" (0..1).',
     "Genre strings (JSON array):",
     JSON.stringify(genres),
   ].join("\n");
@@ -176,6 +217,7 @@ export async function classifyArtistNames(env: Env, names: string[]): Promise<Ma
     "",
     "For each artist name below, infer their most likely genre from general knowledge and pick the single closest bucket id.",
     "If you don't recognize the artist, pick your best guess anyway and give it a low confidence (below 0.4).",
+    'Respond with a JSON array with one object per artist name, each with exactly the fields "artist" (the input name, unchanged), "slot" (one of the bucket ids above), and "confidence" (0..1).',
     "Artist names (JSON array):",
     JSON.stringify(names),
   ].join("\n");

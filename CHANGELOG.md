@@ -232,3 +232,34 @@
     so a failure is diagnosable from the response itself rather than a bare 1101.
     `worker/index.ts`'s rate-limit check now also fails *open* (logs and lets the request through)
     if its D1 counter throws, rather than 500ing every route over an abuse-protection hiccup.
+
+- **Phase 3 fix pass #2** (post-deploy: `/api/village` returned 200, but `geminiError` was
+  `"Cannot read properties of undefined (reading 'length')"` and every artist landed on the
+  deterministic hash fallback — nonsense mappings like Kanye West → Pop):
+  - **Root cause, found by audit**: `worker/genre-resolution.ts` does `artist.genres.length`
+    directly. `TopArtistOut.genres` is typed as a non-optional `string[]`, but Spotify's deprecated
+    `genres` field — confirmed empty (`[]`) for this account's *top 10* artists (`/api/top-artists`'s
+    limit) — can apparently come back **missing entirely** for some artist further down a *top 50*
+    fetch (`/api/village`'s limit), which is new in Phase 3. One such artist crashes the `.filter()`
+    call for the whole batch; the fix pass #1 catch-all then (correctly) fell back *every* artist in
+    the batch rather than crashing the request, which is exactly the reported symptom.
+  - **`worker/top-artists.ts`'s `deriveArtists`** now normalizes `genres` to `[]` when Spotify omits
+    it, at the one place every caller gets artist data from, instead of re-guarding it everywhere.
+  - **`worker/gemini.ts`'s response parser rewritten to be fully explicit** rather than defaulting
+    silently through optional chaining: checks `promptFeedback.blockReason` (blocked prompt),
+    `candidates[0]` existing, `finishReason !== "STOP"`, and `content.parts` existing/non-empty, each
+    with its own `GeminiRequestError` message carrying the HTTP status and the first ~300 chars of
+    the raw body — so any future mismatch is self-explanatory from `geminiError` alone instead of a
+    generic error.
+  - Verified the request shape against ai.google.dev's current REST docs: `generationConfig`
+    nesting for `responseMimeType`/`responseSchema` is correct, `contents[].parts[].text` is
+    correct, `gemini-3.5-flash-lite` supports structured output (no separate mechanism for Gemini 3
+    models). Both prompts now also explicitly say which JSON fields to return, on top of the schema
+    constraint.
+  - Added `scripts/gemini-smoke.mjs` (`npm run gemini:smoke`) — a standalone, human-run-only script
+    (reads `data/districts.json` directly, mirrors `classifyArtistNames` exactly) that classifies 3
+    hardcoded artists and prints the raw response on any failure, for checking prompt/schema/model
+    changes without a full deploy.
+  - Confirmed (by code trace, not just intent): a `"fallback"`-sourced slot is never written to
+    `artist_cache` or `genre_slot_map` — every write site is gated on `slot.source !== "fallback"`,
+    and this has been true since the very first Phase 3 commit — so no bad rows exist to clean up.

@@ -31,6 +31,7 @@ npm run db:migrate:local   # applies migrations/*.sql to the local D1 (wrangler 
 npm run db:migrate:remote  # applies migrations/*.sql to the real remote D1
 npm run spotify:connect    # one-time local PKCE login — see "Connect your Spotify account" below
 npm run spotify:disconnect # deletes all stored Spotify data (refresh token + caches + usage log)
+npm run gemini:smoke       # GEMINI_API_KEY=... npm run gemini:smoke — real Gemini call, run by hand only
 ```
 
 ## Assets are not in this repo
@@ -211,7 +212,15 @@ remote D1. The site goes back to the **Not connected** state until
   Phase 3 fix pass). `resolveArtistSlots` never throws: a Gemini call
   failure degrades to the same deterministic fallback slot as a quota cap
   and is reported via `/api/village`'s `geminiError` (distinct from
-  `geminiLimited`), so a Gemini outage never breaks the endpoint.
+  `geminiLimited`), so a Gemini outage never breaks the endpoint. The
+  response parser checks every documented step of Gemini's shape explicitly
+  (`promptFeedback.blockReason`, `candidates[0]`, `finishReason !== "STOP"`,
+  `content.parts`) rather than defaulting silently through optional
+  chaining, so any mismatch throws with the HTTP status and a body snippet
+  — self-explanatory from `geminiError` alone. `npm run gemini:smoke`
+  (`scripts/gemini-smoke.mjs`) exercises the exact same request/response
+  shape by hand, outside the Worker, for whenever the prompt/schema/model
+  changes.
 - **`GET /api/village`** (`worker/village.ts`) — the derived world: every
   roster slot's activity level (dormant/quiet/active/festival, from its
   share of a rank-derived score across up to 50 top artists), share %, and
