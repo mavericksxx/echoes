@@ -10,5 +10,19 @@
   "routes": [{ "pattern": "echoes.parthkohale.com", "custom_domain": true }],
   "observability": {
     "enabled": true
-  }
+  },
+  "vars": {
+    // Public PKCE client id — there is no client secret for this app. Safe
+    // to commit (see SPEC.md's "Auth & tokens" section).
+    "SPOTIFY_CLIENT_ID": "d0f1c1c011cf4ae0bed185a84b483208"
+  },
+  // TOKEN_KEY (the AES-GCM key used to encrypt the stored refresh token) is
+  // a secret, not a var — see README.md's "Connect your Spotify account".
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "echoes",
+      "database_id": "1f8abb15-651a-47db-bfcb-40f4ac1c5065"
+    }
+  ]
 }

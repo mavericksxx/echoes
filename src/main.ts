@@ -25,6 +25,7 @@ import {
   setSidebarImages,
   sidebarSlotId,
 } from "./sidebar";
+import { initTopArtists } from "./top-artists";
 
 const NOW_PLAYING_INTERVAL_MS = 8000;
 const VILLAGE_EVENT_INTERVAL_MS = 5000;
@@ -73,6 +74,7 @@ const viewTabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".view-
 const sidebarRoot = el<HTMLElement>("sidebar");
 const sidebarBackdrop = el<HTMLDivElement>("sidebarBackdrop");
 initSidebar(sidebarRoot, sidebarBackdrop, { onClose: () => canvas.focus() });
+initTopArtists();
 
 let images: ImageMap = {};
 let mode: Mode = "village"; // default view: the whole village, everyone present

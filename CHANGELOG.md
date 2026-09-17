@@ -80,3 +80,38 @@
     data-only tier (frame rects/waypoints/anchors checked against `assets.json`'s declared sizes, no
     PNG needed — safe to run in CI without the copyrighted assets) and a local-only tier (verifies
     the actual synced PNG dimensions match, only when `public/assets/` is populated).
+
+- **Phase 2 — Log in and see your real top artists:**
+  - D1 schema (`migrations/0001_init.sql`, `npm run db:migrate:local` / `db:migrate:remote`):
+    `spotify_token` (single row, encrypted refresh token + scope), `artist_cache` (per-artist
+    metadata, populated starting Phase 3), `usage_log` (one row per real Spotify HTTP call —
+    endpoint, status, 429 count, timestamp).
+  - `npm run spotify:connect` (`scripts/spotify-connect.mjs`): one-time local PKCE login against
+    `http://127.0.0.1:8888/callback` (no client secret). Prints the authorize URL, handles the
+    `/callback` redirect via a tiny local server, exchanges the code, encrypts the refresh token
+    (AES-GCM), and writes it into the **remote** D1. Also supports a manual paste mode
+    (`--code "<redirect URL or code>"`) for when the login browser is on a different device.
+    `npm run spotify:disconnect` (`scripts/spotify-disconnect.mjs`) deletes every row (token +
+    caches + usage log) from the remote D1.
+  - Shared encryption scheme (`worker/crypto.ts` + `scripts/spotify-crypto.mjs`, AES-GCM via
+    WebCrypto, same format documented in both files) so the connect script and the Worker agree on
+    how the stored refresh token is encrypted/decrypted, keyed by a `TOKEN_KEY` Worker secret.
+  - `worker/token.ts`: loads + decrypts the stored refresh token, exchanges it for an access token,
+    caches it in memory until ~60s before expiry, and persists a rotated refresh token back to D1
+    when Spotify issues one.
+  - `worker/spotify-fetch.ts`: the only thing allowed to call `api.spotify.com` — honors 429
+    `Retry-After`, exponential backoff with jitter on 429/5xx (max 4 retries), and logs every real
+    HTTP attempt to `usage_log`. Callers only ever see a typed `SpotifyRequestError`, never a raw
+    Spotify response.
+  - `GET /api/top-artists?range=short_term|medium_term|long_term` (`worker/top-artists.ts`): derived
+    JSON only (id, name, genres, image, rank) — no raw Spotify payload passthrough — cached ~30 min
+    via the Workers Cache API. Not connected and "refresh failed" both come back as a plain `200`
+    with a `connected`/`live` flag instead of an error, so the UI has a clear state to render.
+  - Frontend (`src/top-artists.ts`): a small "Top artists" panel (topbar button, hidden until
+    connected) with a time-range switcher, plus a `connected` / `not connected` / `live paused`
+    status chip in the topbar, styled with the existing Night Overlay tokens
+    (`.activity-pill`-style dot chip, glass panel chrome). No login UI anywhere — the chip and panel
+    only ever reflect connection state. The genre sidebar (Overview/Songs/Artists) keeps running on
+    `src/sample-data.ts`; real per-genre listening data lands in Phase 3.
+  - README: "Connect your Spotify account" section (generate + set `TOKEN_KEY`, migrate the remote
+    D1, run `spotify:connect` including paste mode) and disconnect instructions.

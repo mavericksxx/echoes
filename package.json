@@ -9,6 +9,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit",
     "check:data": "node scripts/check-data.mjs",
     "assets:sync": "node scripts/sync-assets.mjs",
+    "db:migrate:local": "wrangler d1 migrations apply echoes --local",
+    "db:migrate:remote": "wrangler d1 migrations apply echoes --remote",
+    "spotify:connect": "node scripts/spotify-connect.mjs",
+    "spotify:disconnect": "node scripts/spotify-disconnect.mjs",
     "deploy": "npm run check:data && npm run build && wrangler deploy"
   },
   "devDependencies": {

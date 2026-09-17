@@ -22,19 +22,30 @@
       <div class="layout">
         <div class="content">
           <header class="topbar">
-            <span class="brand">Echoes</span>
-            <nav class="view-switch" aria-label="View">
-              <button type="button" class="view-tab" data-view="village">
-                <span class="view-tab__label">Village</span>
+            <div class="topbar-nav">
+              <span class="brand">Echoes</span>
+              <nav class="view-switch" aria-label="View">
+                <button type="button" class="view-tab" data-view="village">
+                  <span class="view-tab__label">Village</span>
+                </button>
+                <button type="button" class="view-tab" data-view="district">
+                  <span class="view-tab__label">Districts</span>
+                </button>
+                <button type="button" class="view-tab" data-view="roster">
+                  <span class="view-tab__label">Roster</span>
+                </button>
+              </nav>
+            </div>
+            <div class="topbar-actions">
+              <span class="status-chip" id="statusChip">Not connected</span>
+              <button type="button" class="topbar-btn" id="topArtistsBtn" aria-expanded="false" aria-controls="topArtistsPanel" hidden>
+                Top artists
               </button>
-              <button type="button" class="view-tab" data-view="district">
-                <span class="view-tab__label">Districts</span>
-              </button>
-              <button type="button" class="view-tab" data-view="roster">
-                <span class="view-tab__label">Roster</span>
-              </button>
-            </nav>
+            </div>
           </header>
+
+          <div class="top-artists-backdrop" id="topArtistsBackdrop" hidden></div>
+          <aside class="top-artists-panel" id="topArtistsPanel" hidden aria-hidden="true" aria-label="Your top artists"></aside>
 
           <main class="main" id="main">
             <div class="stage-area" id="stageArea">
