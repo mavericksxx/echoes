@@ -30,6 +30,15 @@ and `scripts/walkability-draft-interiors.json` are kept as historical record; 4 
   districts. Verify the playlist endpoints survived Feb 2026 before scoping.
 
 ## Known exposure (not a bug, not fixed yet)
+- **`wrangler deploy` silently drops the cron schedule.** The API token lacks `Zone / Workers
+  Routes / Edit`, so the deploy's trigger step fails on the route re-assertion — and routes and
+  crons are deployed together, so it aborts before registering `crons` from wrangler.jsonc. The
+  Worker still uploads and goes live, which is why this reads as a harmless error but isn't: on
+  2026-09-18 it shipped Phase 8a with no cron at all, meaning the play log would never have run.
+  Until the token gains that permission, **after every deploy** verify with
+  `GET /accounts/{id}/workers/scripts/echoes/schedules` and re-register with a `PUT` of
+  `[{"cron":"*/15 * * * *"}]` if the list comes back empty.
+
 - **`getAccessToken`'s access-token cache is per-isolate** (`worker/token.ts:19-20`). Phase 8a's
   15-min cron (`worker/history.ts`) will often land on a cold isolate, so expect roughly one
   refresh-token POST per cron run instead of one per ~50 minutes (the token's actual TTL). Spotify's
