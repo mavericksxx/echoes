@@ -225,10 +225,15 @@ select {
   justify-content: space-between;
   gap: var(--space-4);
   padding: calc(var(--safe-top) + var(--space-2)) var(--space-4) var(--space-2);
-  background: var(--color-glass);
+  /* Same heavier glass treatment as .sidebar/.top-artists-panel (see
+     --color-glass-panel's doc comment in :root) — the lighter --color-glass
+     this used to carry read blotchy/green over the village map's art, so
+     this reads as one material with the rest of the floating chrome. */
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 32%), var(--color-glass-panel);
   border-bottom: 1px solid var(--color-glass-border);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(30px) saturate(140%);
+  -webkit-backdrop-filter: blur(30px) saturate(140%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 20px 40px -24px rgba(0, 0, 0, 0.6);
 }
 
 .brand {
@@ -521,21 +526,40 @@ select {
   max-width: 100%;
 }
 
+/* A one-time hint, not persistent chrome — main.ts fades it via
+   .is-dismissed (on a timeout or the user's first drag/tap/zoom) and then
+   hides it for good, so it never lingers over the map. Sized down from the
+   desktop --text-sm on phone specifically, where the sentence otherwise
+   wraps to two lines and reads as a band across the top of the village. */
 .village-caption {
   position: relative;
   z-index: var(--z-floating);
   flex: none;
   align-self: center;
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
+  line-height: 1.3;
   color: var(--color-text-muted);
   text-align: center;
   background: var(--color-glass);
   border: 1px solid var(--color-glass-border);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  padding: 6px var(--space-3);
+  padding: 4px var(--space-2);
   border-radius: var(--radius-pill);
   max-width: 100%;
+  opacity: 1;
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+.village-caption.is-dismissed {
+  opacity: 0;
+}
+
+@media (min-width: 900px) {
+  .village-caption {
+    font-size: var(--text-sm);
+    padding: 6px var(--space-3);
+  }
 }
 
 /* ==========================================================================
