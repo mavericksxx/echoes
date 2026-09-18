@@ -214,6 +214,12 @@ export function setCaption(npc: Npc, text: string, seconds: number): void {
 export interface NowPlayingInfo {
   artist: string;
   song: string;
+  /** AI-generated in-world caption for this track (Phase 7c), when one
+   * exists — used in place of the template captions below. Only the live
+   * (connected) now-playing source ever sets this; sample data never has
+   * one, so a missing field here falls back to the template exactly as
+   * before Phase 7c. */
+  caption?: string | null;
 }
 
 export interface UpdateOptions {
@@ -394,7 +400,7 @@ export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions
       npc.x = npc.home.x;
       npc.y = npc.home.y;
       const info = opts.getNowPlaying();
-      if (info) setCaption(npc, `Now playing: ${info.artist} – ${info.song}`, 3.2);
+      if (info) setCaption(npc, info.caption ?? `Now playing: ${info.artist} – ${info.song}`, 3.2);
       // Performing ends back at idle, right where it already is (home) — the
       // old separate "walk back to patrol start" leg is gone; wander resumes
       // from here on its own next idle beat.
@@ -410,7 +416,7 @@ export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions
       const info = opts.getNowPlaying();
       if (info) {
         startPerform(npc, "idle");
-        setCaption(npc, `${character.name.split(" ")[0]} is vibing to ${info.artist}`, 2.4);
+        setCaption(npc, info.caption ?? `${character.name.split(" ")[0]} is vibing to ${info.artist}`, 2.4);
       }
     }
     return;

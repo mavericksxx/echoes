@@ -47,6 +47,10 @@ interface NowPlayingTrack {
   /** The district that should react to this track, or null (an unresolved
    * artist, or the server's D1 lookup degraded) — see worker/now-playing.ts. */
   slotId: string | null;
+  /** AI-generated in-world caption line (Phase 7c), or null — see
+   * worker/now-playing.ts. src/npc.ts falls back to its own template
+   * caption whenever this is null. */
+  caption: string | null;
 }
 
 type NowPlayingResponse = { playing: boolean; track: NowPlayingTrack | null };
@@ -72,6 +76,9 @@ export interface LiveNowPlaying {
   slotId: string;
   artist: string;
   song: string;
+  /** AI-generated in-world caption line for this track (Phase 7c), or null
+   * — see NowPlayingTrack above and src/npc.ts's template fallback. */
+  caption: string | null;
 }
 
 type NowPlayingListener = (info: LiveNowPlaying | null) => void;
@@ -102,7 +109,9 @@ function updateLiveNowPlaying(data: NowPlayingResponse): void {
   const trackId = track?.id ?? null;
   if (trackId === liveTrackId) return; // no transition — nothing to notify
   liveTrackId = trackId;
-  liveInfo = track?.slotId ? { slotId: track.slotId, artist: track.artist, song: track.title } : null;
+  liveInfo = track?.slotId
+    ? { slotId: track.slotId, artist: track.artist, song: track.title, caption: track.caption }
+    : null;
   listeners.forEach((cb) => cb(liveInfo));
 }
 

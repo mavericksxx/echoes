@@ -308,6 +308,19 @@ design. Revisit only if `usage_log` shows a real 429 (then fall back to 15–30s
 
 - Sidebar gains a **Character** section (personality + dialogue).
 
+**Phase 7c (built 2026-09-19):** AI live captions. Rides the existing `/api/now-playing`
+poll instead of a separate endpoint — that handler already resolves the track's slot from
+`artist_cache` on every refresh of its own ~10s shared cache, at zero extra Spotify calls, so
+adding one more D1 read/write there costs nothing extra either. New migration `0008_caption_cache.sql`
+(`caption_cache`, keyed by artist id + track id) caches a few short in-world lines per track
+**forever**, generated at most once ever per (artist, track) pair — not once per poll, and not
+even once per replay of the same track — via a new `worker/captions.ts` (prompt: artist name,
+track name, slot genre only; the actual Gemini call lives in `worker/gemini.ts`, which stays the
+only file allowed to call Gemini). Respects the existing Gemini daily cap
+(`geminiQuotaAvailable`); quota exhausted, a Gemini failure, or no cache row yet all degrade to
+`caption: null`, never a 500 — the frontend (`src/npc.ts`, `src/main.ts`) falls back to its
+existing template caption exactly as before whenever that's null, live or sample-data alike.
+
 **You'll see:** districts feel different by mood; characters talk about your music.
 
 ### Phase 8 — The village remembers

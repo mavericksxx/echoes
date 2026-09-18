@@ -163,7 +163,7 @@ let allCrowd: Npc[] = [];
 function getNowPlayingFor(slotId: string): NowPlayingInfo | null {
   if (isVillageLive()) {
     const live = getLiveNowPlaying();
-    return live && live.slotId === slotId ? { artist: live.artist, song: live.song } : null;
+    return live && live.slotId === slotId ? { artist: live.artist, song: live.song, caption: live.caption } : null;
   }
   const song = getNowPlaying(slotId);
   return song ? { artist: song.artist, song: song.title } : null;
@@ -606,7 +606,7 @@ function tickVillage(now: number, dt: number): void {
     const npc = villageNpcs.find((n) => n.district.id === slotId);
     const info = getNowPlayingFor(slotId);
     if (npc && info && (npc.state === "idle" || npc.state === "walk")) {
-      setCaption(npc, `Now playing: ${info.artist} – ${info.song}`, 3.2);
+      setCaption(npc, info.caption ?? `Now playing: ${info.artist} – ${info.song}`, 3.2);
       startPerform(npc, "idle");
     }
   }
