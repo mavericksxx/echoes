@@ -68,8 +68,8 @@
     "location": "Konoha Ninja Shop",
     "bg": "shopNinja",
     "home": {
-      "x": 130,
-      "y": 175
+      "x": 133,
+      "y": 184
     },
     "note": "overworld sheet is his Cursed-Seal-2 form (no plain-clothes overworld sheet found in POTN1/POTN2)"
   },
@@ -131,7 +131,7 @@
     "bg": "shopFlower",
     "home": {
       "x": 175,
-      "y": 225
+      "y": 216
     }
   },
   {
@@ -140,8 +140,8 @@
     "location": "Ichiraku Ramen (interior)",
     "bg": "ramenInterior",
     "home": {
-      "x": 100,
-      "y": 140
+      "x": 104,
+      "y": 168
     }
   },
   {
