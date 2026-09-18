@@ -7,7 +7,16 @@ import districtsJson from "./districts.json";
 import villageJson from "./village.json";
 import assetsJson from "./assets.json";
 import npcRigsJson from "./npcRigs.json";
-import type { AssetManifest, CharacterDef, DistrictDef, NpcRigManifest, VillageDef } from "./types";
+import walkabilityJson from "./walkability.json";
+import type {
+  AssetManifest,
+  CharacterDef,
+  DistrictDef,
+  NpcRigManifest,
+  VillageDef,
+  WalkabilityManifest,
+  WalkGrid,
+} from "./types";
 
 // JSON imports are inferred as plain arrays/objects (e.g. rects come back as
 // `number[]`, not the `Rect` tuple), so we assert through `unknown` once here
@@ -18,6 +27,8 @@ export const VILLAGE = villageJson as unknown as VillageDef;
 export const ASSET_MANIFEST = assetsJson as unknown as AssetManifest;
 /** Generic NPC rigs used to build district resident NPCs (see src/residents.ts). */
 export const NPC_RIGS = npcRigsJson as unknown as NpcRigManifest;
+/** Per-map walkability grids, keyed by asset key (see WalkGrid). */
+export const WALKABILITY = walkabilityJson as unknown as WalkabilityManifest;
 
 export interface Slot {
   character: CharacterDef;
@@ -54,4 +65,12 @@ export function assetUrl(key: string): string {
 export function assetSize(key: string): [number, number] {
   const entry = assetEntry(key);
   return [entry.w, entry.h];
+}
+
+/** Walkability grid for a map asset key (a district's `bg` or the village's
+ * `mapImage`) — see src/pathfinding.ts for the consumers. */
+export function getWalkGrid(key: string): WalkGrid {
+  const grid = WALKABILITY[key];
+  if (!grid) throw new Error(`No walkability grid for asset key "${key}"`);
+  return grid;
 }

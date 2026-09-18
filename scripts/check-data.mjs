@@ -75,20 +75,11 @@ function checkDataOnly({ characters, districts, village, assets }) {
     });
   }
 
-  // Every district's bg resolves, and every patrol/home waypoint falls within it.
+  // Every district's bg resolves. (Home's walkable-cell check — which
+  // subsumes bounds-checking — lives in checkWalkability below, replacing
+  // the old patrol-bounds check now that patrol is gone; see SPEC.md Phase 4.)
   for (const def of districts) {
-    const bgSize = assetSize(def.bg, `${def.id}.bg`);
-    const points = [...def.patrol, def.home];
-    points.forEach((p, i) => {
-      checks++;
-      if (!bgSize) return;
-      const [w, h] = bgSize;
-      if (p.x < 0 || p.y < 0 || p.x > w || p.y > h) {
-        errors.push(
-          `${def.id}: waypoint[${i}] (${p.x},${p.y}) is outside its ${w}x${h} background '${def.bg}'`,
-        );
-      }
-    });
+    assetSize(def.bg, `${def.id}.bg`);
   }
 
   // Exactly 17 slots, one character per district, no duplicate genres.
@@ -187,6 +178,225 @@ function checkNpcRigs(npcRigs, assets) {
   }
 
   return { errors, checks };
+}
+
+// ---------------------------------------------------------------------------
+// Walkability (data/walkability.json): still tier 1 (data-only, no PNGs) —
+// see SPEC.md Phase 4. The BFS/flood-fill helpers below duplicate
+// src/pathfinding.ts's isWalkable/reachableWithin logic (~30 lines): this is
+// a plain-Node script with no bundler, so it can't import that TS module.
+// ---------------------------------------------------------------------------
+
+const WALK_CELL_SIZES = new Set([8, 16]);
+
+// Radii mirror src/npc.ts's per-role wander radii (village leader 5,
+// district leader 4, resident 2-3), so "is there room to wander" matches
+// what actually happens at runtime. village.doors has no wander logic of
+// its own (that's Phase 5's walk-to-door pathing) — it gets the smallest
+// (resident-floor) radius as a "not a one-cell closet" sanity floor.
+const HOME_WANDER_RADIUS = 4;
+const ANCHOR_WANDER_RADIUS = 5;
+const DOOR_WANDER_RADIUS = 2;
+const MIN_WANDER_ROOM = 6;
+
+const WALK_NEIGHBOR_OFFSETS = [
+  [0, -1],
+  [1, 0],
+  [0, 1],
+  [-1, 0],
+];
+
+function isWalkableCell(grid, cx, cy) {
+  if (cx < 0 || cy < 0 || cx >= grid.cols || cy >= grid.rows) return false;
+  return grid.grid[cy][cx] === ".";
+}
+
+/** BFS in path steps (not Euclidean distance) — how many walkable cells
+ * (including the start) are reachable within `radius` steps. */
+function bfsReachableCount(grid, startCx, startCy, radius) {
+  if (!isWalkableCell(grid, startCx, startCy)) return 0;
+  const dist = new Map([[`${startCx},${startCy}`, 0]]);
+  const queue = [[startCx, startCy]];
+  let head = 0;
+  while (head < queue.length) {
+    const [cx, cy] = queue[head++];
+    const d = dist.get(`${cx},${cy}`);
+    if (d >= radius) continue;
+    for (const [dx, dy] of WALK_NEIGHBOR_OFFSETS) {
+      const ncx = cx + dx;
+      const ncy = cy + dy;
+      const key = `${ncx},${ncy}`;
+      if (dist.has(key) || !isWalkableCell(grid, ncx, ncy)) continue;
+      dist.set(key, d + 1);
+      queue.push([ncx, ncy]);
+    }
+  }
+  return dist.size;
+}
+
+/** 4-connected flood fill: labels every walkable cell with a component id. */
+function floodFillComponents(grid) {
+  const componentOf = new Map();
+  let count = 0;
+  for (let cy = 0; cy < grid.rows; cy++) {
+    for (let cx = 0; cx < grid.cols; cx++) {
+      const key = `${cx},${cy}`;
+      if (!isWalkableCell(grid, cx, cy) || componentOf.has(key)) continue;
+      count++;
+      const queue = [[cx, cy]];
+      componentOf.set(key, count);
+      let head = 0;
+      while (head < queue.length) {
+        const [qx, qy] = queue[head++];
+        for (const [dx, dy] of WALK_NEIGHBOR_OFFSETS) {
+          const ncx = qx + dx;
+          const ncy = qy + dy;
+          const nkey = `${ncx},${ncy}`;
+          if (componentOf.has(nkey) || !isWalkableCell(grid, ncx, ncy)) continue;
+          componentOf.set(nkey, count);
+          queue.push([ncx, ncy]);
+        }
+      }
+    }
+  }
+  return { componentOf, count };
+}
+
+/** Validates data/walkability.json's shape, that every district.home,
+ * village.anchors[id], and village.doors[id] sits on a walkable cell with
+ * enough room to wander, and that each map's walkable cells relevant to
+ * those points form one connected component. */
+function checkWalkability({ districts, village, assets, walkability }) {
+  const errors = [];
+  const warnings = [];
+  let checks = 0;
+
+  const referencedKeys = new Set(districts.map((d) => d.bg));
+  referencedKeys.add(village.mapImage);
+
+  for (const key of referencedKeys) {
+    checks++;
+    if (!walkability[key]) {
+      errors.push(`walkability.json is missing an entry for '${key}' (used as a district bg or village.mapImage)`);
+    }
+  }
+  for (const key of Object.keys(walkability)) {
+    checks++;
+    if (!assets[key]) {
+      errors.push(`walkability.json has an entry for unknown asset key '${key}'`);
+    } else if (!referencedKeys.has(key)) {
+      warnings.push(
+        `walkability.json has an entry for '${key}', which no district.bg or village.mapImage references`,
+      );
+    }
+  }
+
+  // Points to validate, grouped by the map they live on.
+  const pointsByMap = new Map();
+  function addPoint(mapKey, label, point, radius) {
+    if (!pointsByMap.has(mapKey)) pointsByMap.set(mapKey, []);
+    pointsByMap.get(mapKey).push({ label, point, radius });
+  }
+  for (const d of districts) addPoint(d.bg, `${d.id}.home`, d.home, HOME_WANDER_RADIUS);
+  for (const [id, p] of Object.entries(village.anchors || {})) {
+    addPoint(village.mapImage, `village.anchors.${id}`, p, ANCHOR_WANDER_RADIUS);
+  }
+  for (const [id, p] of Object.entries(village.doors || {})) {
+    addPoint(village.mapImage, `village.doors.${id}`, p, DOOR_WANDER_RADIUS);
+  }
+
+  for (const [mapKey, grid] of Object.entries(walkability)) {
+    checks++;
+    if (!WALK_CELL_SIZES.has(grid.cell)) {
+      errors.push(`${mapKey}.cell: expected 8 or 16, found ${grid.cell}`);
+      continue;
+    }
+    const assetEntry = assets[mapKey];
+    if (!assetEntry) continue; // already reported above as an unknown key
+
+    const expectedCols = Math.ceil(assetEntry.w / grid.cell);
+    const expectedRows = Math.ceil(assetEntry.h / grid.cell);
+    checks++;
+    if (grid.cols !== expectedCols) {
+      errors.push(`${mapKey}.cols: expected ${expectedCols} (ceil(${assetEntry.w}/${grid.cell})), found ${grid.cols}`);
+    }
+    checks++;
+    if (grid.rows !== expectedRows) {
+      errors.push(`${mapKey}.rows: expected ${expectedRows} (ceil(${assetEntry.h}/${grid.cell})), found ${grid.rows}`);
+    }
+    checks++;
+    let malformed = grid.grid.length !== grid.rows;
+    if (malformed) errors.push(`${mapKey}.grid: expected ${grid.rows} row(s), found ${grid.grid.length}`);
+
+    grid.grid.forEach((row, i) => {
+      checks++;
+      if (row.length !== grid.cols) {
+        errors.push(`${mapKey}.grid[${i}]: expected length ${grid.cols}, found ${row.length}`);
+        malformed = true;
+      }
+      checks++;
+      if (!/^[.#]*$/.test(row)) {
+        errors.push(`${mapKey}.grid[${i}]: contains characters other than '.' and '#'`);
+        malformed = true;
+      }
+    });
+    if (malformed) continue; // can't safely flood-fill/BFS a ragged or corrupt grid
+
+    let walkableCount = 0;
+    for (const row of grid.grid) for (const ch of row) if (ch === ".") walkableCount++;
+    const total = grid.rows * grid.cols;
+    const fraction = total > 0 ? walkableCount / total : 0;
+    checks++;
+    if (fraction === 0) {
+      warnings.push(`${mapKey}: walkable fraction is 0% (grid looks unpainted)`);
+    } else if (fraction > 0.9) {
+      warnings.push(
+        `${mapKey}: walkable fraction is ${(fraction * 100).toFixed(0)}% (grid looks over-painted, or is still a placeholder)`,
+      );
+    }
+
+    const points = pointsByMap.get(mapKey) || [];
+    const validCells = [];
+    for (const { label, point, radius } of points) {
+      checks++;
+      const cx = Math.floor(point.x / grid.cell);
+      const cy = Math.floor(point.y / grid.cell);
+      if (!isWalkableCell(grid, cx, cy)) {
+        errors.push(`${label} (${point.x},${point.y}) is not on a walkable cell of '${mapKey}'`);
+        continue;
+      }
+      validCells.push({ label, cx, cy });
+
+      checks++;
+      const room = bfsReachableCount(grid, cx, cy, radius);
+      if (room < MIN_WANDER_ROOM) {
+        errors.push(
+          `${label}: only ${room} walkable cell(s) reachable within radius ${radius} on '${mapKey}' — needs ` +
+            `at least ${MIN_WANDER_ROOM} (a home in a one-cell closet produces a statue)`,
+        );
+      }
+    }
+
+    checks++;
+    const { componentOf, count: componentCount } = floodFillComponents(grid);
+    if (componentCount > 1) {
+      warnings.push(`${mapKey}: ${componentCount} disconnected walkable region(s) found — check for painting slips (islands)`);
+    }
+    if (validCells.length > 1) {
+      const [first, ...rest] = validCells;
+      const firstComp = componentOf.get(`${first.cx},${first.cy}`);
+      const stray = rest.filter((v) => componentOf.get(`${v.cx},${v.cy}`) !== firstComp);
+      checks++;
+      if (stray.length > 0) {
+        errors.push(
+          `${mapKey}: ${stray.map((v) => v.label).join(", ")} ${stray.length === 1 ? "is" : "are"} not reachable ` +
+            `from ${first.label} (disconnected walkable region)`,
+        );
+      }
+    }
+  }
+
+  return { errors, warnings, checks };
 }
 
 /** Tier 2 — only runs against PNGs actually present in public/assets/. */
@@ -374,13 +584,16 @@ function animPixelsIdentical(png, framesA, framesB) {
 
 // Sheets this rip is missing genuine back-facing art for — walk_up
 // intentionally reuses walk_down's coordinates rather than pointing at
-// something wrong. See BACKLOG.md / the sprite-quality pass report.
-const KNOWN_DUPLICATE_DIRECTIONS = {
-  naruto: [["walk_down", "walk_up"]],
-  kankuro: [["walk_down", "walk_up"]],
-  neji: [["walk_down", "walk_up"]],
-  tenten: [["walk_down", "walk_up"]],
-};
+// something wrong. See BACKLOG.md / the sprite-quality pass report. Reads
+// characters.json's `lacksBackArt` flag (Phase 4) instead of hard-coding the
+// id set a second time, so it can't drift from what src/npc.ts checks.
+function knownDuplicateDirectionsFor(characters) {
+  const known = {};
+  for (const c of characters) {
+    if (c.lacksBackArt) known[c.id] = [["walk_down", "walk_up"]];
+  }
+  return known;
+}
 
 // "left" <-> "right" so a character whose data mirrors one direction from
 // the other (mirrorDirs) doesn't get flagged for having identical rects —
@@ -389,9 +602,9 @@ const KNOWN_DUPLICATE_DIRECTIONS = {
 // turn a front pose into a back one), so it's intentionally not handled here.
 const OPPOSITE_DIR = { walk_left: "walk_right", walk_right: "walk_left" };
 
-function checkDirectionsDistinct(errors, warnings, id, png, anims, mirrorDirs) {
+function checkDirectionsDistinct(errors, warnings, id, png, anims, mirrorDirs, knownDuplicateDirections) {
   const dirs = ["walk_down", "walk_left", "walk_right", "walk_up"];
-  const known = KNOWN_DUPLICATE_DIRECTIONS[id] || [];
+  const known = knownDuplicateDirections[id] || [];
   const mirrored = (mirrorDirs || []).map((d) => `walk_${d}`);
   for (let i = 0; i < dirs.length; i++) {
     for (let j = i + 1; j < dirs.length; j++) {
@@ -421,6 +634,7 @@ function checkLocalSpriteContent(characters, assets) {
   const errors = [];
   const warnings = [];
   let checks = 0;
+  const knownDuplicateDirections = knownDuplicateDirectionsFor(characters);
   const pngCache = new Map();
   function loadSheet(key) {
     if (pngCache.has(key)) return pngCache.get(key);
@@ -450,7 +664,7 @@ function checkLocalSpriteContent(characters, assets) {
       checks++;
       checkFrameContent(errors, warnings, `${c.id}.idle`, sheetPng, c.idle);
       checks++;
-      checkDirectionsDistinct(errors, warnings, c.id, sheetPng, c.anims, c.mirrorDirs);
+      checkDirectionsDistinct(errors, warnings, c.id, sheetPng, c.anims, c.mirrorDirs, knownDuplicateDirections);
     }
 
     const battlePng = loadSheet(c.battleSheet);
@@ -470,6 +684,7 @@ async function main() {
   const village = await loadJson("village.json");
   const assets = await loadJson("assets.json");
   const npcRigs = await loadJson("npcRigs.json");
+  const walkability = await loadJson("walkability.json");
 
   const dataOnly = checkDataOnly({ characters, districts, village, assets });
   console.log(
@@ -481,6 +696,12 @@ async function main() {
   console.log(
     `[data] Checked ${rigs.checks} assertion(s) across ${Object.keys(npcRigs).length} resident NPC rig(s).`,
   );
+
+  const walk = checkWalkability({ districts, village, assets, walkability });
+  console.log(
+    `[data] Checked ${walk.checks} walkability assertion(s) across ${Object.keys(walkability).length} map(s).`,
+  );
+  walk.warnings.forEach((w) => console.log(`  ! ${w}`));
 
   await syncAssets().catch(() => {});
   const hasLocalAssets = existsSync(ASSETS_DIR) && readdirSync(ASSETS_DIR).length > 0;
@@ -504,7 +725,7 @@ async function main() {
     );
   }
 
-  const errors = [...dataOnly.errors, ...rigs.errors, ...local.errors, ...content.errors];
+  const errors = [...dataOnly.errors, ...rigs.errors, ...walk.errors, ...local.errors, ...content.errors];
   if (errors.length) {
     console.error(`\nFAILED (${errors.length} problem(s)):`);
     errors.forEach((e) => console.error(`  - ${e}`));

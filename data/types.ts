@@ -47,6 +47,16 @@ export interface CharacterDef {
    * explicit walk_up-mirrors-walk_down note) for every direction.
    */
   mirrorDirs?: ("left" | "right")[];
+  /**
+   * True when this sheet has no genuine back-facing pose — walk_up is a
+   * byte-identical duplicate of walk_down (see scripts/check-data.mjs's
+   * KNOWN_DUPLICATE_DIRECTIONS, which reads this flag instead of hard-coding
+   * the set). A wander leg that resolves "up" doesn't turn these characters
+   * around — it slides their front-facing art backwards ("moonwalking") — so
+   * src/npc.ts only ever gives them an up leg merged into a side-facing
+   * diagonal (see SPEC.md Phase 4).
+   */
+  lacksBackArt?: boolean;
 }
 
 /** One genre's district: where the character stands. Listening data (artist,
@@ -64,7 +74,6 @@ export interface DistrictDef {
   recolorFilter?: string;
   recolored?: boolean;
   home: Point;
-  patrol: Point[];
   note?: string;
 }
 
@@ -93,6 +102,22 @@ export interface AssetEntry {
   h: number;
 }
 export type AssetManifest = Record<string, AssetEntry>;
+
+/**
+ * One map's walkability grid (data/walkability.json), keyed by asset key —
+ * not district id, since `town` is both the village map and Naruto's
+ * district bg, so one grid serves both. `.` = walkable, `#` = blocked;
+ * `cols`/`rows` are `ceil(w/cell)`/`ceil(h/cell)` against that asset's
+ * declared size in assets.json. See src/pathfinding.ts for the consumers and
+ * scripts/check-data.mjs for validation.
+ */
+export interface WalkGrid {
+  cell: number;
+  cols: number;
+  rows: number;
+  grid: string[];
+}
+export type WalkabilityManifest = Record<string, WalkGrid>;
 
 /**
  * One generic NPC rig (see raw/hiddenleafninja_79019.png): a 3-frame walk
