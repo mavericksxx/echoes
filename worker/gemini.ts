@@ -364,3 +364,46 @@ export async function classifyMoods(env: Env, artists: MoodTagInput[]): Promise<
   });
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 7c: AI live captions — short in-world lines reacting to the
+// currently-playing track, generated on demand by worker/captions.ts (which
+// owns the caching/dedupe/quota decisions; this file only ever knows how to
+// make the one Gemini call).
+// ---------------------------------------------------------------------------
+
+const CAPTION_SCHEMA = { type: "ARRAY", items: { type: "STRING" } };
+
+function safeParseStringArray(text: string): string[] {
+  try {
+    const data: unknown = JSON.parse(text);
+    if (!Array.isArray(data)) return [];
+    return data.filter((s): s is string => typeof s === "string" && s.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** Generates a few short in-world caption lines for one currently-playing
+ * track, in the voice of the district it's reacting in. Sends only the
+ * minimal derived fields SPEC.md's AI policy allows — artist name, track
+ * name, and the reacting slot's representative genre — never a raw Spotify
+ * payload, user id, or token. Throws `GeminiRequestError` (network failure,
+ * non-OK status, or a response with no usable strings), same as every other
+ * function in this file — worker/captions.ts is the one that catches it and
+ * degrades to no AI caption. */
+export async function generateCaptions(env: Env, artistName: string, trackName: string, genre: string): Promise<string[]> {
+  const prompt = [
+    `You are writing short, playful in-world lines for a pixel-art village character who represents the "${genre}" music scene, reacting to a song currently playing in their district.`,
+    `Song: "${trackName}" by ${artistName}.`,
+    "Write 3 short captions (each under 60 characters) in the character's voice — specific to this song/artist, not generic hype.",
+    "Respond with a JSON array of exactly 3 strings, nothing else.",
+  ].join("\n");
+
+  const text = await generateJson(env, prompt, CAPTION_SCHEMA);
+  const lines = safeParseStringArray(text);
+  if (lines.length === 0) {
+    throw new GeminiRequestError("Gemini caption response had no usable strings");
+  }
+  return lines;
+}

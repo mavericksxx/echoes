@@ -100,7 +100,7 @@ export default {
     }
 
     if (url.pathname === "/api/now-playing") {
-      return handleNowPlaying(env);
+      return handleNowPlaying(request, env);
     }
 
     if (url.pathname === "/api/history/stats") {

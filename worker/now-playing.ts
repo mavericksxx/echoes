@@ -25,10 +25,20 @@
 // no reaction — never a fresh Gemini call or a new artist_cache row here,
 // so this costs zero additional AI usage. Resolved before writeCache so the
 // D1 read happens at most once per ~10s cache window, not once per poll.
+//
+// Phase 7c adds `caption`: an AI-generated in-world line for the same
+// track, resolved right alongside slotId (only when one was found — no
+// reacting district, no caption either) so it rides this same ~10s window
+// instead of running once per poll. worker/captions.ts owns the actual
+// generation/caching decision (cached forever per artist+track, so this is
+// a cheap D1 read on every request after the first for a given track); see
+// its doc comment for why that never costs extra Spotify calls either.
 
 import type { Env } from "./index";
 import { getAccessToken, TokenError } from "./token";
 import { spotifyGet, SpotifyRequestError } from "./spotify-fetch";
+import { captionFor } from "./captions";
+import { clientIp } from "./rate-limit";
 
 const CACHE_TTL_SECONDS = 10;
 
@@ -76,6 +86,13 @@ export interface NowPlayingTrack {
    * artist has no cached slot (a genuinely unknown artist, or the D1 lookup
    * itself failed — see resolveSlotId). Never widened past artist_cache. */
   slotId: string | null;
+  /** One AI-generated in-world caption line for this track (Phase 7c), or
+   * null when there's no reacting district (slotId is null), none has been
+   * generated yet and one couldn't be right now (Gemini daily cap, a
+   * Gemini failure, or a D1 hiccup — see worker/captions.ts), or generation
+   * is still in flight for the very first poll of a brand-new track. The
+   * frontend falls back to its own template caption whenever this is null. */
+  caption: string | null;
 }
 
 export type NowPlayingPayload = { playing: boolean; track: NowPlayingTrack | null };
@@ -127,6 +144,7 @@ function toPayload(data: SpotifyCurrentlyPlaying | null): NowPlayingPayload {
       progressMs: data.progress_ms ?? 0,
       artistIds: track.artists.map((a) => a.id),
       slotId: null,
+      caption: null,
     },
   };
 }
@@ -149,7 +167,7 @@ async function resolveSlotId(env: Env, primaryArtistId: string): Promise<string 
   }
 }
 
-export async function handleNowPlaying(env: Env): Promise<Response> {
+export async function handleNowPlaying(request: Request, env: Env): Promise<Response> {
   const key = cacheKey();
   try {
     const cached = await readCache(key);
@@ -180,12 +198,24 @@ export async function handleNowPlaying(env: Env): Promise<Response> {
     return Response.json(NOT_PLAYING);
   }
 
-  // Resolve which district (if any) reacts to this track — before caching,
-  // so the D1 read rides the same ~10s window as the Spotify call above
-  // rather than running once per poll (see this file's doc comment).
+  // Resolve which district (if any) reacts to this track, and (Phase 7c)
+  // its AI caption — both before caching, so their reads/writes ride the
+  // same ~10s window as the Spotify call above rather than running once per
+  // poll (see this file's doc comment).
   if (payload.playing && payload.track) {
     const primaryArtistId = payload.track.artistIds[0];
     payload.track.slotId = primaryArtistId ? await resolveSlotId(env, primaryArtistId) : null;
+    if (payload.track.slotId && primaryArtistId) {
+      payload.track.caption = await captionFor(
+        env,
+        clientIp(request),
+        payload.track.slotId,
+        primaryArtistId,
+        payload.track.artist,
+        payload.track.id,
+        payload.track.title,
+      );
+    }
   }
 
   try {
