@@ -6,7 +6,7 @@
 // already collapses that transition to near-instant).
 //
 // Polling is adaptive, not a flat interval (SPEC.md's rate-limit decision):
-// ~10s while playing, 30-60s while idle, and — when the current track is
+// ~10s while playing, 15s while idle, and — when the current track is
 // nearly over — the next poll is scheduled for just after it should end
 // (using progressMs/durationMs) instead of firing another blind ~10s poll
 // that could land on either side of the actual transition. Polling also
@@ -27,7 +27,7 @@
 import { coverPlaceholderGradient } from "./cover-art";
 
 const PLAYING_POLL_MS = 10_000;
-const IDLE_POLL_MS = 45_000; // within SPEC.md's 30-60s idle range
+const IDLE_POLL_MS = 15_000; // shorter so the "Parth is listening to" card appears soon after playback starts; Spotify load is still bounded by worker/now-playing.ts's 10s shared cache, so visitor count does not multiply Spotify calls
 const SKIP_AHEAD_BUFFER_MS = 1_500; // land just after, not exactly at, track end
 const HIDE_TRANSITION_MS = 260; // slightly longer than style.css's --duration-base fade
 

@@ -27,14 +27,14 @@ See `IDEA.md` for the concept. This spec breaks the build into **vertical slices
     is event-driven. A flat 5s is the aggressive end of what real 2026 projects run.
   - **[decided]** Phase 5a polls **~10s while playing** with **track-end skip-ahead** (use
     `progress_ms`/`duration_ms` to sleep until the track is about to end rather than polling blind),
-    30–60s idle. Fall back to 15–30s if `usage_log` shows any 429s.
+    15s idle. Fall back to 15–30s if `usage_log` shows any 429s.
   - No evidence `/me/player/*` is metered separately. `X-RateLimit-*` headers are undocumented and
     unconfirmed — log them if present, don't rely on them.
 - **Log headers, not just status.** `spotifyGet` currently records endpoint/status/retry count and
   discards response headers and bodies. Capture `Retry-After` raw, any `X-RateLimit-*`, the `Date`
   header, and a 429 body's `error.reason`. This is how we measure headroom passively instead of by
   provoking failures — do this before Phase 6's ramp test.
-- **Live listening:** no push/webhooks — polling only. App open: `currently-playing` every ~5s while playing, 30–60s when paused/idle. App closed: Worker cron pulls `recently-played` (50-item cap) every 15–30 min to backfill history. Intervals are provisional until the rate-limit test below.
+- **Live listening:** no push/webhooks — polling only. App open: `currently-playing` every ~5s while playing, 15s when paused/idle. App closed: Worker cron pulls `recently-played` (50-item cap) every 15–30 min to backfill history. Intervals are provisional until the rate-limit test below.
 
 ## Stack (proposed)
 - **Frontend:** TypeScript + Vite, PixiJS for tile/sprite rendering.
@@ -267,7 +267,7 @@ map isn't covered by chrome.
 
 ### Phase 5 — Live reactions
 - Split into 5a and 5b; 5a is the user-visible half and ships first.
-- **5a — Now-playing widget.** Poll currently-playing (**~10s playing / 30–60s idle**, see the
+- **5a — Now-playing widget.** Poll currently-playing (**~10s playing / 15s idle**, see the
   rate-limit findings below) through the
   wrapper, and show it top-right as a **display-only** card: cover art, title, artist. **No transport
   controls** — the user explicitly asked for a view, not a player (2026-09-18). Hides when nothing
