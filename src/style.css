@@ -122,7 +122,7 @@
   --z-backdrop: 25;
   --z-sidebar: 30;
 
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 @media (min-width: 900px) {
@@ -648,6 +648,13 @@ select {
   cursor: grabbing;
 }
 
+/* The default :focus-visible ring (--color-focus-ring, seal) sits on
+   --color-bg's wood-dark letterbox around the canvas, not on paper — seal on
+   wood-dark is too close in value to read. Light ring instead, just here. */
+#game:focus-visible {
+  outline-color: var(--paper);
+}
+
 /* Screen-space overlay canvas for "now playing" caption pills — kept
    separate from #game so its text renders at full device-pixel resolution
    (smooth, not pixelated) regardless of the map's integer zoom. Positioned
@@ -851,7 +858,7 @@ select {
   width: 56px;
   height: 56px;
   border-radius: 3px;
-  background: var(--color-canvas-bg);
+  background: var(--paper-2);
   box-shadow: 0 0 0 2px var(--ink);
   image-rendering: pixelated;
 }
@@ -1084,7 +1091,7 @@ select {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-xl);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text);
 }
 
@@ -1241,7 +1248,7 @@ select {
 
 .np-title {
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1431,8 +1438,10 @@ select {
     bottom: var(--sidebar-inset);
     left: auto;
     width: var(--sidebar-width);
-    border-left: 2px solid var(--wood-dark);
-    border-right: 2px solid var(--wood-dark);
+    /* No separate left/right border here — the 2px box-shadow ring below
+       already gives the sides the same 2px wood-dark casing as the
+       top/bottom rollers' shadow ring (see base .sidebar). A redundant
+       border on top of that ring doubled the sides to 4px. */
     /* Desktop's own drop-shadow replaces the mobile sheet's (box-shadow
        doesn't merge across cascaded rules) — the wood-cased ring from the
        base .sidebar rule stays alongside it. */
@@ -1534,7 +1543,7 @@ select {
 
 .now-playing-card__title {
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
