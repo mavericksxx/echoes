@@ -230,11 +230,22 @@ export interface UpdateOptions {
 }
 
 /** Sets `npc.dir` from the direction of its current path segment — facing
- * is decided once per segment, not recomputed every frame (see followPath). */
+ * is decided once per segment, not recomputed every frame (see followPath).
+ * Measured from the current cell's center rather than raw npc.x/npc.y: every
+ * segment after the first starts exactly on a cell center already (followPath
+ * snaps to `target` on arrival), so this is a no-op there, but a path's FIRST
+ * segment can start off-center — a hand-authored home point (DistrictDef.home,
+ * a resident/crowd offset) isn't grid-snapped, and triggerNowPlayingReaction
+ * can kick off a new path mid-stride. That leftover sub-cell offset can rival
+ * a short leg's own length, which is exactly the near-diagonal DIR_HYSTERESIS
+ * was built to resolve — except it was tuned only for mergeUpDiagonals' legs
+ * (dx/dy >= 2), so this incidental noise can flip it and lock the facing onto
+ * the NPC's old axis on a leg that's really mostly horizontal (or vertical). */
 function setSegmentDir(npc: Npc): void {
   const target = npc.path[npc.pathIdx];
   if (!target) return;
-  npc.dir = pickDir(target.x - npc.x, target.y - npc.y, npc.dir);
+  const from = cellCenter(worldToCell({ x: npc.x, y: npc.y }, npc.grid), npc.grid);
+  npc.dir = pickDir(target.x - from.x, target.y - from.y, npc.dir);
 }
 
 const MAX_WANDER_TRIES = 5;
