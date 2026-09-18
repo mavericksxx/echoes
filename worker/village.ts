@@ -36,6 +36,7 @@ import { spotifyGet, SpotifyRequestError } from "./spotify-fetch";
 import { deriveArtists, VALID_RANGES, type SpotifyTopArtistsResponse, type TopArtistOut } from "./top-artists";
 import { resolveArtistMoods, resolveArtistSlots } from "./genre-resolution";
 import { fetchTopTracks, bucketTracksBySlot, type SlottedSong } from "./tracks";
+import { resolveSlotPersonas, type SlotPersona } from "./persona";
 import { clientIp } from "./rate-limit";
 import { slotPlaysBetween } from "./history-query";
 import { activityLevel, type ActivityLevel } from "../shared/activity";
@@ -141,6 +142,12 @@ export interface VillageSlot {
    * with a tagged mood/energy — same weighting and same null cases as
    * `mood` above (always null/non-null together). */
   energy: number | null;
+  /** Phase 7b: this slot's personality + dialogue lines, flavored by its own
+   * top artists and cached in D1 (worker/persona.ts) — null if the slot has
+   * no real top artists yet, the persona stage below failed, or nothing was
+   * cached yet for a slot that just became eligible. Never blocks the rest
+   * of the payload (see handleVillage's persona stage). */
+  persona: SlotPersona | null;
 }
 
 export type VillagePayload =
@@ -199,6 +206,7 @@ function dormantSlots(): VillageSlot[] {
     songs: [],
     mood: null,
     energy: null,
+    persona: null,
   }));
 }
 
@@ -227,7 +235,7 @@ async function pausedPayload(env: Env, range: string): Promise<VillagePayload> {
       activitySource = "history";
       slots = SLOT_IDS.map((slotId) => {
         const share = history.bySlotShare!.get(slotId) ?? 0;
-        return { slotId, activity: activityLevel(share), share, artists: [], songs: [], mood: null, energy: null };
+        return { slotId, activity: activityLevel(share), share, artists: [], songs: [], mood: null, energy: null, persona: null };
       });
     }
   } catch (err) {
@@ -375,8 +383,8 @@ function buildSlots(
     const artists = (bySlot.get(slotId) ?? []).sort((a, b) => b.score - a.score);
     const share = totalRawScore > 0 ? (slotRawScore.get(slotId) ?? 0) / totalRawScore : 0;
     const moodAgg = aggregateSlotMood(artists, moodByArtistId);
-    // songs is filled in by handleVillage's separate tracks stage below —
-    // buildSlots only knows about artists.
+    // songs/persona are filled in by handleVillage's separate tracks/persona
+    // stages below — buildSlots only knows about artists.
     return {
       slotId,
       activity: activityLevel(share),
@@ -385,6 +393,7 @@ function buildSlots(
       songs: [],
       mood: moodAgg?.mood ?? null,
       energy: moodAgg?.energy ?? null,
+      persona: null,
     };
   });
 }
@@ -547,6 +556,39 @@ export async function handleVillage(request: Request, env: Env): Promise<Respons
   } catch (err) {
     console.error("[village] tracks stage failed, songs disabled for this response:", err);
     payload.songsLive = false;
+  }
+
+  // ---- stage: persona (Phase 7b) — its own try/catch, deliberately outside
+  // "assemble": a failure here must never fall back to pausedPayload or drop
+  // songs/artists, only leave every slot's persona at buildSlots' null
+  // default (worker/persona.ts's resolveSlotPersonas is itself guaranteed
+  // never to throw, but this is defense-in-depth, same as the tracks stage).
+  //
+  // Built from `baseline` (long_term top artists — already in hand from the
+  // spotify stage above, no extra fetch) rather than `payload.slots[].artists`
+  // (this request's `range`): a slot's persona fingerprint has to track real
+  // taste, not which era a visitor happened to load first — deriving it from
+  // the range would make every era switch look like a fingerprint change and
+  // regenerate from whichever era was viewed today, defeating the once/day
+  // cap's intent (see worker/persona.ts's doc comment). ----
+  try {
+    const namesBySlot = new Map<string, string[]>();
+    for (const slotId of SLOT_IDS) namesBySlot.set(slotId, []);
+    // `baseline` is already in Spotify's long_term rank order (see
+    // fetchTopArtists/deriveArtists) — pushing in iteration order keeps each
+    // slot's list ranked without a separate sort.
+    for (const artist of baseline) {
+      const slotId = bySlotId.get(artist.id)?.slotId;
+      if (slotId) namesBySlot.get(slotId)!.push(artist.name);
+    }
+    const personaInputs = SLOT_IDS.map((slotId) => ({
+      slotId,
+      topArtistNames: (namesBySlot.get(slotId) ?? []).slice(0, 5),
+    }));
+    const personas = await resolveSlotPersonas(env, ip, personaInputs);
+    payload.slots = payload.slots.map((slot) => ({ ...slot, persona: personas.get(slot.slotId) ?? null }));
+  } catch (err) {
+    console.error("[village] persona stage failed, personas disabled for this response:", err);
   }
 
   try {

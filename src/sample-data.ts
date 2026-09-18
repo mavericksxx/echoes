@@ -34,6 +34,14 @@ export interface Song {
   spotifyUrl?: string;
 }
 
+/** Phase 7b: a slot's personality + dialogue lines. Mirrors worker/
+ * persona.ts's SlotPersona (real data, once connected+live) — this file only
+ * needs the shape, not the D1/Gemini plumbing behind it. */
+export interface Persona {
+  personality: string;
+  dialogue: string[];
+}
+
 export interface SlotListening {
   /** Matches a district id in data/districts.json. */
   slotId: string;
@@ -154,6 +162,152 @@ export const SAMPLE_LISTENING: SlotListening[] = [
   slot("temari", 0, []),
   slot("kankuro", 0, []),
 ];
+
+// Handwritten personas (Phase 7b) for the offline/not-connected fallback —
+// real data gets these from worker/persona.ts's Gemini generation instead
+// (see src/listening-source.ts's getPersona). Only the slots with a nonzero
+// SAMPLE_LISTENING share get one; the four silent slots (choji/tenten/
+// temari/kankuro) fall back to null, same as a live slot with no residents
+// yet — the sidebar's Character section already renders that gracefully.
+const STATIC_PERSONAS: Record<string, Persona> = {
+  naruto: {
+    personality: "Loud, stubborn, and convinced every track is about to be his favorite song ever — again.",
+    dialogue: [
+      "This one's my new favorite. Same as yesterday's new favorite.",
+      "You gotta turn it up or it doesn't count!",
+      "I could run laps to this. I have run laps to this.",
+      "Believe it — this playlist never misses.",
+      "One more song. Okay, five more songs.",
+    ],
+  },
+  sakura: {
+    personality: "Keeps the shop's radio on a strict rotation of whatever's stuck in her head this week.",
+    dialogue: [
+      "Okay but this chorus is unreasonably catchy.",
+      "I've had this on repeat since Tuesday, don't judge me.",
+      "Perfect song for closing up the shop.",
+      "This is my walking-fast-on-purpose song.",
+      "Sing it with me or don't come in.",
+    ],
+  },
+  shikamaru: {
+    personality: "Studies with something low and unbothered playing — never picks it, never turns it off either.",
+    dialogue: [
+      "Too much effort to skip it. It's fine where it is.",
+      "This is background noise doing its job perfectly.",
+      "Troublesome how good this beat is, honestly.",
+      "I'll nap to this. That's the highest compliment I give.",
+      "Don't ask me to explain it, just let it play.",
+    ],
+  },
+  kakashi: {
+    personality: "Reads with one earbud in, something glitchy and precise humming under the page.",
+    dialogue: [
+      "Hm. This one's got a good pulse to it.",
+      "Didn't hear you come in — good track, my bad.",
+      "This is the kind of thing you notice on the third listen.",
+      "Steady beat. Steady hands. It works.",
+      "I'll tell you the artist later. Maybe.",
+    ],
+  },
+  gaara: {
+    personality: "Keeps the volume low and the mood lower — this district doesn't do upbeat.",
+    dialogue: [
+      "Fits the forest better than most people do.",
+      "This one understands the quiet.",
+      "I don't need it loud. I need it honest.",
+      "Some nights this is the only company I want.",
+      "Don't ask me why it's sad. It just is.",
+    ],
+  },
+  rocklee: {
+    personality: "Trains harder when something loud is on — the louder, the more reps.",
+    dialogue: [
+      "THIS is what a warm-up song sounds like!",
+      "Five hundred push-ups, one riff. Let's go!",
+      "If it doesn't make my ears ring, it's not working hard enough.",
+      "Youthful energy AND a killer breakdown — unbeatable combo!",
+      "Turn it up or I'm turning up the reps instead!",
+    ],
+  },
+  neji: {
+    personality: "Precise taste, precise volume — nothing plays here without a reason.",
+    dialogue: [
+      "Smooth. Deliberate. As it should be.",
+      "This track knows exactly what it's doing.",
+      "I don't repeat songs by accident.",
+      "Fate had nothing to do with this playlist. I curated it.",
+      "Quiet room, good song — that's the whole plan.",
+    ],
+  },
+  sasuke: {
+    personality: "Something dark and moody plays behind the counter whether anyone's shopping or not.",
+    dialogue: [
+      "Don't ask what it's about. It's not about anything.",
+      "This is the only thing in here that gets it.",
+      "Play it again. I wasn't listening the first time.",
+      "It's not brooding, it's atmosphere.",
+      "You wouldn't get it.",
+    ],
+  },
+  kiba: {
+    personality: "Blasts something fast and scrappy through the market stall speakers, dog included.",
+    dialogue: [
+      "Akamaru barks along, it's basically a duet.",
+      "This one's got teeth. I like it.",
+      "Three chords and a bad attitude — perfect.",
+      "Turn it up before the whole market complains.",
+      "Fast song, fast walk, let's move.",
+    ],
+  },
+  hinata: {
+    personality: "Something gentle drifts through the garden room — she never plays it loud enough to notice at first.",
+    dialogue: [
+      "It's soft. I like that it doesn't rush.",
+      "This one feels like the garden in the morning.",
+      "I hope it's okay if I play it again.",
+      "There's something honest about the quiet parts.",
+      "I could listen to this for a long time.",
+    ],
+  },
+  ino: {
+    personality: "Rotates something a little off-center at the flower shop — nothing that plays on the radio.",
+    dialogue: [
+      "Nobody else in the village listens to this. Their loss.",
+      "Found this one on a whim, kept it forever.",
+      "It's a mood, okay? Let me have it.",
+      "This is the good kind of weird.",
+      "Trust me, it grows on you like everything here does.",
+    ],
+  },
+  shino: {
+    personality: "The general store hums with something so quiet you might not register it's playing at all.",
+    dialogue: [
+      "It's there if you listen for it.",
+      "Most people don't notice. I prefer it that way.",
+      "This is less a song and more a room tone.",
+      "It settles the shop. That's enough.",
+      "I wouldn't call it background. I'd call it structure.",
+    ],
+  },
+  guy: {
+    personality: "Trains to something with real swing to it — insists everyone can hear the youthful spirit in it.",
+    dialogue: [
+      "THIS is the sound of springtime youth, my friend!",
+      "A good horn line is worth a thousand push-ups!",
+      "Listen to that rhythm section — flawless technique!",
+      "I challenge you to sit still through this one!",
+      "Music like this is why I train before dawn!",
+    ],
+  },
+};
+
+/** A slot's handwritten sample persona, or null for a silent slot (see
+ * STATIC_PERSONAS' doc comment) — the offline counterpart to
+ * src/listening-source.ts's real getPersona(). */
+export function getPersona(slotId: string): Persona | null {
+  return STATIC_PERSONAS[slotId] ?? null;
+}
 
 const BY_SLOT = new Map(SAMPLE_LISTENING.map((s) => [s.slotId, s]));
 

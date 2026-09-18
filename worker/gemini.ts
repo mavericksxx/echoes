@@ -167,11 +167,13 @@ function snippet(rawBody: string): string {
  * finishReason, a missing `parts`) previously surfaced as a generic,
  * undiagnosable failure instead of a specific one. Throws `GeminiRequestError`
  * on any failure — network, non-OK status, or an unexpected/empty response —
- * never lets a raw fetch/parse exception escape this module. */
-// Deliberately loose — resultSchema's and moodResultSchema's return values
-// have different property sets (slot/confidence vs mood/energy), and this
-// param only ever gets JSON.stringify'd, never inspected by shape.
-async function generateJson(env: Env, prompt: string, schema: Record<string, unknown>): Promise<string> {
+ * never lets a raw fetch/parse exception escape this module.
+ *
+ * Exported (Phase 7b) so worker/persona.ts can reuse this exact request/
+ * response handling for its own schema instead of duplicating it — `schema`
+ * is typed as a loose `Record<string, unknown>` rather than `ReturnType<typeof resultSchema>`
+ * for exactly that reuse; the function only ever JSON.stringifies it. */
+export async function generateJson(env: Env, prompt: string, schema: Record<string, unknown>): Promise<string> {
   let res: Response;
   try {
     res = await fetch(`${API_URL}?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {

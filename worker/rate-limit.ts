@@ -127,9 +127,9 @@ export async function geminiQuotaAvailable(env: Env, ip: string): Promise<boolea
 }
 
 /** Records one Gemini API call (one batched classify-genres, classify-artists,
- * Phase 7a classify-moods, or Phase 7c caption-generation request, regardless of how many items were in
+ * Phase 7a classify-moods, Phase 7b persona-generation, or Phase 7c caption-generation request, regardless of how many items were in
  * it) against both the global and per-IP daily caps. */
-export async function logGeminiCall(env: Env, ip: string, kind: "genres" | "artists" | "moods" | "captions"): Promise<void> {
+export async function logGeminiCall(env: Env, ip: string, kind: "genres" | "artists" | "moods" | "captions" | "persona"): Promise<void> {
   try {
     await env.DB.prepare(
       "INSERT INTO usage_log (endpoint, status, retry_429_count, created_at, ip) VALUES (?, 200, 0, ?, ?)",

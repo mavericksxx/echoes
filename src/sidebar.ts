@@ -8,12 +8,13 @@
 
 import { SLOTS, type Slot } from "../data/loader";
 import { drawPortrait, type ImageMap } from "./render";
-import { SAMPLE_NOW, type Song } from "./sample-data";
+import { SAMPLE_NOW, type Persona, type Song } from "./sample-data";
 import {
   activitySource,
   getActivity,
   getArtists,
   getNowPlaying,
+  getPersona,
   getSamplePlaysLogged,
   getSongs,
   isVillageLive,
@@ -69,6 +70,7 @@ let portraitCanvas: HTMLCanvasElement;
 let nameEl: HTMLElement;
 let genrePill: HTMLElement;
 let locationEl: HTMLElement;
+let dialogueEl: HTMLElement;
 let tablistEl: HTMLElement;
 let panelHost: HTMLElement;
 let closeBtn: HTMLButtonElement;
@@ -480,6 +482,53 @@ function renderArtists(container: HTMLElement, ctx: SectionContext): void {
   list.className = "artist-list";
   artists.forEach((a) => list.appendChild(buildArtistRow(a, () => ctx.switchToSongs(a.id ?? a.name))));
   container.appendChild(list);
+}
+
+// ---------------------------------------------------------------------------
+// Character (Phase 7b) — personality + dialogue lines flavored by this
+// slot's own top artists (worker/persona.ts), or src/sample-data.ts's
+// handwritten personas offline. Null (no personality yet, or a genuinely
+// quiet slot) renders a plain empty state, same convention as every other
+// section here — never a loading spinner, since a persona either already
+// came back with /api/village or it didn't this time.
+// ---------------------------------------------------------------------------
+function renderCharacter(container: HTMLElement, ctx: SectionContext): void {
+  const persona = getPersona(ctx.slot.district.id);
+  if (!persona) {
+    const empty = document.createElement("p");
+    empty.className = "sidebar-empty";
+    empty.textContent = isVillageLive()
+      ? "No personality generated for this district yet."
+      : "This district hasn't found its voice yet.";
+    container.appendChild(empty);
+    return;
+  }
+
+  const heading = document.createElement("p");
+  heading.className = "sidebar-heading";
+  heading.textContent = "Personality";
+  container.appendChild(heading);
+
+  const personality = document.createElement("p");
+  personality.className = "character-personality";
+  personality.textContent = persona.personality;
+  container.appendChild(personality);
+
+  if (persona.dialogue.length > 0) {
+    const dialogueHeading = document.createElement("p");
+    dialogueHeading.className = "sidebar-heading";
+    dialogueHeading.textContent = "Says";
+    container.appendChild(dialogueHeading);
+
+    const list = document.createElement("ul");
+    list.className = "character-dialogue";
+    persona.dialogue.forEach((line) => {
+      const item = document.createElement("li");
+      item.textContent = line;
+      list.appendChild(item);
+    });
+    container.appendChild(list);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -900,6 +949,7 @@ const SECTIONS: Section[] = [
   { id: "overview", label: "Overview", render: renderOverview },
   { id: "songs", label: "Songs", render: renderSongs },
   { id: "artists", label: "Artists", render: renderArtists },
+  { id: "character", label: "Character", render: renderCharacter },
   { id: "history", label: "History", render: renderHistory },
   // Global — deliberately ignores `ctx.slot` (SPEC.md's Phase 8.5: this is
   // the listener's whole Wrapped, not filtered to whichever character's
@@ -964,12 +1014,30 @@ function renderSection(sectionId: string): void {
   });
 }
 
+/** One dialogue line to show in the header's info card — picked at random
+ * each time the sidebar opens for this slot (flavor text, not data a
+ * visitor would ever need to compare across opens), null if the slot has no
+ * persona yet. */
+function pickDialogueLine(persona: Persona | null): string | null {
+  if (!persona || persona.dialogue.length === 0) return null;
+  const i = Math.floor(Math.random() * persona.dialogue.length);
+  return persona.dialogue[i] ?? null;
+}
+
 function renderHeader(slot: Slot): void {
   const portraitCtx = portraitCanvas.getContext("2d");
   if (portraitCtx) drawPortrait(portraitCtx, images, slot.character);
   nameEl.textContent = slot.character.name;
   genrePill.textContent = slot.district.genre;
   locationEl.textContent = slot.district.location;
+
+  // Phase 7b: a line of this character's dialogue (worker/persona.ts / the
+  // sample-data fallback), shown right in the header so it's visible the
+  // instant the sidebar opens — before a visitor even reaches the Character
+  // tab below. Hidden entirely rather than left blank when there's none.
+  const line = pickDialogueLine(getPersona(slot.district.id));
+  dialogueEl.textContent = line ? `“${line}”` : "";
+  dialogueEl.hidden = !line;
 }
 
 // ---------------------------------------------------------------------------
@@ -1009,7 +1077,9 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
   locationEl = document.createElement("span");
   locationEl.className = "sidebar__location";
   meta.append(genrePill, locationEl);
-  headerText.append(nameEl, meta);
+  dialogueEl = document.createElement("p");
+  dialogueEl.className = "sidebar__dialogue";
+  headerText.append(nameEl, meta, dialogueEl);
 
   enterBtn = document.createElement("button");
   enterBtn.type = "button";
