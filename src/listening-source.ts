@@ -14,6 +14,7 @@
 
 import { activityLevel, type ActivityLevel } from "../shared/activity";
 import { getListening, nowPlayingSong, totalPlays, topArtists as sampleTopArtists, type Song } from "./sample-data";
+import { getEra } from "./era";
 
 export interface ArtistEntry {
   name: string;
@@ -83,9 +84,12 @@ function indexVillage(payload: VillagePayload): void {
   villageBySlot = payload.connected ? new Map(payload.slots.map((s) => [s.slotId, s])) : new Map();
 }
 
+/** Phase 8b: /api/village is fetched for the current global era (src/era.ts)
+ * — the single source of truth shared with src/top-artists.ts's panel, so
+ * the two never disagree about which window of listening they're showing. */
 async function fetchVillage(): Promise<VillagePayload> {
   try {
-    const res = await fetch("/api/village");
+    const res = await fetch(`/api/village?range=${getEra()}`);
     if (!res.ok) return { connected: false };
     return (await res.json()) as VillagePayload;
   } catch {
@@ -97,6 +101,15 @@ async function fetchVillage(): Promise<VillagePayload> {
  * Spotify connection — the endpoint itself reports `{connected:false}`, and
  * every accessor below just keeps returning the sample-data fallback. */
 export async function initListeningSource(): Promise<void> {
+  village = await fetchVillage();
+  indexVillage(village);
+}
+
+/** Re-fetches /api/village for whatever era is current and swaps it in —
+ * called by main.ts's onEraChange subscription, which then rebuilds the
+ * resident/crowd NPCs from the fresh data (see src/residents.ts's
+ * getArtists dependency) and refreshes the sidebar if it's open. */
+export async function refreshVillage(): Promise<void> {
   village = await fetchVillage();
   indexVillage(village);
 }

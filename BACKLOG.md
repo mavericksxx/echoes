@@ -4,9 +4,10 @@ Phases are defined in SPEC.md. Done: Phase 1 (village, camera, sidebar, UI direc
 Done since: Phase 3 (genres as characters), Phase 3.5 (real Songs tab), **Phase 4** (walkability
 grids + A* — all 17 maps authored and visually verified, 2026-09-18), Phase 4.5 (camera), Phase 5a
 (now-playing card), **Phase 5b** (the village reacts to the playing track), **Phase 8a** (the
-`play_event` log).
+`play_event` log), **Phase 8b** (token cache in D1, history-driven activity, era toggle + sidebar
+History strip — 2026-09-18).
 
-Next: **Phase 8b** (daily rollups + history-driven world) or **Phase 6** (rate-limit ramp test).
+Next: **Phase 8.5** (Wrapped on demand) or **Phase 6** (rate-limit ramp test).
 
 Notes on the finished grid work: two rooms are tight enough to watch — `shopFlower` collapses the 5
 resident/crowd spawn offsets onto 2 distinct cells and `shopWeapons` onto 4 (the others keep all 5),
@@ -18,14 +19,13 @@ and `scripts/walkability-draft-interiors.json` are kept as historical record; 4 
 - **Now-playing widget** (Phase 5a) — display-only card top-right, no controls. Asked 2026-09-18.
 - **Camera fixes** (Phase 4.5) — eased zoom animation + fractional fit-to-screen so phones can
   actually zoom out. Blocked on Phase 4 merging; both touch src/main.ts. Asked 2026-09-18.
-- **Daily rollups + history-driven world** (Phase 8b) — `daily_snapshot`, activity levels from
-  history, era/time-range toggle, sidebar History section. Builds on Phase 8a's `play_event` log
-  (built 2026-09-18), which only logs — none of 8b exists yet.
+- ~~Daily rollups + history-driven world~~ done (Phase 8b, 2026-09-18) — see SPEC.md's Phase 8b
+  deviations for what shipped differently than planned (no `daily_snapshot`; live joins instead).
 - **Wrapped on demand** (Phase 8.5) — minutes listened + top songs/artists/genres over arbitrary
-  ranges. Phase 8a's `play_event` log is now running (built 2026-09-18), so data is accruing from
-  today forward, but Wrapped itself (the view) isn't built — still blocked on that plus Phase 8b's
-  `daily_snapshot`. User chose to log from today forward rather than import a data export
-  (2026-09-18).
+  ranges. Phase 8a's `play_event` log is running and Phase 8b's history-query plumbing
+  (`worker/history-query.ts`) now exists too, so most of the aggregation Wrapped needs is already
+  built — the view itself still isn't. User chose to log from today forward rather than import a
+  data export (2026-09-18).
 - **Playlists as places** (Phase 8.6) — playlists become enterable buildings, distinct from genre
   districts. Verify the playlist endpoints survived Feb 2026 before scoping.
 
@@ -39,13 +39,9 @@ and `scripts/walkability-draft-interiors.json` are kept as historical record; 4 
   `GET /accounts/{id}/workers/scripts/echoes/schedules` and re-register with a `PUT` of
   `[{"cron":"*/15 * * * *"}]` if the list comes back empty.
 
-- **`getAccessToken`'s access-token cache is per-isolate** (`worker/token.ts:19-20`). Phase 8a's
-  15-min cron (`worker/history.ts`) will often land on a cold isolate, so expect roughly one
-  refresh-token POST per cron run instead of one per ~50 minutes (the token's actual TTL). Spotify's
-  PKCE refresh rotates the refresh token on use, so two isolates refreshing concurrently — already
-  possible before 8a — becomes a more frequent pre-existing race, not a new one. Fix: persist the
-  encrypted access token + expiry in `spotify_token` so `getAccessToken` reads it before ever
-  refreshing. Out of scope for 8a (SPEC.md's Phase 8 section).
+- ~~`getAccessToken`'s access-token cache is per-isolate~~ fixed (Phase 8b's Stage 1, 2026-09-18) —
+  `worker/token.ts` now persists the encrypted access token + expiry in `spotify_token` and reads it
+  before ever refreshing, with a `version` column for compare-and-swap across concurrent isolates.
 
 ## Needs the user
 - ~~Register Spotify app~~ done (client id in wrangler.jsonc); account connected 2026-09-17

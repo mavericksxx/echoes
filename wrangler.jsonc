@@ -31,7 +31,12 @@
   "vars": {
     // Public PKCE client id — there is no client secret for this app. Safe
     // to commit (see SPEC.md's "Auth & tokens" section).
-    "SPOTIFY_CLIENT_ID": "d0f1c1c011cf4ae0bed185a84b483208"
+    "SPOTIFY_CLIENT_ID": "d0f1c1c011cf4ae0bed185a84b483208",
+    // Phase 8b: the one owner's IANA timezone, used only to bucket
+    // /api/history/daily's 30-day strip into *their* local calendar days
+    // (worker/history-daily.ts) rather than each visitor's own timezone —
+    // a district's daily bar strip should mean the same thing to everyone.
+    "OWNER_TZ": "Asia/Dubai"
   },
   // TOKEN_KEY (the AES-GCM key used to encrypt the stored refresh token) is
   // a secret, not a var — see README.md's "Connect your Spotify account".

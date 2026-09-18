@@ -4,10 +4,16 @@
 // panel is additive, not a replacement, until Phase 3 wires real data into
 // the districts themselves. No login UI: the chip and panel only ever
 // *reflect* connection state, they never offer a way to connect.
+//
+// Phase 8b: this panel's range tabs are now the one global era control
+// (src/era.ts) — the whole app's single source of truth for which
+// short/medium/long_term window is showing, shared with /api/village (see
+// src/main.ts's onEraChange subscription). Selecting a tab calls
+// era.setEra(), never touches a local range variable directly, so this
+// panel and the village can never end up on different eras.
 
 import { coverPlaceholderGradient } from "./cover-art";
-
-type TimeRange = "short_term" | "medium_term" | "long_term";
+import { ERAS, ERA_LABELS, getEra, onEraChange, setEra, type Era } from "./era";
 
 interface TopArtistOut {
   id: string;
@@ -21,18 +27,10 @@ type TopArtistsResponse =
   | { connected: false }
   | { connected: true; live: boolean; range: string; artists: TopArtistOut[]; cachedAt: string | null };
 
-const RANGES: TimeRange[] = ["short_term", "medium_term", "long_term"];
-const RANGE_LABELS: Record<TimeRange, string> = {
-  short_term: "Recent",
-  medium_term: "6 months",
-  long_term: "All time",
-};
-
 let statusChip: HTMLElement;
 let toggleBtn: HTMLButtonElement;
 let panel: HTMLElement;
 let backdrop: HTMLElement;
-let currentRange: TimeRange = "medium_term";
 let lastConnected = false;
 
 function setStatusChip(state: "not-connected" | "connected" | "paused"): void {
@@ -55,20 +53,20 @@ function buildRangeTabs(): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "ta-range";
   wrap.setAttribute("role", "tablist");
-  wrap.setAttribute("aria-label", "Time range");
-  RANGES.forEach((range) => {
+  wrap.setAttribute("aria-label", "Era");
+  const active = getEra();
+  ERAS.forEach((era) => {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "ta-range-btn";
-    btn.classList.toggle("is-active", range === currentRange);
+    btn.classList.toggle("is-active", era === active);
     btn.setAttribute("role", "tab");
-    btn.setAttribute("aria-selected", String(range === currentRange));
-    btn.textContent = RANGE_LABELS[range];
-    btn.addEventListener("click", () => {
-      if (range === currentRange) return;
-      currentRange = range;
-      void loadAndRender();
-    });
+    btn.setAttribute("aria-selected", String(era === active));
+    btn.textContent = ERA_LABELS[era];
+    // setEra() (not a local variable) is what re-renders this panel — see
+    // the onEraChange subscription in initTopArtists — so the village and
+    // this panel update together no matter which one changed the era.
+    btn.addEventListener("click", () => setEra(era));
     wrap.appendChild(btn);
   });
   return wrap;
@@ -156,7 +154,7 @@ function renderPanel(data: TopArtistsResponse): void {
   panel.appendChild(list);
 }
 
-async function fetchTopArtists(range: TimeRange): Promise<TopArtistsResponse> {
+async function fetchTopArtists(range: Era): Promise<TopArtistsResponse> {
   try {
     const res = await fetch(`/api/top-artists?range=${range}`);
     if (!res.ok) return { connected: true, live: false, range, artists: [], cachedAt: null };
@@ -169,7 +167,7 @@ async function fetchTopArtists(range: TimeRange): Promise<TopArtistsResponse> {
 }
 
 async function loadAndRender(): Promise<void> {
-  const data = await fetchTopArtists(currentRange);
+  const data = await fetchTopArtists(getEra());
 
   if (!data.connected) {
     setStatusChip("not-connected");
@@ -218,6 +216,13 @@ export function initTopArtists(): void {
   window.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && isPanelOpen()) closePanel();
   });
+
+  // Subscribing here (rather than only re-rendering from buildRangeTabs's
+  // click handler) keeps this panel correct regardless of what triggers the
+  // change — today that's only this panel's own tabs, but src/main.ts also
+  // reacts to the same event (rebuilding residents/crowd + refreshing the
+  // sidebar), so nothing here should assume it's the only listener.
+  onEraChange(() => void loadAndRender());
 
   void loadAndRender();
 }
