@@ -73,7 +73,7 @@ interface LatestBanRow {
  * defensively since a misparse here must never turn into "banned forever";
  * an unparseable value fails open (not banned) rather than silently wedging
  * every future cron run. */
-async function isSpotifyBanned(env: Env): Promise<boolean> {
+export async function isSpotifyBanned(env: Env): Promise<boolean> {
   const row = await env.DB.prepare(
     "SELECT retry_after_raw, created_at FROM usage_log WHERE status = 429 ORDER BY id DESC LIMIT 1",
   ).first<LatestBanRow>();

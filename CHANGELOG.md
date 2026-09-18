@@ -378,3 +378,36 @@
     podcast plays, `duration_ms` being track length not listened time, the per-isolate token-cache
     exposure this cron makes more frequent) are documented in SPEC.md's Phase 8 section and
     BACKLOG.md.
+
+- **Phase 8.5 — Wrapped on demand (2026-09-19):**
+  - `GET /api/wrapped?range=week|month|year|all` (`worker/wrapped.ts`, `historyStats`'s rate-limit
+    bucket reused): D1-only over `play_event` for the common case — total plays, `approxMinutes`
+    (`SUM(duration_ms) / 60000`, rounded), top 10 tracks (joined to `track_cache`), top 10 artists
+    (aggregated by `primary_artist_id`, one vote per play — same convention as
+    `worker/history-query.ts`'s `slotPlaysBetween`, which this reuses directly for the top 5 genres +
+    `unclassifiedPlays`). `collectingSince` is always the true whole-history answer, never scoped to
+    `range` — SPEC.md's Phase 8.5 "no backfill" decision means it's the honest way to show how far
+    back real data goes.
+  - **Fallback below ~50 plays in the window:** `/me/top/tracks` (`worker/tracks.ts`'s
+    `fetchTopTracks`, reused as-is) + `/me/top/artists` (`worker/top-artists.ts`'s `deriveArtists`,
+    reused as-is) at week/month → `short_term`, year → `medium_term`, all → `long_term`. Rank-only —
+    `plays`/`totalPlays`/`approxMinutes` come back `null`, never estimated from a rank. Checks
+    `worker/history.ts`'s `isSpotifyBanned` (now exported) before ever calling Spotify, same as the
+    cron. If the fallback can't run at all (not connected, banned, or the calls themselves fail) the
+    thin history payload is returned instead of an error — the one route in this Worker with a
+    deliberately broad catch around its Spotify calls, since SPEC.md's Phase 8.5 says this endpoint
+    must never error over a fallback failure.
+  - **Deviation:** the Spotify fallback's `topGenres` is always `[]`. Spotify has no genre-play-count
+    endpoint, and mapping its artists' raw genres to slots at request time would be an uncached
+    classification call on a page load — the same rule `worker/tracks.ts` already refuses to break.
+  - `src/sidebar.ts` gains a global **Wrapped** tab (`SECTIONS`, ignores the open character —
+    SPEC.md: this is the listener's whole Wrapped, not a per-district one): This week/Month/Year/All
+    time range picker (reusing `.ta-range`/`.ta-range-btn`), plays + "≈ N min (approx.)" stat pair
+    (`.overview-stats`), top songs (`.song-row`), top artists (`.ta-row`, its `.ta-row__genres` slot
+    repurposed for the plays/rank line), top genres (`.artist-row`, resolved to a display name via
+    `data/loader.ts`'s `SLOTS`), "Collecting since ..." shown unconditionally, and a clear "From
+    Spotify's own top lists — not enough logged plays yet" label when `source === "spotify"`.
+    Loading/error/empty states match the existing History tab's wording. Cached per range in a
+    module-level `Map`, including a failed fetch (never auto-retried, same as `historyDaily`) — no
+    new CSS, every class reused from the Overview/Songs/Artists/History tabs and the top-artists
+    panel.

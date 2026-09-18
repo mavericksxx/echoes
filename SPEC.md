@@ -407,6 +407,32 @@ district's play counts.
 - Until Phase 8 has accrued data, the same view can fall back to `/me/top/*` over
   short/medium/long_term — clearly labelled as Spotify's windows, not ours.
 
+**Built (2026-09-19).** `GET /api/wrapped?range=week|month|year|all` (`worker/wrapped.ts`) — D1-only
+over `play_event` once a window has ≥50 plays: `totalPlays`, `approxMinutes`, top 10 tracks/artists,
+top 5 genres (reusing `worker/history-query.ts`'s `slotPlaysBetween`) + `unclassifiedPlays`, and
+`collectingSince` (always the true whole-history value, never scoped to `range` — this is what "show
+the collection start date instead" means in practice). Below 50 plays, falls back to `/me/top/tracks`
++ `/me/top/artists` (reusing `worker/tracks.ts`'s `fetchTopTracks` and `worker/top-artists.ts`'s
+`deriveArtists` as-is) at week/month → `short_term`, year → `medium_term`, all → `long_term` —
+rank-only, every plays/minutes field `null`, never estimated from a rank. `src/sidebar.ts` gained a
+global **Wrapped** tab (ignores the open character on purpose) with the range picker, the "≈ N min
+(approx.)" stat, top songs/artists/genres, an unconditional "Collecting since ..." line, and a "From
+Spotify's own top lists — not enough logged plays yet" label when the fallback served the response.
+
+**Deviations from this section's original plan:**
+- **Fallback `topGenres` is always `[]`**, not derived from Spotify's own per-artist `genres` arrays.
+  Spotify has no genre-play-count endpoint, and mapping raw Spotify genres to slots at request time
+  would mean an uncached classification call on a page load — the same rule `worker/tracks.ts` already
+  refuses to break for the Songs tab. Deferred, not fabricated.
+- **A failed fallback attempt returns the thin history payload, not an error.** `spotifyFallbackPayload`
+  has a deliberately broad catch around its two Spotify calls — the one place in this Worker that
+  doesn't narrow to `SpotifyRequestError` — because this endpoint must degrade to "here's the little
+  history we have" rather than 500 or 429 the whole tab over a fallback that couldn't run.
+- **The ≥50-play threshold counts every play in the window, not just classified ones.** Top
+  songs/artists need no genre classification at all, so gating the whole history path behind
+  `slottedPlays` (rather than raw `play_event` rows) would fall back to Spotify's rank-only view more
+  often than necessary.
+
 **You'll see:** a Wrapped-style read on your listening, any time, over any range you pick.
 
 ### Phase 8.6 — Playlists are places

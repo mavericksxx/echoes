@@ -6,7 +6,7 @@
 // Character (Phase 7), History (Phase 8), This week (Phase 9) without
 // restructuring this file — they'd just push another entry onto SECTIONS.
 
-import type { Slot } from "../data/loader";
+import { SLOTS, type Slot } from "../data/loader";
 import { drawPortrait, type ImageMap } from "./render";
 import { SAMPLE_NOW, type Song } from "./sample-data";
 import {
@@ -582,11 +582,314 @@ function renderHistory(container: HTMLElement, ctx: SectionContext): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Wrapped (Phase 8.5)
+// ---------------------------------------------------------------------------
+// A Wrapped-style read on the listener's *whole* history — not filtered to
+// whichever character's sidebar happens to be open (SPEC.md's Phase 8.5) —
+// over a real arbitrary range, unlike /api/top-artists's fixed Spotify
+// buckets. See worker/wrapped.ts for the response shape and its
+// history/spotify source split.
+type WrappedRange = "week" | "month" | "year" | "all";
+
+const WRAPPED_RANGES: WrappedRange[] = ["week", "month", "year", "all"];
+const WRAPPED_RANGE_LABELS: Record<WrappedRange, string> = {
+  week: "This week",
+  month: "Month",
+  year: "Year",
+  all: "All time",
+};
+
+interface WrappedTrackOut {
+  id: string;
+  name: string;
+  artists: string;
+  art: string | null;
+  plays: number | null;
+  rank: number | null;
+}
+interface WrappedArtistOut {
+  id: string;
+  name: string;
+  image: string | null;
+  plays: number | null;
+  rank: number | null;
+}
+interface WrappedGenreOut {
+  slotId: string;
+  plays: number;
+}
+interface WrappedPayload {
+  range: WrappedRange;
+  source: "history" | "spotify";
+  collectingSince: number | null;
+  totalPlays: number | null;
+  approxMinutes: number | null;
+  topTracks: WrappedTrackOut[];
+  topArtists: WrappedArtistOut[];
+  topGenres: WrappedGenreOut[];
+  unclassifiedPlays: number;
+}
+
+let wrappedRange: WrappedRange = "month";
+// Cached per range, including a failed fetch ("error") — same
+// never-auto-retry convention as historyDaily above; switching ranges and
+// back doesn't re-fetch either.
+const wrappedCache = new Map<WrappedRange, WrappedPayload | "error">();
+const wrappedInFlight = new Set<WrappedRange>();
+
+function formatWrappedDate(epochMs: number): string {
+  return new Date(epochMs).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** Slot id -> the character's display name, matching renderHeader's
+ * `slot.character.name`. Looked up defensively (never throws, unlike
+ * data/loader.ts's getSlot) since a genre's slot_id in D1 could in
+ * principle outlive a roster change — same caution as
+ * worker/history-daily.ts's bySlot guard. */
+function slotDisplayName(slotId: string): string {
+  return SLOTS.find((s) => s.district.id === slotId)?.character.name ?? slotId;
+}
+
+async function fetchWrapped(range: WrappedRange): Promise<WrappedPayload | null> {
+  try {
+    const res = await fetch(`/api/wrapped?range=${range}`);
+    if (!res.ok) return null;
+    return (await res.json()) as WrappedPayload;
+  } catch {
+    return null;
+  }
+}
+
+function loadWrapped(range: WrappedRange): void {
+  if (wrappedCache.has(range) || wrappedInFlight.has(range)) return;
+  wrappedInFlight.add(range);
+  void fetchWrapped(range).then((data) => {
+    wrappedInFlight.delete(range);
+    wrappedCache.set(range, data ?? "error");
+    // If the visitor is still on the Wrapped tab looking at this same range
+    // when the fetch resolves, refresh it in place instead of leaving it on
+    // "loading" (same pattern as loadHistoryDaily above).
+    if (currentSlot && activeSectionId === "wrapped" && wrappedRange === range) renderSection("wrapped");
+  });
+}
+
+function buildWrappedSongRow(track: WrappedTrackOut): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "song-row";
+
+  const cover = document.createElement("div");
+  cover.className = "song-row__cover";
+  if (track.art) {
+    const img = document.createElement("img");
+    img.className = "song-row__cover-img";
+    img.src = track.art;
+    img.alt = "";
+    img.loading = "lazy";
+    cover.appendChild(img);
+  } else {
+    cover.style.background = coverPlaceholderGradient(`${track.name}|${track.artists}`);
+  }
+
+  const info = document.createElement("div");
+  info.className = "song-row__info";
+  const title = document.createElement("p");
+  title.className = "song-row__title";
+  title.textContent = track.name;
+  const meta = document.createElement("p");
+  meta.className = "song-row__meta";
+  meta.textContent = track.artists;
+  info.append(title, meta);
+
+  // Same plays/rank fallback as buildSongRow above: history gives plays,
+  // the Spotify fallback gives only rank.
+  const plays = document.createElement("span");
+  plays.className = "song-row__plays";
+  if (track.plays !== null) plays.textContent = `${track.plays} plays`;
+  else if (track.rank !== null) plays.textContent = `#${track.rank}`;
+
+  row.append(cover, info, plays);
+  return row;
+}
+
+function buildWrappedArtistRow(artist: WrappedArtistOut): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "ta-row";
+
+  const art = document.createElement("div");
+  art.className = "ta-row__art";
+  if (artist.image) {
+    const img = document.createElement("img");
+    img.src = artist.image;
+    img.alt = "";
+    img.loading = "lazy";
+    art.appendChild(img);
+  } else {
+    art.style.background = coverPlaceholderGradient(artist.id);
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "ta-row__meta";
+  const name = document.createElement("p");
+  name.className = "ta-row__name";
+  name.textContent = artist.name;
+  // Reuses .ta-row__genres purely for its "small line under the name" style
+  // — holds the plays/rank fallback text here, not genres.
+  const sub = document.createElement("p");
+  sub.className = "ta-row__genres";
+  sub.textContent = artist.plays !== null ? `${artist.plays} plays` : artist.rank !== null ? `#${artist.rank}` : " ";
+  meta.append(name, sub);
+
+  row.append(art, meta);
+  return row;
+}
+
+function buildWrappedGenreRow(genre: WrappedGenreOut): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "artist-row";
+
+  const name = document.createElement("span");
+  name.className = "artist-row__name";
+  name.textContent = slotDisplayName(genre.slotId);
+
+  const plays = document.createElement("span");
+  plays.className = "artist-row__plays";
+  plays.textContent = `${genre.plays} plays`;
+
+  row.append(name, plays);
+  return row;
+}
+
+function renderWrappedContent(container: HTMLElement, data: WrappedPayload): void {
+  if (data.source === "spotify") {
+    const note = document.createElement("p");
+    note.className = "activity-source-note";
+    note.textContent = "From Spotify's own top lists — not enough logged plays yet";
+    container.appendChild(note);
+  }
+
+  // SPEC.md's Phase 8.5: shown always, regardless of source or how thin this
+  // particular range's data is — never fabricated, never hidden.
+  const collecting = document.createElement("p");
+  collecting.className = "history-caption";
+  collecting.textContent =
+    data.collectingSince !== null
+      ? `Collecting since ${formatWrappedDate(data.collectingSince)}`
+      : "Just started collecting — no history yet";
+  container.appendChild(collecting);
+
+  const isEmpty = data.topTracks.length === 0 && data.topArtists.length === 0 && data.topGenres.length === 0;
+
+  if (data.source === "history" && data.totalPlays !== null && data.approxMinutes !== null && !isEmpty) {
+    const stats = document.createElement("div");
+    stats.className = "overview-stats";
+    const playsStat = document.createElement("div");
+    playsStat.className = "overview-stat";
+    playsStat.innerHTML = `<strong>${data.totalPlays}</strong><span>plays</span>`;
+    const minutesStat = document.createElement("div");
+    minutesStat.className = "overview-stat";
+    // "duration_ms" is a track's catalog length, not time actually listened
+    // (worker/wrapped.ts) — the "≈" and "approx." label are load-bearing,
+    // not decorative.
+    minutesStat.innerHTML = `<strong>≈ ${data.approxMinutes}</strong><span>min (approx.)</span>`;
+    stats.append(playsStat, minutesStat);
+    container.appendChild(stats);
+  }
+
+  if (isEmpty) {
+    const empty = document.createElement("p");
+    empty.className = "sidebar-empty";
+    empty.textContent = "No listening yet for this range.";
+    container.appendChild(empty);
+    return;
+  }
+
+  if (data.topTracks.length) {
+    const heading = document.createElement("p");
+    heading.className = "sidebar-heading";
+    heading.textContent = "Top songs";
+    container.appendChild(heading);
+    const list = document.createElement("div");
+    list.className = "song-list";
+    data.topTracks.forEach((t) => list.appendChild(buildWrappedSongRow(t)));
+    container.appendChild(list);
+  }
+
+  if (data.topArtists.length) {
+    const heading = document.createElement("p");
+    heading.className = "sidebar-heading";
+    heading.textContent = "Top artists";
+    container.appendChild(heading);
+    const list = document.createElement("div");
+    list.className = "artist-list";
+    data.topArtists.forEach((a) => list.appendChild(buildWrappedArtistRow(a)));
+    container.appendChild(list);
+  }
+
+  if (data.topGenres.length) {
+    const heading = document.createElement("p");
+    heading.className = "sidebar-heading";
+    heading.textContent = "Top genres";
+    container.appendChild(heading);
+    const list = document.createElement("div");
+    list.className = "artist-list";
+    data.topGenres.forEach((g) => list.appendChild(buildWrappedGenreRow(g)));
+    container.appendChild(list);
+  }
+}
+
+function renderWrapped(container: HTMLElement): void {
+  const rangePicker = document.createElement("div");
+  rangePicker.className = "ta-range";
+  rangePicker.setAttribute("role", "tablist");
+  rangePicker.setAttribute("aria-label", "Wrapped range");
+  WRAPPED_RANGES.forEach((range) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ta-range-btn";
+    btn.classList.toggle("is-active", range === wrappedRange);
+    btn.setAttribute("role", "tab");
+    btn.setAttribute("aria-selected", String(range === wrappedRange));
+    btn.textContent = WRAPPED_RANGE_LABELS[range];
+    btn.addEventListener("click", () => {
+      if (range === wrappedRange) return;
+      wrappedRange = range;
+      renderSection("wrapped");
+    });
+    rangePicker.appendChild(btn);
+  });
+  container.appendChild(rangePicker);
+
+  loadWrapped(wrappedRange);
+  const cached = wrappedCache.get(wrappedRange);
+
+  if (cached === undefined) {
+    const loading = document.createElement("p");
+    loading.className = "sidebar-empty";
+    loading.textContent = "Loading Wrapped…";
+    container.appendChild(loading);
+    return;
+  }
+  if (cached === "error") {
+    const failed = document.createElement("p");
+    failed.className = "sidebar-empty";
+    failed.textContent = "Wrapped isn't available right now.";
+    container.appendChild(failed);
+    return;
+  }
+
+  renderWrappedContent(container, cached);
+}
+
 const SECTIONS: Section[] = [
   { id: "overview", label: "Overview", render: renderOverview },
   { id: "songs", label: "Songs", render: renderSongs },
   { id: "artists", label: "Artists", render: renderArtists },
   { id: "history", label: "History", render: renderHistory },
+  // Global — deliberately ignores `ctx.slot` (SPEC.md's Phase 8.5: this is
+  // the listener's whole Wrapped, not filtered to whichever character's
+  // sidebar happens to be open).
+  { id: "wrapped", label: "Wrapped", render: (container) => renderWrapped(container) },
 ];
 
 // ---------------------------------------------------------------------------

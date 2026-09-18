@@ -16,13 +16,16 @@
 // `triggers.crons`) driving worker/history.ts's play-event log, plus
 // /api/history/stats for its small frontend readout. Phase 8b adds
 // /api/history/daily (history-daily.ts) for the sidebar's per-district
-// 30-day strip.
+// 30-day strip. Phase 8.5 adds /api/wrapped (wrapped.ts) for the sidebar's
+// Wrapped tab — an on-demand read over play_event, falling back to Spotify's
+// own top lists when a range's history is too thin.
 
 import { handleTopArtists } from "./top-artists";
 import { handleVillage } from "./village";
 import { handleNowPlaying } from "./now-playing";
 import { runHistorySync, handleHistoryStats } from "./history";
 import { handleHistoryDaily } from "./history-daily";
+import { handleWrapped } from "./wrapped";
 import { clientIp, enforceRateLimit, RateLimitError, RATE_LIMIT_RULES } from "./rate-limit";
 
 export interface Env {
@@ -52,6 +55,11 @@ const ROUTE_BUCKETS: Record<string, keyof typeof RATE_LIMIT_RULES> = {
   // D1-only reads too (worker/history-daily.ts) — same generous limit as
   // historyStats, reusing its rule rather than defining a near-identical one.
   "/api/history/daily": "historyStats",
+  // Phase 8.5: can fall back to a couple of Spotify calls (worker/wrapped.ts),
+  // but so can /api/top-artists at the same "topArtists" bucket's rate — the
+  // D1-only common case doesn't need its own stricter rule either, so this
+  // reuses historyStats same as /api/history/daily above.
+  "/api/wrapped": "historyStats",
 };
 
 export default {
@@ -98,6 +106,10 @@ export default {
 
     if (url.pathname === "/api/history/daily") {
       return handleHistoryDaily(env);
+    }
+
+    if (url.pathname === "/api/wrapped") {
+      return handleWrapped(request, env);
     }
 
     // Reached only when a request matches neither a rate-limited /api/*
