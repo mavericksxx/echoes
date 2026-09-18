@@ -58,6 +58,7 @@ const captionCtx = captionCanvas.getContext("2d");
 const stageArea = el<HTMLDivElement>("stageArea");
 const villageCaption = el<HTMLParagraphElement>("villageCaption");
 const backBtn = el<HTMLButtonElement>("backBtn");
+const topbarContext = el<HTMLDivElement>("topbarContext");
 const districtGenre = el<HTMLSpanElement>("districtGenre");
 const districtName = el<HTMLSpanElement>("districtName");
 const zoomInBtn = el<HTMLButtonElement>("zoomInBtn");
@@ -341,6 +342,7 @@ function applyDistrictScene(slotId: string): void {
   camY = clampAxis(npc.y - viewH / 2, mapH, viewH);
   districtGenre.textContent = district.genre;
   districtName.textContent = character.name;
+  topbarContext.hidden = false;
   backBtn.hidden = false;
   villageCaption.hidden = true;
 }
@@ -353,7 +355,11 @@ function applyVillageScene(): void {
   fitCanvas();
   centerCamera();
   districtGenre.textContent = "";
-  districtName.textContent = "Konoha Village";
+  districtName.textContent = "";
+  // No village-wide name/genre to show (see index.html's empty #districtName)
+  // — hide the whole readout so its padding doesn't leave a stray gap in the
+  // topbar's flex row (see [hidden] in style.css).
+  topbarContext.hidden = true;
   backBtn.hidden = true;
   villageCaption.hidden = false;
 }
