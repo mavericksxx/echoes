@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- **Phase 5a — Now-playing:** Shortened the idle poll to 15s so the listening card appears sooner;
+  the worker's shared cache still bounds Spotify calls.
 - Project idea (IDEA.md) and phased spec (SPEC.md).
 - Konoha prototype (`prototypes/konoha-demo/`) — sprite/map assets are local-only and not committed.
 - **Phase 1 — Village on screen (no Spotify yet):**
