@@ -21,6 +21,7 @@ import { bakeRecolor } from "./recolor";
 import { buildCrowd, buildResidents, drawActivityTreatment, type Resident } from "./residents";
 import { close as closeSidebar, initSidebar, isSidebarOpen, openSidebar, setSidebarImages } from "./sidebar";
 import { initTopArtists } from "./top-artists";
+import { initNowPlayingCard } from "./now-playing-card";
 import { getActivity, getNowPlaying, initListeningSource } from "./listening-source";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
 
@@ -77,6 +78,7 @@ initSidebar(sidebarRoot, sidebarBackdrop, {
   },
 });
 initTopArtists();
+initNowPlayingCard();
 
 let images: ImageMap = {};
 let mode: Mode = "village"; // default view: the whole village, everyone present

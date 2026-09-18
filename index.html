@@ -43,6 +43,11 @@
           <div class="top-artists-backdrop" id="topArtistsBackdrop" hidden></div>
           <aside class="top-artists-panel" id="topArtistsPanel" hidden aria-hidden="true" aria-label="Your top artists"></aside>
 
+          <!-- Phase 5a: display-only now-playing card, populated by
+               src/now-playing-card.ts. Starts hidden — shown only while
+               something is actually playing. -->
+          <aside class="now-playing-card" id="nowPlayingCard" hidden aria-hidden="true" aria-label="Now playing"></aside>
+
           <main class="main" id="main">
             <div class="stage-area" id="stageArea">
               <canvas id="game" tabindex="0" aria-label="Village stage"></canvas>

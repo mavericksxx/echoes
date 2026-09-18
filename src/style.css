@@ -97,6 +97,12 @@
   /* Z-index */
   --z-topbar: 10;
   --z-floating: 1;
+  /* Phase 5a's now-playing card: HUD chrome like the topbar, floated above
+     it (it sits visually below/beside the topbar and must never be hidden
+     under it), but still below the modal overlays (backdrop/sidebar/
+     top-artists-panel) so those still cover it when open, same as they'd
+     cover any other floating chrome. */
+  --z-now-playing: 15;
   --z-tabbar: 20;
   --z-backdrop: 25;
   --z-sidebar: 30;
@@ -1243,6 +1249,96 @@ select {
     left: auto;
     right: var(--sidebar-inset);
     width: 320px;
+  }
+}
+
+/* ==========================================================================
+   Phase 5a — now-playing card (src/now-playing-card.ts). Display-only HUD
+   card, top-right, below the topbar — same frosted --color-glass-panel
+   treatment as .top-artists-panel/.sidebar so it reads as part of the
+   existing chrome. Starts hidden (index.html) and fades via .is-visible;
+   the global prefers-reduced-motion rule near the top of this file already
+   collapses that transition to near-instant.
+   ========================================================================== */
+.now-playing-card {
+  position: fixed;
+  z-index: var(--z-now-playing);
+  top: calc(var(--topbar-h) + var(--safe-top) + var(--space-2));
+  right: calc(var(--space-3) + var(--safe-right));
+  width: min(240px, calc(100vw - 2 * var(--space-3)));
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity var(--duration-base) var(--ease-standard), transform var(--duration-base) var(--ease-standard);
+  pointer-events: none;
+}
+
+.now-playing-card.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.now-playing-card__link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  /* --color-glass-panel + the same faint top-down light wash as
+     .top-artists-panel/.sidebar — see those rules' comments. */
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 32%), var(--color-glass-panel);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-panel);
+  backdrop-filter: blur(30px) saturate(140%);
+  -webkit-backdrop-filter: blur(30px) saturate(140%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 24px 48px -20px rgba(0, 0, 0, 0.65);
+  text-decoration: none;
+  color: inherit;
+}
+
+.now-playing-card__cover {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--cover-radius);
+  overflow: hidden;
+  background: var(--color-canvas-bg);
+}
+
+/* object-fit: contain, not cover — same choice as .np-cover-img/
+   .song-row__cover-img (both real Spotify cover art): the container is
+   square and so is the source, so this never crops, matching the
+   attribution rule that cover art stays unmodified. */
+.now-playing-card__cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.now-playing-card__meta {
+  min-width: 0;
+}
+
+.now-playing-card__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.now-playing-card__artist {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 900px) {
+  .now-playing-card {
+    right: calc(var(--space-4) + var(--safe-right));
+    width: 240px;
   }
 }
 
