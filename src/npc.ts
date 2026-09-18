@@ -245,7 +245,12 @@ function setSegmentDir(npc: Npc): void {
   const target = npc.path[npc.pathIdx];
   if (!target) return;
   const from = cellCenter(worldToCell({ x: npc.x, y: npc.y }, npc.grid), npc.grid);
-  npc.dir = pickDir(target.x - from.x, target.y - from.y, npc.dir);
+  const dx = target.x - from.x;
+  const dy = target.y - from.y;
+  // A first waypoint inside the NPC's own cell measures as zero here —
+  // keep the current facing rather than letting pickDir guess an axis.
+  if (dx === 0 && dy === 0) return;
+  npc.dir = pickDir(dx, dy, npc.dir);
 }
 
 const MAX_WANDER_TRIES = 5;
