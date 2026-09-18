@@ -6,6 +6,9 @@ Next: **Phase 4 — characters walk properly** (walkability grid + A*).
 Old: **Phase 1 — Village on screen with sample data** (deployed to echoes.parthkohale.com; fix pass in progress: camera, all-characters default + song cards, map watermark cleanup).
 
 ## Asked for, slotted later
+- **Now-playing widget** (Phase 5a) — display-only card top-right, no controls. Asked 2026-09-18.
+- **Camera fixes** (Phase 4.5) — eased zoom animation + fractional fit-to-screen so phones can
+  actually zoom out. Blocked on Phase 4 merging; both touch src/main.ts. Asked 2026-09-18.
 - **Wrapped on demand** (Phase 8.5) — minutes listened + top songs/artists/genres over arbitrary
   ranges. Blocked on Phase 8's history log; Spotify's API has no counts or durations. User chose to
   log from today forward rather than import a data export (2026-09-18).

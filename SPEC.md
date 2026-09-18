@@ -222,8 +222,27 @@ instead of a fake play count, and tapping a featured artist's row no longer empt
 
 **You'll see:** characters wander naturally, no walking on roofs or through walls.
 
+### Phase 4.5 — Camera feels right
+- **Mobile can't zoom out (bug).** `ZOOM_MIN = 1` plus `fitZoom = Math.floor(min(availW/mapW,
+  availH/mapH))` (src/main.ts:277,300) means a 390px-wide phone viewport against the 767px town map
+  computes `floor(0.51) = 0`, clamped up to 1 — so the camera is pinned at 1:1 and shows a vertical
+  strip. The floor of a sub-1 ratio is always 0, so the map can never fit on a phone. Fix: allow
+  fractional zoom below 1, with the minimum being a true fit-to-screen.
+- **Stepped zoom feels janky.** **[decided 2026-09-18]** Keep settling on integer zoom levels (the
+  existing "never a fractional scale" rule at src/main.ts:331 is what keeps pixel art crisp — at a
+  fractional scale some source pixels get 2 screen px and some get 1, which shimmers), but animate
+  between levels over ~200ms with easing. Smooth to use, crisp at rest. Rejected fully-continuous
+  zoom for that shimmer, and a phone/desktop split for the divergent feel.
+
+**You'll see:** zoom glides instead of jumping, and the whole village fits on a phone screen.
+
 ### Phase 5 — Live reactions
-- Poll currently-playing (~5s playing / 30–60s idle) through the wrapper.
+- Split into 5a and 5b; 5a is the user-visible half and ships first.
+- **5a — Now-playing widget.** Poll currently-playing (~5s playing / 30–60s idle) through the
+  wrapper, and show it top-right as a **display-only** card: cover art, title, artist. **No transport
+  controls** — the user explicitly asked for a view, not a player (2026-09-18). Hides when nothing
+  is playing. Spotify attribution rules apply as in Phase 3.5 (unmodified art, links out, logo).
+- **5b — Village reactions.** Uses the same poll.
 - Now-playing song → its slot's character walks to their spot + special pose + caption (template text, no AI yet).
 
 **You'll see:** play a song on Spotify → the right character reacts within seconds.
