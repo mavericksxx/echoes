@@ -13,6 +13,7 @@
 // track is still playing.
 
 import { activityLevel, type ActivityLevel } from "../shared/activity";
+import type { MoodId } from "../shared/mood";
 import { getListening, nowPlayingSong, totalPlays, topArtists as sampleTopArtists, type Song } from "./sample-data";
 import { getEra } from "./era";
 
@@ -57,6 +58,13 @@ export interface VillageSlotIn {
   share: number;
   artists: VillageArtistIn[];
   songs: VillageSongIn[];
+  /** Phase 7a: this slot's play/share-weighted dominant mood (worker/
+   * village.ts's VillageSlot.mood) — null if no resident artist has a mood
+   * tagged yet. */
+  mood: MoodId | null;
+  /** Phase 7a: this slot's score-weighted mean energy, 0..1 (worker/
+   * village.ts's VillageSlot.energy) — null alongside `mood` above. */
+  energy: number | null;
 }
 
 export type VillagePayload =
@@ -215,4 +223,47 @@ export function getSamplePlaysLogged(slotId: string): number {
 export function getNowPlaying(slotId: string): Song | null {
   if (isVillageLive()) return null;
   return nowPlayingSong(getListening(slotId));
+}
+
+export interface MoodEnergy {
+  mood: MoodId | null;
+  energy: number | null;
+}
+
+// Phase 7a: plausible per-district mood/energy for the offline/sample
+// fallback, keyed by genre character (data/districts.json's `genre`) so
+// sample mode exercises the district tint + walk-speed/perform-frequency
+// treatment (src/residents.ts, src/npc.ts) too, not just real connected
+// data — same "sample mode keeps working" rule every other accessor above
+// already follows. Not derived from anything live; picked by ear per genre.
+const SAMPLE_MOOD: Record<string, MoodEnergy> = {
+  naruto: { mood: "upbeat", energy: 0.75 }, // Hip-Hop
+  sakura: { mood: "upbeat", energy: 0.7 }, // Pop
+  neji: { mood: "dreamy", energy: 0.45 }, // R&B
+  rocklee: { mood: "intense", energy: 0.9 }, // Rock/Metal
+  shikamaru: { mood: "calm", energy: 0.2 }, // Lo-fi
+  gaara: { mood: "melancholy", energy: 0.55 }, // Emo/Alt
+  sasuke: { mood: "melancholy", energy: 0.5 }, // Darkwave
+  kakashi: { mood: "upbeat", energy: 0.7 }, // Electronic
+  kiba: { mood: "intense", energy: 0.95 }, // Punk
+  hinata: { mood: "calm", energy: 0.3 }, // Folk
+  shino: { mood: "dreamy", energy: 0.15 }, // Ambient
+  guy: { mood: "calm", energy: 0.4 }, // Jazz
+  ino: { mood: "dreamy", energy: 0.5 }, // Indie
+  choji: { mood: "upbeat", energy: 0.6 }, // Soul/Funk
+  tenten: { mood: "upbeat", energy: 0.8 }, // Latin
+  temari: { mood: "calm", energy: 0.25 }, // Classical
+  kankuro: { mood: "intense", energy: 0.95 }, // Metalcore
+};
+
+/** A slot's mood/energy: real (village-derived) when connected+live, else
+ * the sample fallback above. Drives src/residents.ts's district tint and
+ * src/npc.ts's energy-scaled walk speed/perform frequency — both treat a
+ * null mood/energy as "no change from today's behavior". */
+export function getMoodEnergy(slotId: string): MoodEnergy {
+  if (isVillageLive()) {
+    const slot = villageBySlot.get(slotId);
+    return { mood: slot?.mood ?? null, energy: slot?.energy ?? null };
+  }
+  return SAMPLE_MOOD[slotId] ?? { mood: null, energy: null };
 }

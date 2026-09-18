@@ -15,6 +15,7 @@ import { getArtists } from "./listening-source";
 import { bakeRecolor } from "./recolor";
 import type { ImageMap } from "./render";
 import { ACTIVITY_TREATMENT, type ActivityLevel } from "../shared/activity";
+import type { MoodId } from "../shared/mood";
 
 /**
  * Phase 2.5 size check: rendered (mentally, against the actual crop
@@ -254,4 +255,33 @@ export function drawActivityTreatment(
     ctx.fillRect(0, 0, w, h);
     ctx.restore();
   }
+}
+
+// Phase 7a: a subtle per-district mood tint, low-alpha so it reads as
+// lighting rather than a color filter over the Naruto DS pixel art — picked
+// to feel roughly right for each mood (cool blue for calm, warm amber for
+// upbeat, etc) without leaning on any real hue-symbolism theory. Layered on
+// top of drawActivityTreatment's own overlay (call this right after it, see
+// main.ts's renderDistrict), not a replacement for it: activity says how
+// *busy* a district is, mood says what its music *feels* like — independent
+// signals, so both washes stack.
+const MOOD_TINTS: Record<MoodId, string> = {
+  calm: "rgba(84, 168, 200, 0.10)",
+  melancholy: "rgba(104, 100, 168, 0.12)",
+  upbeat: "rgba(255, 196, 92, 0.10)",
+  intense: "rgba(224, 78, 74, 0.12)",
+  dreamy: "rgba(196, 140, 224, 0.10)",
+};
+
+/** Draws one district's mood tint onto its background, in world space —
+ * district-interior only (see drawActivityTreatment's doc comment: the
+ * whole-village view has one shared background, so per-slot lighting
+ * doesn't apply there). No-op for a null mood (not tagged yet, or a paused/
+ * never-connected village) — today's exact behavior. */
+export function drawMoodTint(ctx: CanvasRenderingContext2D, mood: MoodId | null, w: number, h: number): void {
+  if (!mood) return;
+  ctx.save();
+  ctx.fillStyle = MOOD_TINTS[mood];
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
 }
