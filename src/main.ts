@@ -18,7 +18,7 @@ import {
   type ImageMap,
 } from "./render";
 import { bakeRecolor } from "./recolor";
-import { buildResidents, drawActivityTreatment, type Resident } from "./residents";
+import { buildCrowd, buildResidents, drawActivityTreatment, type Resident } from "./residents";
 import { close as closeSidebar, initSidebar, isSidebarOpen, openSidebar, setSidebarImages } from "./sidebar";
 import { initTopArtists } from "./top-artists";
 import { getActivity, getNowPlaying, initListeningSource } from "./listening-source";
@@ -58,6 +58,7 @@ const captionCtx = captionCanvas.getContext("2d");
 const stageArea = el<HTMLDivElement>("stageArea");
 const villageCaption = el<HTMLParagraphElement>("villageCaption");
 const backBtn = el<HTMLButtonElement>("backBtn");
+const topbarContext = el<HTMLDivElement>("topbarContext");
 const districtGenre = el<HTMLSpanElement>("districtGenre");
 const districtName = el<HTMLSpanElement>("districtName");
 const zoomInBtn = el<HTMLButtonElement>("zoomInBtn");
@@ -117,6 +118,13 @@ let allResidents: Resident[] = [];
 let residentArtistByNpc = new Map<Npc, string>();
 let residentArtistIdByNpc = new Map<Npc, string | undefined>();
 let residentFadedByNpc = new Map<Npc, boolean>();
+
+// Ambient background crowd — every district gets a pool (see buildCrowd);
+// how many of each district's pool are shown/updated is decided per-frame by
+// its current activity level (see renderDistrict). Non-interactive: never in
+// interactionPool(), districtCaptionLabels(), or any resident/artist map.
+let crowdBySlot = new Map<string, Npc[]>();
+let allCrowd: Npc[] = [];
 
 function getNowPlayingFor(slotId: string): NowPlayingInfo | null {
   const song = getNowPlaying(slotId);
@@ -341,6 +349,7 @@ function applyDistrictScene(slotId: string): void {
   camY = clampAxis(npc.y - viewH / 2, mapH, viewH);
   districtGenre.textContent = district.genre;
   districtName.textContent = character.name;
+  topbarContext.hidden = false;
   backBtn.hidden = false;
   villageCaption.hidden = true;
 }
@@ -353,7 +362,11 @@ function applyVillageScene(): void {
   fitCanvas();
   centerCamera();
   districtGenre.textContent = "";
-  districtName.textContent = "Konoha Village";
+  districtName.textContent = "";
+  // No village-wide name/genre to show (see index.html's empty #districtName)
+  // — hide the whole readout so its padding doesn't leave a stray gap in the
+  // topbar's flex row (see [hidden] in style.css).
+  topbarContext.hidden = true;
   backBtn.hidden = true;
   villageCaption.hidden = false;
 }
@@ -398,6 +411,12 @@ function renderDistrict(): void {
   const { district } = getSlot(currentDistrictId);
   const leader = districtNpcsBySlot.get(currentDistrictId)!;
   const residents = residentsBySlot.get(currentDistrictId) ?? [];
+  const crowd = crowdBySlot.get(currentDistrictId) ?? [];
+  const level = getActivity(district.id).level;
+  // crowdExtra decides how many of the district's crowd pool are visible
+  // this frame (see buildCrowd's doc comment) — the rest keep wandering
+  // off-screen so a level change never needs to spawn/despawn NPCs.
+  const visibleCrowd = crowd.slice(0, ACTIVITY_TREATMENT[level].crowdExtra);
   const imgs = (district.recolorFilter && recoloredImagesByDistrict.get(district.id)) || images;
   const view = { camX, camY, viewW, viewH };
   const [bgW, bgH] = [mapW, mapH]; // renderDistrict only runs while mode==="district", so these are this district's bg size
@@ -406,8 +425,8 @@ function renderDistrict(): void {
   ctx.save();
   ctx.translate(-camX, -camY);
   ctx.drawImage(imgs[district.bg]!, 0, 0);
-  drawActivityTreatment(ctx, imgs, district, getActivity(district.id).level, bgW, bgH);
-  const allNpcs = [leader, ...residents.map((r) => r.npc)];
+  drawActivityTreatment(ctx, level, bgW, bgH);
+  const allNpcs = [leader, ...residents.map((r) => r.npc), ...visibleCrowd];
   const sorted = [...allNpcs].sort((a, b) => a.y - b.y);
   sorted.forEach((npc) => {
     if (npc === selectedNpc || npc === keyboardSelectedNpc) drawSelectionRing(ctx, npc);
@@ -750,6 +769,13 @@ function frame(ts: number): void {
       getNowPlaying: () => null,
     }),
   );
+  allCrowd.forEach((npc) =>
+    updateNpc(npc, dt, ts, {
+      isActive: false,
+      nowPlayingIntervalMs: Number.POSITIVE_INFINITY,
+      getNowPlaying: () => null,
+    }),
+  );
 
   if (mode === "village") {
     applyKeyPan(dt);
@@ -780,6 +806,8 @@ Promise.all([loadImages(urlsByKey), initListeningSource()]).then(([loaded]) => {
   residentArtistByNpc = new Map(allResidents.map((r) => [r.npc, r.artistName]));
   residentArtistIdByNpc = new Map(allResidents.map((r) => [r.npc, r.artistId]));
   residentFadedByNpc = new Map(allResidents.map((r) => [r.npc, r.faded]));
+  crowdBySlot = buildCrowd();
+  allCrowd = Array.from(crowdBySlot.values()).flat();
   applyVillageScene();
   requestAnimationFrame(frame);
 

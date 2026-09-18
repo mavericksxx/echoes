@@ -9,7 +9,7 @@
 
 import type { CharacterDef, DistrictDef, Point } from "../data/types";
 import { NPC_RIGS, SLOTS, assetSize, getWalkGrid } from "../data/loader";
-import { makeNpc, type Npc } from "./npc";
+import { hashSeed, makeNpc, type Npc } from "./npc";
 import { nearestWalkable } from "./pathfinding";
 import { getArtists } from "./listening-source";
 import { bakeRecolor } from "./recolor";
@@ -171,6 +171,50 @@ const CROWD_OFFSETS: Point[] = [
 ];
 const BUNTING_COLORS = ["#E86A5C", "#F2C14E", "#5AA9E6", "#7ED6A5"];
 
+// Crowd villagers are real NPC instances (wandering, y-sorted with everyone
+// else — see main.ts's renderDistrict), built once up front rather than in
+// drawActivityTreatment (a draw function, called every frame, that can't own
+// NPC state). Every district gets a pool sized to the *largest* crowdExtra
+// across all activity levels, so a level change at runtime never needs new
+// NPCs — main.ts just shows/updates a level-sized prefix of the pool.
+const MAX_CROWD_EXTRA = Math.max(...Object.values(ACTIVITY_TREATMENT).map((t) => t.crowdExtra));
+
+// Ambient background scenery, not a resident (SPEC.md's "resident placement
+// encodes play count" doesn't apply to these) — kept small and fixed rather
+// than varied per index.
+const CROWD_WANDER_RADIUS = 2;
+
+/** Deterministic per-(district, slot) rig pick — so a district's crowd
+ * villagers don't all render as identical twins, but reloading doesn't
+ * reshuffle who's who. */
+function crowdRigId(districtId: string, i: number): string {
+  return RIG_IDS[hashSeed(`${districtId}:crowd${i}`) % RIG_IDS.length]!;
+}
+
+function buildCrowdForDistrict(district: DistrictDef): Npc[] {
+  const [w, h] = assetSize(district.bg);
+  const grid = getWalkGrid(district.bg);
+  return Array.from({ length: MAX_CROWD_EXTRA }, (_, i) => {
+    const rigId = crowdRigId(district.id, i);
+    const rig = NPC_RIGS[rigId]!;
+    const character = residentCharacter(rigId, rig.sheet);
+    const offset = CROWD_OFFSETS[i % CROWD_OFFSETS.length]!;
+    // Runtime-computed, like a resident's home — snap onto the nearest
+    // walkable cell so a background villager doesn't spawn on a table.
+    const raw = clampPoint(district.home.x + offset.x, district.home.y + offset.y, w, h);
+    const home = nearestWalkable(raw, grid);
+    return makeNpc(character, district, home, { wanderRadius: CROWD_WANDER_RADIUS });
+  });
+}
+
+/** Builds every district's crowd-villager pool. Call once, alongside
+ * buildResidents. */
+export function buildCrowd(): Map<string, Npc[]> {
+  const bySlot = new Map<string, Npc[]>();
+  for (const { district } of SLOTS) bySlot.set(district.id, buildCrowdForDistrict(district));
+  return bySlot;
+}
+
 function drawFestivalBunting(ctx: CanvasRenderingContext2D, w: number): void {
   const count = Math.max(3, Math.round(w / 40));
   const y = 10;
@@ -190,40 +234,17 @@ function drawFestivalBunting(ctx: CanvasRenderingContext2D, w: number): void {
 
 /** Draws one district's activity treatment onto its background, in world
  * space — call right after drawing the bg image and before its leader/
- * residents, so the wash/crowd sit behind the interactive cast (which stays
- * at full brightness/contrast for tap targets). */
+ * residents/crowd, so the wash sits behind the interactive cast (which stays
+ * at full brightness/contrast for tap targets). The crowd itself is real
+ * NPCs now (see buildCrowd) drawn by main.ts's renderDistrict, y-sorted
+ * alongside the leader and residents rather than here. */
 export function drawActivityTreatment(
   ctx: CanvasRenderingContext2D,
-  images: ImageMap,
-  district: DistrictDef,
   level: ActivityLevel,
   w: number,
   h: number,
 ): void {
   const treatment = ACTIVITY_TREATMENT[level];
-
-  if (treatment.crowdExtra > 0) {
-    const rig = NPC_RIGS[RIG_IDS[0]!]!;
-    const img = images[rig.sheet];
-    const frame = rig.down[0];
-    if (img instanceof HTMLImageElement && frame) {
-      const [sx, sy, ex, ey] = frame;
-      const fw = ex - sx;
-      const fh = ey - sy;
-      const grid = getWalkGrid(district.bg);
-      ctx.save();
-      ctx.globalAlpha = 0.5;
-      for (let i = 0; i < treatment.crowdExtra; i++) {
-        const offset = CROWD_OFFSETS[i % CROWD_OFFSETS.length]!;
-        // Runtime-computed, like a resident's home — snap onto the nearest
-        // walkable cell so a background villager doesn't render on a table.
-        const raw = clampPoint(district.home.x + offset.x, district.home.y + offset.y, w, h);
-        const p = nearestWalkable(raw, grid);
-        ctx.drawImage(img, sx, sy, fw, fh, p.x - fw / 2, p.y - fh, fw, fh);
-      }
-      ctx.restore();
-    }
-  }
 
   if (treatment.festivalProps) drawFestivalBunting(ctx, w);
 
