@@ -28,7 +28,15 @@
 
 import type { Env } from "./index";
 import type { TopArtistOut } from "./top-artists";
-import { classifyArtistNames, classifyGenres, classifyMoods, normalizeArtistName, type MoodGuess, type SlotGuess } from "./gemini";
+import {
+  classifyArtistNames,
+  classifyGenres,
+  classifyMoods,
+  normalizeArtistName,
+  MOOD_IDS,
+  type MoodGuess,
+  type SlotGuess,
+} from "./gemini";
 import { geminiQuotaAvailable, logGeminiCall } from "./rate-limit";
 import { SLOTS } from "../data/loader";
 
@@ -326,13 +334,23 @@ interface ArtistCacheMoodRow {
   artist_id: string;
   mood: string | null;
   energy: number | null;
+  mood_tagged_at: string | null;
+}
+
+/** Validates a stored `artist_cache.mood` value against MOOD_IDS instead of
+ * a bare cast — gemini.ts only ever writes a validated MoodId now, but a
+ * stored value could in principle be anything (a hand-edited row, a future
+ * schema change), and a bare cast would let that reach the client silently
+ * mistyped rather than just being treated as "not tagged". */
+function isMoodId(value: string): value is MoodGuess["mood"] {
+  return (MOOD_IDS as readonly string[]).includes(value);
 }
 
 async function fetchArtistCacheMoodRows(env: Env, artistIds: string[]): Promise<Map<string, ArtistCacheMoodRow>> {
   if (artistIds.length === 0) return new Map();
   const placeholders = artistIds.map(() => "?").join(",");
   const { results } = await env.DB.prepare(
-    `SELECT artist_id, mood, energy FROM artist_cache WHERE artist_id IN (${placeholders})`,
+    `SELECT artist_id, mood, energy, mood_tagged_at FROM artist_cache WHERE artist_id IN (${placeholders})`,
   )
     .bind(...artistIds)
     .all<ArtistCacheMoodRow>();
@@ -343,6 +361,34 @@ async function updateArtistMood(env: Env, artistId: string, guess: MoodGuess): P
   await env.DB.prepare(`UPDATE artist_cache SET mood = ?, energy = ?, mood_tagged_at = ? WHERE artist_id = ?`)
     .bind(guess.mood, guess.energy, new Date().toISOString(), artistId)
     .run();
+}
+
+/** Records a mood-tagging *attempt* that didn't land a usable guess (Gemini
+ * skipped/garbled this artist's row, or echoed a name classifyMoods
+ * couldn't match back to it — see that function's doc comment) — bumps
+ * mood_tagged_at with mood/energy left null, so resolveArtistMoodsInner's
+ * MOOD_RETRY_COOLDOWN_MS check stops re-sending this same artist to Gemini
+ * on every /api/village cache-miss build. A real Gemini call failure
+ * (network/HTTP error — the whole batch never got a response) does *not*
+ * call this; that's a transient problem worth retrying next request, not
+ * this artist's problem specifically. */
+async function recordMoodAttempt(env: Env, artistId: string): Promise<void> {
+  await env.DB.prepare(`UPDATE artist_cache SET mood_tagged_at = ? WHERE artist_id = ?`)
+    .bind(new Date().toISOString(), artistId)
+    .run();
+}
+
+// How long a failed/unmatched mood-tagging attempt (recordMoodAttempt above)
+// holds off retrying the same artist — long enough that a sticky mismatch
+// doesn't cost a Gemini call on every cache-miss build, short enough that a
+// fixed prompt/matching bug (or Gemini just having a bad day for that name)
+// self-heals within a day without any manual intervention.
+const MOOD_RETRY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+function attemptedRecently(row: ArtistCacheMoodRow): boolean {
+  if (!row.mood_tagged_at) return false;
+  const attemptedAt = Date.parse(row.mood_tagged_at);
+  return Number.isFinite(attemptedAt) && Date.now() - attemptedAt < MOOD_RETRY_COOLDOWN_MS;
 }
 
 async function resolveArtistMoodsInner(env: Env, ip: string, artists: TopArtistOut[]): Promise<Map<string, MoodGuess>> {
@@ -359,11 +405,14 @@ async function resolveArtistMoodsInner(env: Env, ip: string, artists: TopArtistO
   for (const artist of artists) {
     const row = rows.get(artist.id);
     if (!row) continue;
-    if (row.mood && row.energy !== null) {
-      byArtistId.set(artist.id, { mood: row.mood as MoodGuess["mood"], energy: row.energy });
-    } else {
+    if (row.mood && isMoodId(row.mood) && row.energy !== null) {
+      byArtistId.set(artist.id, { mood: row.mood, energy: row.energy });
+    } else if (!attemptedRecently(row)) {
       missing.push(artist);
     }
+    // else: tagged with nothing usable, but attempted within the last 24h
+    // (recordMoodAttempt below) — left unset for this response without
+    // spending another Gemini call on it.
   }
   if (missing.length === 0) return byArtistId;
 
@@ -385,9 +434,16 @@ async function resolveArtistMoodsInner(env: Env, ip: string, artists: TopArtistO
 
   for (const artist of missing) {
     const guess = guesses.get(normalizeArtistName(artist.name));
-    if (!guess) continue; // Gemini's response just skipped this one artist (a schema/parse gap) — retried next request.
-    byArtistId.set(artist.id, guess);
-    await updateArtistMood(env, artist.id, guess);
+    if (guess) {
+      byArtistId.set(artist.id, guess);
+      await updateArtistMood(env, artist.id, guess);
+    } else {
+      // classifyMoods already tried its own name/positional matching and
+      // still came up empty for this one — record the attempt so it isn't
+      // re-sent to Gemini on every cache-miss build until the cooldown above
+      // expires (see recordMoodAttempt's doc comment).
+      await recordMoodAttempt(env, artist.id);
+    }
   }
   return byArtistId;
 }

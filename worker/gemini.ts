@@ -60,17 +60,25 @@ function clampConfidence(value: unknown): number {
   return Math.max(0, Math.min(1, n));
 }
 
-// Same 0..1 clamp as clampConfidence, just under the name Phase 7a's mood
-// tagging actually reads at its call site.
-const clampEnergy = clampConfidence;
+/** Unlike clampConfidence (a slot always needs *some* confidence number, so
+ * an unusable value defaults to 0), an unusable energy must not silently
+ * become a real-looking 0 — that would read as "confirmed very low energy"
+ * and get persisted as if it were a real classification. Returns null
+ * instead, so classifyMoods below drops the whole row rather than fabricate
+ * a fallback guess (SPEC.md's "never persist a fallback guess as if it were
+ * Gemini's" — the same rule fallbackSlot documents for slots). */
+function clampEnergy(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(1, value));
+}
 
-/** Coerces a model-returned mood to one of MOOD_IDS — mirrors coerceSlot: a
- * hallucinated/misspelled value falls back to the first mood rather than
- * reaching D1/the client. */
-function coerceMood(value: unknown): MoodId {
-  return typeof value === "string" && (MOOD_IDS as readonly string[]).includes(value)
-    ? (value as MoodId)
-    : MOOD_IDS[0];
+/** Coerces a model-returned mood to one of MOOD_IDS, or null if it isn't
+ * one — unlike coerceSlot (a slot always needs *some* id so an artist can be
+ * placed at all), an unusable mood must not silently become a real-looking
+ * MOOD_IDS[0] guess; null lets classifyMoods drop the row instead of
+ * persisting a fabricated classification (see clampEnergy's doc comment). */
+function coerceMood(value: unknown): MoodId | null {
+  return typeof value === "string" && (MOOD_IDS as readonly string[]).includes(value) ? (value as MoodId) : null;
 }
 
 /** Coerces a model-returned slot id to one of the 17 known ids — a
@@ -151,11 +159,6 @@ function snippet(rawBody: string): string {
   return rawBody.slice(0, 300);
 }
 
-// Loose shape shared by resultSchema's and moodResultSchema's return values —
-// generateJson only ever JSON.stringifies this, so it doesn't need (and
-// deliberately doesn't pin to) either one's exact property set.
-type JsonSchema = { type: string; items: { type: string; properties: Record<string, unknown>; required: string[] } };
-
 /** POSTs one generateContent call with a JSON-schema-constrained response
  * and pulls the text out, checking every step of the documented response
  * shape (https://ai.google.dev/api/generate-content) explicitly rather than
@@ -165,7 +168,10 @@ type JsonSchema = { type: string; items: { type: string; properties: Record<stri
  * undiagnosable failure instead of a specific one. Throws `GeminiRequestError`
  * on any failure — network, non-OK status, or an unexpected/empty response —
  * never lets a raw fetch/parse exception escape this module. */
-async function generateJson(env: Env, prompt: string, schema: JsonSchema): Promise<string> {
+// Deliberately loose — resultSchema's and moodResultSchema's return values
+// have different property sets (slot/confidence vs mood/energy), and this
+// param only ever gets JSON.stringify'd, never inspected by shape.
+async function generateJson(env: Env, prompt: string, schema: Record<string, unknown>): Promise<string> {
   let res: Response;
   try {
     res = await fetch(`${API_URL}?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {
@@ -305,7 +311,16 @@ export interface MoodTagInput {
  * already available, their genre strings — never a raw Spotify payload, per
  * the AI policy at the top of this file. Keyed by normalizeArtistName, same
  * as classifyArtistNames, so callers apply the identical lookup
- * normalization. */
+ * normalization — with one addition: when the model's echoed "artist"
+ * doesn't match anything sent (name drift beyond normalizeArtistName, or a
+ * missing/empty field) but the response array has exactly one row per input
+ * artist, the row's position recovers it instead of stranding it — see
+ * worker/genre-resolution.ts's 24h retry cooldown, the other half of that
+ * fix, for what happens when it still can't be matched.
+ *
+ * A row with an invalid mood or a non-finite energy (coerceMood/clampEnergy
+ * both return null for those) is dropped entirely — never a fabricated
+ * MOOD_IDS[0]/0 guess persisted as if it were Gemini's. */
 export async function classifyMoods(env: Env, artists: MoodTagInput[]): Promise<Map<string, MoodGuess>> {
   if (artists.length === 0) return new Map();
   // Each input object's own "artist"/"genres" fields (rather than a
@@ -324,11 +339,28 @@ export async function classifyMoods(env: Env, artists: MoodTagInput[]): Promise<
   ].join("\n");
 
   const text = await generateJson(env, prompt, moodResultSchema());
+  const rows = safeParseArray(text);
+  const sentNames = new Set(artists.map((a) => normalizeArtistName(a.name)));
+  // Only trustworthy when the model returned exactly one row per artist sent
+  // — otherwise a row's index doesn't reliably line up with `artists`' own
+  // order (a dropped or duplicated row would shift every later one).
+  const positionalFallbackOk = rows.length === artists.length;
+
   const out = new Map<string, MoodGuess>();
-  for (const row of safeParseArray(text)) {
-    const artist = typeof row.artist === "string" ? row.artist : null;
-    if (!artist) continue;
-    out.set(normalizeArtistName(artist), { mood: coerceMood(row.mood), energy: clampEnergy(row.energy) });
-  }
+  rows.forEach((row, i) => {
+    const mood = coerceMood(row.mood);
+    const energy = clampEnergy(row.energy);
+    if (mood === null || energy === null) return;
+
+    const echoedName = typeof row.artist === "string" ? normalizeArtistName(row.artist) : null;
+    const key =
+      echoedName && sentNames.has(echoedName)
+        ? echoedName
+        : positionalFallbackOk
+          ? normalizeArtistName(artists[i]!.name)
+          : null;
+    if (!key) return;
+    out.set(key, { mood, energy });
+  });
   return out;
 }
