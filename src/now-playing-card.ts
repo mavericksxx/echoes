@@ -56,6 +56,7 @@ const NOT_PLAYING: NowPlayingResponse = { playing: false, track: null };
 let card: HTMLElement;
 let link: HTMLAnchorElement;
 let coverEl: HTMLDivElement;
+let labelEl: HTMLElement;
 let titleEl: HTMLElement;
 let artistEl: HTMLElement;
 
@@ -210,11 +211,17 @@ export function initNowPlayingCard(): void {
 
   const meta = document.createElement("div");
   meta.className = "now-playing-card__meta";
+  // Mission-scroll direction: name whose live listening this is, above the
+  // track itself, so visitors don't mistake this for a generic "now
+  // playing" widget — it's always the owner's account.
+  labelEl = document.createElement("p");
+  labelEl.className = "now-playing-card__label";
+  labelEl.textContent = "Parth is listening to";
   titleEl = document.createElement("p");
   titleEl.className = "now-playing-card__title";
   artistEl = document.createElement("p");
   artistEl.className = "now-playing-card__artist";
-  meta.append(titleEl, artistEl);
+  meta.append(labelEl, titleEl, artistEl);
 
   link.append(coverEl, meta);
   card.appendChild(link);

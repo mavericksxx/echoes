@@ -1,56 +1,72 @@
 /* ==========================================================================
    Design tokens — the single source of truth for color, type, space, motion.
-   UI direction: "B — Night Overlay" — frosted glass HUD panels floating
-   directly over the night village; cyan/amber signal colors read as
-   instrumentation, not decoration. The pixel art (canvas village + sprites)
-   is the only pixel element — typography and chrome are refined, not
-   cartoony.
+   UI direction: "Mission scroll" — chrome reads as a ninja mission scroll:
+   dark-indigo ink on khaki paper, wooden rollers capping the sidebar's top
+   and bottom edges, a red hanko (seal) stamp reserved for real status (the
+   #1 track/artist row, a live connection) and never used decoratively. The
+   pixel art (canvas village + sprites) is the only pixel element — chrome
+   and typography are paper/ink, not cartoony, and Dela Gothic One gives
+   headings the weight of a poster/woodblock face.
    Breakpoint: 900px is the mobile/desktop split used throughout this file
    and mirrored in main.ts's matchMedia("(min-width: 900px)") check (the
    sidebar needs more room alongside the map than a phone-style 720px split).
    ========================================================================== */
 :root {
-  /* Color — Void ground, Ice text, Cyan "active" signal, Amber secondary. */
-  --color-bg: #0d131c;
-  --color-surface: #121a24; /* panel */
-  --color-surface-raised: #182230; /* panel-2 */
-  --color-border: rgba(231, 238, 244, 0.1); /* line */
-  --color-border-strong: rgba(231, 238, 244, 0.22); /* line-strong */
-  --color-glass: rgba(18, 26, 36, 0.55);
-  --color-glass-border: rgba(231, 238, 244, 0.16);
-  /* Fix pass (2026-09-17): --color-glass alone reads fine for light chrome
-     (topbar, the village caption pill, zoom controls — short text, or none)
-     but washed out completely on the *text-dense* panels (sidebar, top
-     artists) when they float over the bright/high-chroma village map, not
-     just the darker district interiors. This is a denser variant for those
-     two surfaces only — same hue, alpha raised from 0.55 to 0.82 so body
-     text has a legible, stable ground even in a browser with no
-     backdrop-filter support (Firefox's is partial, and an ancestor filter/
-     stacking context can silently disable it) — the tint must carry
-     contrast on its own, blur/saturate are polish on top of that, not the
-     source of it. Do not widen this to the lighter chrome surfaces; that
-     would make them heavy for no readability gain. */
-  --color-glass-panel: rgba(18, 26, 36, 0.82);
-  --color-accent: #55c2ce; /* cyan */
-  --color-accent-strong: #7ad3dd;
-  --color-secondary: #f0a85e; /* amber */
-  --color-leaf: var(--color-accent);
-  --color-text: #e7eef4; /* ice */
-  --color-text-muted: #8fa0af; /* fog */
-  --color-text-faint: #62727f;
+  /* Color — khaki paper ground, indigo ink text, vermilion seal for status,
+     brown wood for the sidebar's roller edges. */
+  --ink: #1d2748;
+  --paper: #dcd6bd;
+  --paper-2: #cfc8aa;
+  --wood: #6a4527;
+  --wood-dark: #3e2814;
+  --seal: #b8321f;
+  /* --seal itself, paired with --paper as either fg or bg, measures ~4.1:1
+     — short of WCAG AA's 4.5:1 for normal text at chip/badge sizes. --seal
+     stays the pure token for non-text accents (the now-playing card's left
+     edge, borders, the focus ring — all held to the lower 3:1 non-text
+     bar, which it clears). Everywhere seal pairs with paper as actual
+     text — the hanko stamps, the "Connected" chip, the now-playing label —
+     uses this ~12% deeper vermilion instead, which measures ~5:1 and still
+     reads as the same seal red. */
+  --seal-deep: #9c2b1a;
+
+  --color-bg: var(--wood-dark);
+  --color-surface: var(--paper); /* panel */
+  --color-surface-raised: var(--paper-2); /* panel-2 */
+  --color-border: rgba(29, 39, 72, 0.18); /* line */
+  --color-border-strong: rgba(29, 39, 72, 0.38); /* line-strong */
+  --color-glass: rgba(220, 214, 189, 0.92);
+  --color-glass-border: rgba(29, 39, 72, 0.25);
+  /* Paper is opaque, unlike the frosted glass it replaced — every surface
+     that used to lean on backdrop-filter for contrast now just sits on solid
+     --paper, so there's one glass-panel token instead of two densities. */
+  --color-glass-panel: var(--paper);
+  --color-accent: var(--seal);
+  --color-accent-strong: #d1502f;
+  --color-secondary: var(--wood);
+  --color-text: var(--ink);
+  /* Alpha picked (not just "looks muted") so both still clear WCAG AA's
+     4.5:1 for normal text against --paper: ~6.4:1 and ~4.9:1 respectively. */
+  --color-text-muted: rgba(29, 39, 72, 0.82); /* fog */
+  --color-text-faint: rgba(29, 39, 72, 0.72);
   --color-canvas-bg: #0a0f17;
-  --color-focus-ring: var(--color-accent);
+  --color-focus-ring: var(--seal);
 
-  /* Activity levels (dormant -> quiet -> active -> festival) */
-  --color-activity-dormant: #3a4a5a;
-  --color-activity-quiet: #5b7a8c;
-  --color-activity-active: #55c2ce;
-  --color-activity-festival: #f0a85e;
+  /* Activity levels (dormant -> quiet -> active -> festival) — an
+     ink/seal-derived ramp so the ordering still reads as "getting louder"
+     on paper: dusty and desaturated at rest, full ink at "active", full
+     seal vermilion only at "festival". */
+  --color-activity-dormant: #a39c82;
+  --color-activity-quiet: #57628a;
+  --color-activity-active: var(--ink);
+  --color-activity-festival: var(--seal);
 
-  /* Type — Archivo for UI + display, IBM Plex Mono for tabular figures. */
-  --font-display: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-body: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-num: "IBM Plex Mono", SFMono-Regular, Consolas, monospace;
+  /* Type — Dela Gothic One for display/headings, Zen Kaku Gothic New for
+     body text, tabular-nums kept on numeric figures (see --font-num below,
+     still used wherever font-variant-numeric: tabular-nums appears). */
+  --font-display: "Dela Gothic One", "Zen Kaku Gothic New", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-body: "Zen Kaku Gothic New", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-num: "Zen Kaku Gothic New", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --text-xs: 0.7rem;
   --text-sm: 0.8125rem;
   --text-base: 0.9375rem;
@@ -75,7 +91,6 @@
   --radius-lg: 20px;
   --radius-pill: 999px;
   --radius-panel: 14px;
-  --radius-sheet: 18px;
   /* Cover-art corners: explicitly 4px on phone, 8px on desktop (see media query below). */
   --cover-radius: 4px;
 
@@ -215,9 +230,9 @@ select {
 }
 
 /* ==========================================================================
-   App bar — a translucent, blurred HUD strip that floats directly over the
-   map (the map fills the full content height behind it; see .main/.stage-area
-   below). Segmented view-switch pill with a cyan active state.
+   App bar — a paper strip with wooden top/bottom borders, floating directly
+   over the map (the map fills the full content height behind it; see
+   .main/.stage-area below). Opaque, not glass — paper doesn't need a blur.
    ========================================================================== */
 .topbar {
   position: absolute;
@@ -231,22 +246,18 @@ select {
   justify-content: space-between;
   gap: var(--space-4);
   padding: calc(var(--safe-top) + var(--space-2)) var(--space-4) var(--space-2);
-  /* Same heavier glass treatment as .sidebar/.top-artists-panel (see
-     --color-glass-panel's doc comment in :root) — the lighter --color-glass
-     this used to carry read blotchy/green over the village map's art, so
-     this reads as one material with the rest of the floating chrome. */
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 32%), var(--color-glass-panel);
-  border-bottom: 1px solid var(--color-glass-border);
-  backdrop-filter: blur(30px) saturate(140%);
-  -webkit-backdrop-filter: blur(30px) saturate(140%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 20px 40px -24px rgba(0, 0, 0, 0.6);
+  /* Faint horizontal fibre lines, same texture as the sidebar's paper
+     ground (see .sidebar below) — one material across every paper surface. */
+  background: repeating-linear-gradient(0deg, rgba(29, 39, 72, 0.035) 0 1px, transparent 1px 5px), var(--color-glass-panel);
+  border-top: 4px solid var(--wood);
+  border-bottom: 4px solid var(--wood);
+  box-shadow: 0 20px 40px -24px rgba(0, 0, 0, 0.5);
 }
 
 .brand {
   font-family: var(--font-display);
   font-size: var(--text-md);
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.02em;
   color: var(--color-text);
 }
 
@@ -267,9 +278,12 @@ select {
   flex: none;
 }
 
-/* ---- connection status chip (Phase 2) — same dot+label shape as
-   .activity-pill, reusing the existing signal colors: cyan for "good",
-   amber for "needs attention", muted fog for "no connection yet". ---- */
+/* ---- connection status chip (Phase 2) — a plain ink pill for
+   "not connected"/"sample data", a wood-toned pill for "paused" (needs
+   attention, but not actually live), and a hanko (seal) stamp — the only
+   real "live status" this app has — for "Connected". The seal is reserved
+   for genuine status per the mission-scroll direction, so it never appears
+   on the other two states. ---- */
 .status-chip {
   display: inline-flex;
   align-items: center;
@@ -292,36 +306,47 @@ select {
   box-shadow: 0 0 8px var(--dot, transparent);
   flex: none;
 }
-.status-chip--connected {
-  --dot: var(--color-accent);
+.status-chip--paused {
+  --dot: var(--wood);
   color: var(--color-text);
 }
-.status-chip--paused {
-  --dot: var(--color-secondary);
-  color: var(--color-text);
+/* Hanko stamp: outlined seal, rotated like an actual ink stamp — no dot,
+   the stamp itself is the signal. --seal-deep, not --seal (see its :root
+   comment): this is small bold text at chip size, held to the 4.5:1 bar. */
+.status-chip--connected {
+  gap: 0;
+  padding: 1px 8px;
+  font-weight: 700;
+  color: var(--seal-deep);
+  background: transparent;
+  border: 2px solid var(--seal-deep);
+  border-radius: 4px;
+  transform: rotate(-3deg);
+}
+.status-chip--connected::before {
+  content: none;
 }
 
 .topbar-btn {
   appearance: none;
   min-height: 32px;
   padding: 0 var(--space-3);
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--color-border-strong);
-  background: transparent;
-  color: var(--color-text);
+  border-radius: 3px;
+  border: none;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-body);
   font-size: var(--text-xs);
-  font-weight: 500;
+  font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
   transition: background var(--duration-fast) var(--ease-standard);
 }
 .topbar-btn:hover {
-  background: rgba(231, 238, 244, 0.08);
+  background: var(--wood-dark);
 }
 .topbar-btn[aria-expanded="true"] {
-  background: var(--color-accent);
-  color: #0b1116;
-  border-color: transparent;
+  background: var(--wood-dark);
 }
 
 /* ---- "Your top artists" panel (Phase 2) — a small floating card, not the
@@ -346,15 +371,11 @@ select {
   max-height: min(70vh, 520px);
   overflow-y: auto;
   padding: var(--space-4);
-  /* --color-glass-panel (see :root), plus a faint top-down light wash — the
-     diffused-highlight look that reads as glass rather than fog — layered
-     over it as a second background image. */
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 32%), var(--color-glass-panel);
-  border: 1px solid var(--color-glass-border);
-  border-radius: var(--radius-panel);
-  backdrop-filter: blur(30px) saturate(140%);
-  -webkit-backdrop-filter: blur(30px) saturate(140%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 24px 48px -20px rgba(0, 0, 0, 0.65);
+  /* Same paper ground + fibre lines as .topbar/.sidebar — one material. */
+  background: repeating-linear-gradient(0deg, rgba(29, 39, 72, 0.035) 0 1px, transparent 1px 5px), var(--color-glass-panel);
+  border: 1px solid var(--wood);
+  border-radius: 6px;
+  box-shadow: 0 24px 48px -20px rgba(0, 0, 0, 0.55);
 }
 
 .ta-panel-header {
@@ -366,8 +387,8 @@ select {
 }
 
 .ta-heading {
-  font-size: var(--text-xs);
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
   color: var(--color-text);
   margin: 0;
 }
@@ -383,22 +404,28 @@ select {
   gap: var(--space-1);
   margin-bottom: var(--space-3);
 }
+/* Outlined ink, selected = filled seal — same "range button" language
+   wherever this class is reused (Wrapped's range picker, top artists' era
+   tabs). */
 .ta-range-btn {
   appearance: none;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-raised);
-  color: var(--color-text-muted);
-  border-radius: var(--radius-sm);
-  padding: 4px var(--space-2);
+  border: 1.5px solid var(--ink);
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-body);
+  border-radius: 3px;
+  padding: 3px var(--space-2);
   font-size: var(--text-xs);
+  font-weight: 700;
   cursor: pointer;
   min-height: 32px;
 }
+/* --seal-deep, not --seal (see its :root comment) — this is small bold
+   button text held to WCAG AA's 4.5:1, not the 3:1 bar for a plain accent. */
 .ta-range-btn.is-active {
-  background: var(--color-accent);
-  color: #0b1116;
-  border-color: transparent;
-  font-weight: 600;
+  background: var(--seal-deep);
+  color: var(--paper);
+  border-color: var(--seal-deep);
 }
 
 .ta-row {
@@ -418,8 +445,19 @@ select {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-xs);
+  font-weight: 700;
   color: var(--color-text-faint);
   text-align: right;
+}
+/* Real #1 rank — the only ta-row rank that gets the hanko treatment
+   (mirrors .song-row__plays/.artist-row__plays below). --seal-deep, not
+   --seal (see its :root comment) — small bold text, held to 4.5:1. */
+.ta-row:first-child .ta-row__rank {
+  color: var(--paper);
+  background: var(--seal-deep);
+  border-radius: 3px;
+  width: auto;
+  padding: 0 5px;
 }
 .ta-row__art {
   flex: none;
@@ -428,6 +466,7 @@ select {
   border-radius: var(--cover-radius);
   overflow: hidden;
   background: var(--color-canvas-bg);
+  box-shadow: 0 0 0 1px var(--color-border-strong);
 }
 .ta-row__art img {
   width: 100%;
@@ -499,7 +538,7 @@ select {
 }
 
 .icon-btn:hover {
-  background: rgba(231, 238, 244, 0.08);
+  background: rgba(29, 39, 72, 0.08);
 }
 
 .icon-btn:active {
@@ -523,8 +562,7 @@ select {
 
 .district-readout__name {
   font-family: var(--font-display);
-  font-weight: 600;
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
   color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
@@ -547,9 +585,7 @@ select {
   color: var(--color-text-muted);
   text-align: center;
   background: var(--color-glass);
-  border: 1px solid var(--color-glass-border);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--wood);
   padding: 4px var(--space-2);
   border-radius: var(--radius-pill);
   max-width: 100%;
@@ -629,10 +665,8 @@ select {
   display: flex;
   flex-direction: column;
   background: var(--color-glass);
-  border: 1px solid var(--color-glass-border);
-  border-radius: var(--radius-lg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--wood);
+  border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 16px 32px -18px rgba(0, 0, 0, 0.6);
 }
@@ -657,7 +691,7 @@ select {
 }
 
 .zoom-btn:hover {
-  background: rgba(231, 238, 244, 0.08);
+  background: rgba(29, 39, 72, 0.08);
 }
 
 .zoom-btn:active {
@@ -674,11 +708,15 @@ select {
 
 
 /* ==========================================================================
-   Sidebar — a floating glass panel over the map on desktop (the map stays
-   visible and interactive around it) and a glass slide-up sheet with a
-   handle on phones. Closed state uses transform + visibility so it never
+   Sidebar — the mission scroll itself: a paper panel over the map on
+   desktop (the map stays visible and interactive around it) and a paper
+   slide-up sheet with a handle on phones, both capped top and bottom by a
+   wooden roller edge. Closed state uses transform + visibility so it never
    blocks input, and the transition is skipped entirely under
-   prefers-reduced-motion (see reset).
+   prefers-reduced-motion (see reset). The "unroll" clip-path animation on
+   .sidebar.is-open (below) is this direction's one motion moment — also cut
+   to near-instant by that same reduced-motion rule, since it's a plain CSS
+   animation like everything else it covers.
    ========================================================================== */
 .sidebar-backdrop {
   position: fixed;
@@ -706,16 +744,13 @@ select {
   z-index: var(--z-sidebar);
   display: flex;
   flex-direction: column;
-  /* --color-glass-panel + a faint top-down light wash (see .top-artists-panel
-     above, same reasoning: this is the densest body-text surface in the app,
-     sitting directly over the map, so it needs the readable variant). */
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 32%), var(--color-glass-panel);
-  border: 1px solid var(--color-glass-border);
-  border-top-left-radius: var(--radius-sheet);
-  border-top-right-radius: var(--radius-sheet);
-  backdrop-filter: blur(30px) saturate(140%);
-  -webkit-backdrop-filter: blur(30px) saturate(140%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 -20px 60px rgba(0, 0, 0, 0.5);
+  /* Paper ground with subtle horizontal fibre lines — this is the densest
+     body-text surface in the app, but paper is opaque, so unlike the glass
+     treatment it replaced it needs no extra-dense variant to stay legible. */
+  background: repeating-linear-gradient(0deg, rgba(29, 39, 72, 0.035) 0 1px, transparent 1px 5px), var(--color-glass-panel);
+  border-top: 14px solid var(--wood);
+  border-bottom: 14px solid var(--wood);
+  box-shadow: 0 0 0 2px var(--wood-dark), 0 -20px 60px rgba(0, 0, 0, 0.5);
   padding: var(--space-2) var(--space-4) calc(var(--space-4) + var(--safe-bottom));
   visibility: hidden;
   opacity: 0;
@@ -729,6 +764,21 @@ select {
   opacity: 1;
   transform: translateY(0);
   transition: transform var(--duration-base) var(--ease-standard), opacity var(--duration-base) var(--ease-standard);
+  /* The one motion moment (SPEC.md's mission-scroll direction): the panel
+     unrolls open instead of just sliding/fading in. Global reduced-motion
+     rule near the top of this file already collapses this to near-instant
+     alongside every other transition/animation, so it needs no separate
+     prefers-reduced-motion guard here. */
+  animation: sidebar-unroll 0.6s var(--ease-standard);
+}
+
+@keyframes sidebar-unroll {
+  from {
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0);
+  }
 }
 
 .sidebar__grabber {
@@ -773,35 +823,36 @@ select {
 
 /* "Enter district" (Phase 2.5) — the only way into a district's own scene;
    shown only when the sidebar was opened from the village. Reuses the
-   filled-accent look of an active view tab / expanded topbar toggle. */
+   ink-filled block look of .topbar-btn. */
 .sidebar__enter {
   flex: none;
   margin-left: auto;
   appearance: none;
   min-height: 36px;
   padding: 0 var(--space-3);
-  border-radius: var(--radius-pill);
+  border-radius: 3px;
   border: none;
-  background: var(--color-accent);
-  color: #0b1116;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-body);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
-  transition: opacity var(--duration-fast) var(--ease-standard);
+  transition: background var(--duration-fast) var(--ease-standard);
 }
 
 .sidebar__enter:hover {
-  opacity: 0.88;
+  background: var(--wood-dark);
 }
 
 .sidebar__portrait {
   flex: none;
   width: 56px;
   height: 56px;
-  border-radius: var(--radius-md);
+  border-radius: 3px;
   background: var(--color-canvas-bg);
-  border: 1px solid var(--color-border);
+  box-shadow: 0 0 0 2px var(--ink);
   image-rendering: pixelated;
 }
 
@@ -811,8 +862,8 @@ select {
 
 .sidebar__name {
   font-family: var(--font-display);
-  font-weight: 600;
-  font-size: var(--text-md);
+  font-size: var(--text-lg);
+  line-height: 1;
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -830,10 +881,10 @@ select {
 .pill {
   font-size: var(--text-xs);
   font-weight: 500;
-  color: var(--color-text-muted);
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
+  color: var(--color-text);
+  background: var(--paper-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 3px;
   padding: 2px var(--space-2);
   white-space: nowrap;
 }
@@ -869,25 +920,36 @@ select {
   flex: none;
 }
 
-/* Official Spotify logo (see src/sidebar.ts) — kept at its source aspect
-   ratio, comfortably over Spotify's own minimum legible width. */
+/* Official Spotify logo (see src/sidebar.ts) is a white asset, which reads
+   fine on the previous dark glass but disappears on paper — same fix
+   Spotify's own guidelines use for a light background: a small dark plate
+   under the mark, not a modification of the asset itself. */
+.sidebar__spotify-badge {
+  display: flex;
+  align-items: center;
+  flex: none;
+  background: var(--ink);
+  border-radius: 3px;
+  padding: 4px 8px;
+}
+
 .sidebar__spotify-logo {
   display: block;
   width: 78px;
   height: auto;
   flex: none;
-  opacity: 0.9;
 }
 
 /* ---- tablist ---- */
 .sidebar-tablist {
   flex: none;
   display: flex;
-  gap: var(--space-3);
+  gap: var(--space-2);
   margin-top: var(--space-3);
+  padding-bottom: 4px;
   overflow-x: auto;
   scrollbar-width: none;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 2px solid var(--ink);
 }
 
 .sidebar-tablist::-webkit-scrollbar {
@@ -899,23 +961,30 @@ select {
   flex: none;
   border: none;
   background: transparent;
+  /* --color-text-muted, not opacity: a flat opacity on the whole button
+     lands under WCAG AA's 4.5:1 at this font size/weight — the token is
+     already calibrated to clear it (see :root's comment). */
   color: var(--color-text-muted);
+  font-family: var(--font-body);
   font-size: var(--text-sm);
-  font-weight: 500;
-  padding: var(--space-3) 0;
+  font-weight: 700;
+  padding: 4px 8px;
+  margin: var(--space-1) 0;
   min-height: 44px;
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
-  border-bottom: 2px solid transparent;
+  border-radius: 3px;
 }
 
 .sidebar-tab:hover {
   color: var(--color-text);
 }
 
+/* Active tab reads as an ink-filled block, not an underline. */
 .sidebar-tab[aria-selected="true"] {
-  color: var(--color-accent);
-  border-bottom-color: var(--color-accent);
-  font-weight: 600;
+  background: var(--ink);
+  color: var(--paper);
 }
 
 .sidebar-panel {
@@ -925,11 +994,27 @@ select {
   padding-top: var(--space-3);
 }
 
+/* Section heading with a brush-stroke rule trailing after the text — a
+   tapered stroke, not a straight line, via clip-path. */
 .sidebar-heading {
-  font-size: var(--text-xs);
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
   color: var(--color-text);
   margin: var(--space-4) 0 var(--space-2);
+}
+
+.sidebar-heading::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 3px;
+  min-width: 12px;
+  background: var(--ink);
+  opacity: 0.8;
+  border-radius: 2px;
+  clip-path: polygon(0 30%, 100% 0, 98% 100%, 0 80%);
 }
 
 .sidebar-heading:first-of-type {
@@ -1048,7 +1133,19 @@ select {
   color: var(--color-text-faint);
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
+  font-weight: 700;
   font-size: var(--text-xs);
+}
+
+/* Real #1 row (this list's own sort already puts the top artist first) —
+   the only artist row that gets the hanko treatment. Excludes a faded
+   (asleep/dropped-out-of-range) row — that's not a real "#1 right now".
+   --seal-deep, not --seal (see its :root comment) — small bold text. */
+.artist-list .artist-row:first-child:not(.artist-row--faded) .artist-row__plays {
+  color: var(--paper);
+  background: var(--seal-deep);
+  border-radius: 3px;
+  padding: 1px 6px;
 }
 
 /* An artist who dropped out of the current range (see /api/village's
@@ -1255,6 +1352,7 @@ select {
   border-radius: var(--cover-radius);
   overflow: hidden;
   background: var(--color-canvas-bg);
+  box-shadow: 0 0 0 1px var(--color-border-strong);
 }
 
 .song-row__cover-img {
@@ -1290,8 +1388,30 @@ select {
   flex: none;
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
+  font-weight: 700;
   font-size: var(--text-xs);
   color: var(--color-text-faint);
+}
+
+/* Real #1 track — the only song row that gets the hanko treatment. The
+   Overview/Artists/Wrapped song lists are always plays/rank-sorted, so
+   their first row is always a genuine #1. The interactive Songs tab can be
+   sorted by title or recency instead (see src/sidebar.ts's renderSongs),
+   where "first" no longer means "most played" — that list gets
+   .song-list--unranked so the seal is skipped rather than misrepresenting
+   status. --seal-deep, not --seal (see its :root comment) — small bold
+   text, held to 4.5:1. */
+.song-list .song-row:first-child .song-row__plays {
+  color: var(--paper);
+  background: var(--seal-deep);
+  border-radius: 3px;
+  padding: 1px 6px;
+}
+.song-list--unranked .song-row:first-child .song-row__plays {
+  color: var(--color-text-faint);
+  background: none;
+  border-radius: 0;
+  padding: 0;
 }
 
 /* ==========================================================================
@@ -1311,11 +1431,12 @@ select {
     bottom: var(--sidebar-inset);
     left: auto;
     width: var(--sidebar-width);
-    border-radius: var(--radius-panel);
+    border-left: 2px solid var(--wood-dark);
+    border-right: 2px solid var(--wood-dark);
     /* Desktop's own drop-shadow replaces the mobile sheet's (box-shadow
-       doesn't merge across cascaded rules) — keep the same glass top
-       highlight from the base .sidebar rule alongside it. */
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 30px 70px rgba(0, 0, 0, 0.55);
+       doesn't merge across cascaded rules) — the wood-cased ring from the
+       base .sidebar rule stays alongside it. */
+    box-shadow: 0 0 0 2px var(--wood-dark), 0 30px 70px rgba(0, 0, 0, 0.5);
     padding: var(--space-3) var(--space-4) var(--space-4);
   }
 
@@ -1337,11 +1458,11 @@ select {
 
 /* ==========================================================================
    Phase 5a — now-playing card (src/now-playing-card.ts). Display-only HUD
-   card, top-right, below the topbar — same frosted --color-glass-panel
-   treatment as .top-artists-panel/.sidebar so it reads as part of the
-   existing chrome. Starts hidden (index.html) and fades via .is-visible;
-   the global prefers-reduced-motion rule near the top of this file already
-   collapses that transition to near-instant.
+   card, top-right, below the topbar — a paper card with a seal-red left
+   edge, same as every other paper surface in this file. Starts hidden
+   (index.html) and fades via .is-visible; the global prefers-reduced-motion
+   rule near the top of this file already collapses that transition to
+   near-instant.
    ========================================================================== */
 .now-playing-card {
   position: fixed;
@@ -1366,14 +1487,11 @@ select {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2);
-  /* --color-glass-panel + the same faint top-down light wash as
-     .top-artists-panel/.sidebar — see those rules' comments. */
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 32%), var(--color-glass-panel);
+  background: repeating-linear-gradient(0deg, rgba(29, 39, 72, 0.035) 0 1px, transparent 1px 5px), var(--color-glass-panel);
   border: 1px solid var(--color-glass-border);
-  border-radius: var(--radius-panel);
-  backdrop-filter: blur(30px) saturate(140%);
-  -webkit-backdrop-filter: blur(30px) saturate(140%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 24px 48px -20px rgba(0, 0, 0, 0.65);
+  border-left: 4px solid var(--seal);
+  border-radius: 4px;
+  box-shadow: 0 24px 48px -20px rgba(0, 0, 0, 0.5);
   text-decoration: none;
   color: inherit;
 }
@@ -1385,6 +1503,7 @@ select {
   border-radius: var(--cover-radius);
   overflow: hidden;
   background: var(--color-canvas-bg);
+  box-shadow: 0 0 0 1px var(--color-border-strong);
 }
 
 /* object-fit: contain, not cover — same choice as .np-cover-img/
@@ -1399,6 +1518,18 @@ select {
 
 .now-playing-card__meta {
   min-width: 0;
+}
+
+/* "Parth is listening to" — says whose live listening this is, above the
+   track itself (src/now-playing-card.ts). --seal-deep, not --seal (see its
+   :root comment) — small bold text, held to 4.5:1. */
+.now-playing-card__label {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--seal-deep);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .now-playing-card__title {
@@ -1443,10 +1574,8 @@ select {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   background: var(--color-glass);
-  border: 1px solid var(--color-glass-border);
+  border: 1px solid var(--wood);
   border-radius: var(--radius-pill);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   pointer-events: none;
   max-width: calc(100vw - 2 * var(--space-2));
   overflow: hidden;

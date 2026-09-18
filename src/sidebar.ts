@@ -426,6 +426,10 @@ function renderSongs(container: HTMLElement, ctx: SectionContext): void {
 
   const list = document.createElement("div");
   list.className = "song-list";
+  // The #1 hanko stamp (style.css) only means something when the list is
+  // actually plays/rank-sorted — skip it when the visitor sorted by title
+  // or recency instead, so the seal never stamps a row that isn't really #1.
+  if (songsSort !== "plays") list.classList.add("song-list--unranked");
   if (filtered.length === 0) {
     const empty = document.createElement("p");
     empty.className = "sidebar-empty";
@@ -1047,18 +1051,24 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
   // Phase 3.5: the official Spotify logo (public/brand/spotify-logo-white.png,
   // downloaded from Spotify's own press assets — see SPEC.md's Phase 3.5
   // section), placed once here in the sidebar chrome rather than per song
-  // row, per SPEC.md's cover-art attribution rules.
+  // row, per SPEC.md's cover-art attribution rules. The logo is a white
+  // asset, so on the mission-scroll paper ground it sits on a small dark
+  // plate (.sidebar__spotify-badge) instead — same asset, unmodified, just
+  // given a background it stays legible on.
   const footer = document.createElement("div");
   footer.className = "sidebar__footer";
   const footerLabel = document.createElement("span");
   footerLabel.textContent = "Data from";
+  const footerBadge = document.createElement("span");
+  footerBadge.className = "sidebar__spotify-badge";
   const footerLogo = document.createElement("img");
   footerLogo.className = "sidebar__spotify-logo";
   footerLogo.src = "/brand/spotify-logo-white.png";
   footerLogo.alt = "Spotify";
   footerLogo.width = 78;
   footerLogo.height = 23;
-  footer.append(footerLabel, footerLogo);
+  footerBadge.appendChild(footerLogo);
+  footer.append(footerLabel, footerBadge);
 
   root.append(grabber, closeBtn, header, tablistEl, panelHost, footer);
   backdrop.addEventListener("click", () => close());

@@ -411,3 +411,32 @@
     module-level `Map`, including a failed fetch (never auto-retried, same as `historyDaily`) — no
     new CSS, every class reused from the Overview/Songs/Artists/History tabs and the top-artists
     panel.
+
+- **UI reskin — Mission scroll (2026-09-19):** the whole UI chrome (topbar, sidebar, now-playing
+  card, top artists panel, zoom controls, village caption, history readout, status chip) moved from
+  "B — Night Overlay" (frosted dark glass, cyan/amber) to "Mission scroll": indigo ink on khaki paper
+  (`--ink #1d2748` / `--paper #dcd6bd` / `--paper-2 #cfc8aa`), wooden rollers (`--wood #6a4527` /
+  `--wood-dark #3e2814`) capping the sidebar's top and bottom edges, Dela Gothic One for display type
+  and Zen Kaku Gothic New for body (replacing Archivo/IBM Plex Mono — `tabular-nums` kept via
+  `font-variant-numeric`, not a monospace face), and a red hanko (seal, `--seal #b8321f`) reserved for
+  real status only: the #1 track/artist row (`.song-row`/`.artist-row`/`.ta-row`'s `:first-child`),
+  and the "Connected" status chip. The sidebar's one motion moment is an "unroll" `clip-path` reveal
+  on open (`@keyframes sidebar-unroll`), covered by the existing global `prefers-reduced-motion` rule
+  like every other transition/animation in this file. Active sidebar tabs are now an ink-filled
+  block; `.ta-range-btn`'s selected state (Wrapped's range picker, top artists' era tabs) is
+  outlined-ink with a filled-seal selected state. `src/now-playing-card.ts` gains a
+  `.now-playing-card__label` reading "Parth is listening to" above the track, and its card gets a
+  seal-red left edge, so a visitor can tell this is the owner's live listening rather than a generic
+  player widget.
+  - **AA fix:** pure `--seal` paired with `--paper` as either foreground or background measures
+    ~4.1:1 — under WCAG AA's 4.5:1 for normal text at chip/badge sizes. `--seal` stays the literal
+    token for non-text accents (the now-playing card's left edge, borders, the focus ring — held to
+    the lower 3:1 non-text bar, which it clears); a new `--seal-deep` (`#9c2b1a`, ~5:1 against paper)
+    covers every seal+paper *text* pairing (the hanko stamps, the "Connected" chip, the now-playing
+    label). `--color-text-muted`/`--color-text-faint` are ink at 0.82/0.72 alpha (not the previous
+    0.68/0.52) for the same reason — picked to clear 4.5:1, not just "look muted".
+  - The Spotify badge in the sidebar footer (`.sidebar__spotify-logo`, a white PNG) now sits on a
+    small dark plate (`.sidebar__spotify-badge`, `src/sidebar.ts`) since it disappears on paper
+    otherwise — same asset, unmodified, just given a background it stays legible on.
+  - Deliberately unchanged: the pixel-art canvas (village map, sprites, NPC rendering) — this
+    direction is chrome-only, not the pixel art itself.
