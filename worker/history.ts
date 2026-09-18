@@ -2,11 +2,15 @@
 // `triggers.crons`, wired to `scheduled()` in worker/index.ts) calls
 // `runHistorySync` to backfill `play_event`/`track_cache`/`artist_cache` from
 // GET /me/player/recently-played — the only source of play history Spotify's
-// API offers (no play counts, no minutes listened anywhere). This is the
-// *logging* half of Phase 8 only; daily_snapshot rollups, history-driven
-// activity levels, the sidebar History section, and the era toggle are
-// Phase 8b, built on top of what this file starts collecting today. Also
-// exports `handleHistoryStats`, the GET /api/history/stats route.
+// API offers (no play counts, no minutes listened anywhere). Also exports
+// `handleHistoryStats`, the GET /api/history/stats route.
+//
+// Phase 8b adds `classifyUnslottedArtists`: after each run's batch insert,
+// any of this run's primary artists still missing a slot (artist_cache.
+// slot_id IS NULL) get run through worker/genre-resolution.ts, so
+// worker/village.ts's history-driven activity (which joins play_event to
+// artist_cache.slot_id at query time) isn't stuck waiting for an artist to
+// happen to show up in a /api/village Spotify fetch too.
 //
 // Deliberately NO `after` cursor on the recently-played call. Offline/
 // downloaded listening syncs to Spotify later carrying its *original*
@@ -22,6 +26,8 @@
 import type { Env } from "./index";
 import { getAccessToken, TokenError } from "./token";
 import { spotifyGet } from "./spotify-fetch";
+import { resolveArtistSlots } from "./genre-resolution";
+import type { TopArtistOut } from "./top-artists";
 
 const RECENTLY_PLAYED_LIMIT = 50; // Spotify's max, and the hard ceiling on how far back one call can see
 
@@ -119,6 +125,41 @@ async function recordRun(env: Env, result: RunResult): Promise<void> {
 function isUsableItem(item: RecentlyPlayedItem): boolean {
   const track = item.track;
   return Boolean(track.id) && !track.is_local && Boolean(track.artists[0]?.id);
+}
+
+/** Classifies any of this run's primary artists that don't have a slot yet
+ * (artist_cache.slot_id IS NULL) — e.g. one seeded fresh by this very run's
+ * batch above, or an artist that's never appeared in a /api/village Spotify
+ * fetch. Its own try/catch: a classification failure (Gemini down, capped,
+ * or a D1 hiccup) must never fail the sync that already inserted real
+ * play_event rows. Builds the empty-genres/null-image input shape
+ * worker/genre-resolution.ts expects for an artist with no Spotify-supplied
+ * metadata (this cron never fetches artist details — only what
+ * recently-played already inlines) — see its Path 2 (classify by name).
+ * "cron" is a fixed pseudo-IP for the Gemini daily-cap bookkeeping
+ * (worker/rate-limit.ts), distinct from any real visitor IP. */
+async function classifyUnslottedArtists(env: Env, primaryArtistIds: string[]): Promise<void> {
+  if (primaryArtistIds.length === 0) return;
+  try {
+    const placeholders = primaryArtistIds.map(() => "?").join(",");
+    const { results } = await env.DB.prepare(
+      `SELECT artist_id, name FROM artist_cache WHERE slot_id IS NULL AND artist_id IN (${placeholders})`,
+    )
+      .bind(...primaryArtistIds)
+      .all<{ artist_id: string; name: string }>();
+    if (results.length === 0) return;
+
+    const artists: TopArtistOut[] = results.map((row, i) => ({
+      id: row.artist_id,
+      name: row.name,
+      genres: [],
+      image: null,
+      rank: i + 1, // unused by resolveArtistSlots — TopArtistOut just requires a value
+    }));
+    await resolveArtistSlots(env, "cron", artists);
+  } catch (err) {
+    console.error("[history] cron classification failed (play_event rows already written are unaffected):", err);
+  }
 }
 
 /**
@@ -241,6 +282,13 @@ export async function runHistorySync(env: Env): Promise<void> {
         inserted += results[i]!.meta.changes ?? 0;
       }
     }
+
+    // Phase 8b: classify this run's primary artists that still have no slot
+    // (e.g. one that only just got seeded into artist_cache above, or one
+    // that's never shown up in a /api/village Spotify fetch) — see
+    // classifyUnslottedArtists's doc comment for why this can never fail the
+    // sync above it.
+    await classifyUnslottedArtists(env, Array.from(new Set(usable.map((item) => item.track.artists[0]!.id!))));
 
     // The endpoint only ever retains the newest 50 plays with no paging past
     // them, so if every fetched item was new (zero overlap with what's

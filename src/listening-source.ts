@@ -70,6 +70,10 @@ export type VillagePayload =
        * `songs` is `[]` in that case, distinct from a slot that's genuinely
        * empty this range. */
       songsLive: boolean;
+      /** Phase 8b: whether every slot's activity/share above came from real
+       * play_event history or from today's Spotify rank-weighted share
+       * (worker/village.ts's historyActivityForRange) — never mixed per slot. */
+      activitySource: "history" | "spotify";
     };
 
 let village: VillagePayload = { connected: false };
@@ -107,6 +111,13 @@ export function isVillageConnected(): boolean {
 
 export function villageGeminiLimited(): boolean {
   return village.connected && village.geminiLimited;
+}
+
+/** Phase 8b: which source is driving every district's activity/share right
+ * now. "spotify" whenever not connected+live (there's nothing else to
+ * report), matching every other accessor here's fallback convention. */
+export function activitySource(): "history" | "spotify" {
+  return village.connected ? village.activitySource : "spotify";
 }
 
 /** True once connected+live, unless the tracks stage itself failed

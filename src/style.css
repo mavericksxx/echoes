@@ -976,6 +976,14 @@ select {
   --dot: var(--color-activity-festival);
 }
 
+/* Phase 8b: subtle note under the activity pill saying whether it's driven
+   by real play history or today's Spotify rank-weighted estimate. */
+.activity-source-note {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  margin: 6px 0 0;
+}
+
 .overview-stats {
   display: flex;
   gap: var(--space-5);

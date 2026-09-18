@@ -10,6 +10,7 @@ import type { Slot } from "../data/loader";
 import { drawPortrait, type ImageMap } from "./render";
 import { SAMPLE_NOW, type Song } from "./sample-data";
 import {
+  activitySource,
   getActivity,
   getArtists,
   getNowPlaying,
@@ -236,6 +237,18 @@ function renderOverview(container: HTMLElement, ctx: SectionContext): void {
   pill.className = `activity-pill activity-pill--${level}`;
   pill.textContent = ACTIVITY_LABEL[level] ?? level;
   container.appendChild(pill);
+
+  // Phase 8b: a subtle note on whether the activity/share above (and every
+  // other district's, for consistency — worker/village.ts never mixes
+  // sources per slot) is real listening history or today's Spotify
+  // rank-weighted estimate.
+  if (live) {
+    const sourceNote = document.createElement("p");
+    sourceNote.className = "activity-source-note";
+    sourceNote.textContent =
+      activitySource() === "history" ? "Activity from your play history" : "Activity from your Spotify top artists";
+    container.appendChild(sourceNote);
+  }
 
   const stats = document.createElement("div");
   stats.className = "overview-stats";
