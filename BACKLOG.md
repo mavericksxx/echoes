@@ -6,9 +6,9 @@ grids + A* — all 17 maps authored and visually verified, 2026-09-18), Phase 4.
 (now-playing card), **Phase 5b** (the village reacts to the playing track), **Phase 8a** (the
 `play_event` log), **Phase 8b** (token cache in D1, history-driven activity, era toggle + sidebar
 History strip — 2026-09-18), **Phase 8.5** (Wrapped on demand — `/api/wrapped`, sidebar Wrapped tab
-— 2026-09-19).
+— 2026-09-19), **Phase 6** (passive rate-limit audit, no ramp — 2026-09-19).
 
-Next: **Phase 6** (rate-limit ramp test).
+Next: **Phase 7** (moods and personalities; needs the Gemini key).
 
 Notes on the finished grid work: two rooms are tight enough to watch — `shopFlower` collapses the 5
 resident/crowd spawn offsets onto 2 distinct cells and `shopWeapons` onto 4 (the others keep all 5),

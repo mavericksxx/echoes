@@ -283,6 +283,24 @@ map isn't covered by chrome.
 
 **You'll see:** a small results report and tuned polling in the app.
 
+**Results (passive audit, 2026-09-19):** the ramp test above was deliberately **not run** — a single
+429 can carry a `Retry-After` of 13–18 hours app-wide (see the rate-limit research above), so
+provoking one to find a ceiling costs up to a day of live data to save seconds of latency. Instead
+`usage_log` (migration `0003_usage_log_headers.sql`) was queried read-only over ~37h of real traffic
+(2026-09-17T09:19Z → 2026-09-18T22:30Z, 173 Spotify requests):
+
+| Metric | Result |
+|---|---|
+| 429s / 5xx | 0 / 0 |
+| `X-RateLimit-*` ever non-null | 0 — Spotify never sends them to this app |
+| Peak app-wide rate | 10 req/30s, 15 req/60s (one page-load burst: now-playing + 7 top-items calls in ~1.5s) |
+| Peak per endpoint | ≤5 req/60s |
+| `currently-playing` cadence | 10.7–10.9s while playing |
+| `recently-played` cron | 15.0 min, 35/35 runs; ban pre-check never blocked |
+
+**Decision:** keep ~10s playing / 15s idle / 15-min cron. The true ceiling stays unmeasured by
+design. Revisit only if `usage_log` shows a real 429 (then fall back to 15–30s).
+
 ### Phase 7 — Moods and personalities
 - Gemini mood/energy tagging per artist (cached) → district tint/lighting + character walk speed/performance frequency.
 - Per-slot personality + dialogue lines flavored by your top artists (cached); shown in the info card.

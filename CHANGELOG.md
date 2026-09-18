@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- **Phase 6 — Rate limits:** Passive audit of `usage_log` (0 × 429 over ~37h, peak 10 req/30s); ramp
+  test skipped to avoid a 13–18h ban; current poll intervals kept. Results in SPEC.md.
 - **Phase 5a — Now-playing:** Shortened the idle poll to 15s so the listening card appears sooner;
   the worker's shared cache still bounds Spotify calls.
 - Project idea (IDEA.md) and phased spec (SPEC.md).
