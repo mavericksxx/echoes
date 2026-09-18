@@ -2,11 +2,11 @@
   {
     "id": "naruto",
     "genre": "Hip-Hop",
-    "location": "Konoha Village — Ichiraku Ramen",
+    "location": "Konoha Village \u2014 Ichiraku Ramen",
     "bg": "town",
     "home": {
-      "x": 495,
-      "y": 690
+      "x": 504,
+      "y": 728
     },
     "note": "walk_up mirrors walk_down (no back sprite on this sheet)"
   },
@@ -45,7 +45,7 @@
   {
     "id": "shikamaru",
     "genre": "Lo-fi",
-    "location": "Konoha House — Study",
+    "location": "Konoha House \u2014 Study",
     "bg": "houseStudy",
     "home": {
       "x": 75,
@@ -97,7 +97,7 @@
   {
     "id": "hinata",
     "genre": "Folk",
-    "location": "Konoha House — Garden Room",
+    "location": "Konoha House \u2014 Garden Room",
     "bg": "houseGarden",
     "home": {
       "x": 150,
@@ -158,7 +158,7 @@
   {
     "id": "temari",
     "genre": "Classical",
-    "location": "Konoha House — Dining Hall",
+    "location": "Konoha House \u2014 Dining Hall",
     "bg": "houseDining",
     "home": {
       "x": 150,
