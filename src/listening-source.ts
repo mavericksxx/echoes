@@ -13,7 +13,15 @@
 // track is still playing.
 
 import { activityLevel, type ActivityLevel } from "../shared/activity";
-import { getListening, nowPlayingSong, totalPlays, topArtists as sampleTopArtists, type Song } from "./sample-data";
+import {
+  getListening,
+  getPersona as getSamplePersona,
+  nowPlayingSong,
+  totalPlays,
+  topArtists as sampleTopArtists,
+  type Persona,
+  type Song,
+} from "./sample-data";
 import { getEra } from "./era";
 
 export interface ArtistEntry {
@@ -57,6 +65,9 @@ export interface VillageSlotIn {
   share: number;
   artists: VillageArtistIn[];
   songs: VillageSongIn[];
+  /** Phase 7b: mirrors worker/village.ts's VillageSlot.persona — null if the
+   * slot has no real top artists yet or nothing was generated/cached. */
+  persona: Persona | null;
 }
 
 export type VillagePayload =
@@ -201,6 +212,19 @@ export function getSongs(slotId: string): Song[] {
     }));
   }
   return getListening(slotId)?.songs ?? [];
+}
+
+/** This slot's personality + dialogue lines (Phase 7b) — real (Gemini-
+ * generated, cached in D1) when connected+live, else src/sample-data.ts's
+ * handwritten personas. Null either way if the slot has none (a quiet slot,
+ * or a live one whose persona hasn't been generated/cached yet) — callers
+ * must render gracefully around that, never a placeholder that implies data
+ * is missing/broken. */
+export function getPersona(slotId: string): Persona | null {
+  if (isVillageLive()) {
+    return villageBySlot.get(slotId)?.persona ?? null;
+  }
+  return getSamplePersona(slotId);
 }
 
 /** Sample-data play count, shown only in the offline/not-connected Overview

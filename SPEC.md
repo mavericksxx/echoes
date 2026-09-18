@@ -310,6 +310,33 @@ design. Revisit only if `usage_log` shows a real 429 (then fall back to 15–30s
 
 **You'll see:** districts feel different by mood; characters talk about your music.
 
+**Phase 7b (built 2026-09-19) — per-slot personality + dialogue:**
+`migrations/0007_slot_persona.sql` adds `slot_persona`, keyed by slot id: a
+personality blurb, a JSON array of ~4-6 dialogue lines, the top-artist
+fingerprint it was generated/attempted from, and `generated_at`.
+`worker/persona.ts` generates a personality + dialogue flavored by each
+slot's top few (up to 5) current top-artist names — taken from the
+range-independent `long_term` baseline `worker/village.ts` already has in
+hand, not whichever era a visitor happens to be viewing, so switching eras
+doesn't look like a taste change — batching every slot that needs one into a
+single Gemini call and reusing `worker/gemini.ts`'s request/response
+handling (`generateJson`, exported for exactly this). Regeneration only
+fires when a slot's top-artist fingerprint changes *and* at least a day has
+passed since the row was last touched — a slot with a fresh fingerprint
+match, or one touched too recently, keeps serving its cached row. On a quota
+cap or a Gemini failure, a slot falls back to its existing cached row if one
+exists, else `null` — never a failed `/api/village` response; a slot Gemini
+never manages to produce anything usable for still gets its row's timestamp
+bumped on the attempt, so it's retried at most once a day rather than on
+every cache-miss build. `/api/village`'s
+payload gains `slots[].persona` (`{ personality, dialogue } | null`);
+`src/sample-data.ts` carries handwritten personas for the offline fallback's
+non-silent slots. The sidebar header (the "info card" shown the instant a
+character is tapped) now shows one random dialogue line under the name/
+genre/location row, and `src/sidebar.ts`'s new **Character** tab (between
+Artists and History) shows the full personality + dialogue lines, styled
+with the existing Mission scroll tokens.
+
 ### Phase 8 — The village remembers
 - Split into 8a and 8b; both built (8a 2026-09-18, 8b 2026-09-18).
 - **8a — The play-event log starts.** Worker cron (`worker/history.ts`, wired to `wrangler.jsonc`'s

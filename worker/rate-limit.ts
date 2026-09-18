@@ -126,10 +126,11 @@ export async function geminiQuotaAvailable(env: Env, ip: string): Promise<boolea
   return true;
 }
 
-/** Records one Gemini API call (one batched classify-genres or
- * classify-artists request, regardless of how many items were in it) against
- * both the global and per-IP daily caps. */
-export async function logGeminiCall(env: Env, ip: string, kind: "genres" | "artists"): Promise<void> {
+/** Records one Gemini API call (one batched classify-genres, classify-
+ * artists, or persona-generation request — see worker/persona.ts — regardless
+ * of how many items were in it) against both the global and per-IP daily
+ * caps. */
+export async function logGeminiCall(env: Env, ip: string, kind: "genres" | "artists" | "persona"): Promise<void> {
   try {
     await env.DB.prepare(
       "INSERT INTO usage_log (endpoint, status, retry_429_count, created_at, ip) VALUES (?, 200, 0, ?, ?)",
