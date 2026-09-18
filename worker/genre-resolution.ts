@@ -28,7 +28,15 @@
 
 import type { Env } from "./index";
 import type { TopArtistOut } from "./top-artists";
-import { classifyArtistNames, classifyGenres, normalizeArtistName, type SlotGuess } from "./gemini";
+import {
+  classifyArtistNames,
+  classifyGenres,
+  classifyMoods,
+  normalizeArtistName,
+  MOOD_IDS,
+  type MoodGuess,
+  type SlotGuess,
+} from "./gemini";
 import { geminiQuotaAvailable, logGeminiCall } from "./rate-limit";
 import { SLOTS } from "../data/loader";
 
@@ -307,5 +315,154 @@ export async function resolveArtistSlots(
       bySlotId.set(artist.id, { slotId: fallbackSlot(artist.name), confidence: 0.05, source: "fallback" });
     }
     return { bySlotId, geminiLimited: false, geminiError: errorMessage(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7a: mood/energy tagging (SPEC.md's "Moods and personalities").
+// Piggybacks on this file's existing cache-first/quota-checked/batched
+// Gemini flow above rather than its own copy of it, but is otherwise a
+// separate, optional pass over the same artist list: unlike a slot (every
+// artist needs one to be placed at all, so a Gemini miss falls back to a
+// deterministic guess), an artist with no mood tagged yet just renders with
+// today's exact behavior (see src/listening-source.ts / worker/village.ts) —
+// so a quota cap or a Gemini failure here simply leaves it unset, no
+// fallback guess invented or persisted.
+// ---------------------------------------------------------------------------
+
+interface ArtistCacheMoodRow {
+  artist_id: string;
+  mood: string | null;
+  energy: number | null;
+  mood_tagged_at: string | null;
+}
+
+/** Validates a stored `artist_cache.mood` value against MOOD_IDS instead of
+ * a bare cast — gemini.ts only ever writes a validated MoodId now, but a
+ * stored value could in principle be anything (a hand-edited row, a future
+ * schema change), and a bare cast would let that reach the client silently
+ * mistyped rather than just being treated as "not tagged". */
+function isMoodId(value: string): value is MoodGuess["mood"] {
+  return (MOOD_IDS as readonly string[]).includes(value);
+}
+
+async function fetchArtistCacheMoodRows(env: Env, artistIds: string[]): Promise<Map<string, ArtistCacheMoodRow>> {
+  if (artistIds.length === 0) return new Map();
+  const placeholders = artistIds.map(() => "?").join(",");
+  const { results } = await env.DB.prepare(
+    `SELECT artist_id, mood, energy, mood_tagged_at FROM artist_cache WHERE artist_id IN (${placeholders})`,
+  )
+    .bind(...artistIds)
+    .all<ArtistCacheMoodRow>();
+  return new Map(results.map((r) => [r.artist_id, r]));
+}
+
+async function updateArtistMood(env: Env, artistId: string, guess: MoodGuess): Promise<void> {
+  await env.DB.prepare(`UPDATE artist_cache SET mood = ?, energy = ?, mood_tagged_at = ? WHERE artist_id = ?`)
+    .bind(guess.mood, guess.energy, new Date().toISOString(), artistId)
+    .run();
+}
+
+/** Records a mood-tagging *attempt* that didn't land a usable guess (Gemini
+ * skipped/garbled this artist's row, or echoed a name classifyMoods
+ * couldn't match back to it — see that function's doc comment) — bumps
+ * mood_tagged_at with mood/energy left null, so resolveArtistMoodsInner's
+ * MOOD_RETRY_COOLDOWN_MS check stops re-sending this same artist to Gemini
+ * on every /api/village cache-miss build. A real Gemini call failure
+ * (network/HTTP error — the whole batch never got a response) does *not*
+ * call this; that's a transient problem worth retrying next request, not
+ * this artist's problem specifically. */
+async function recordMoodAttempt(env: Env, artistId: string): Promise<void> {
+  await env.DB.prepare(`UPDATE artist_cache SET mood_tagged_at = ? WHERE artist_id = ?`)
+    .bind(new Date().toISOString(), artistId)
+    .run();
+}
+
+// How long a failed/unmatched mood-tagging attempt (recordMoodAttempt above)
+// holds off retrying the same artist — long enough that a sticky mismatch
+// doesn't cost a Gemini call on every cache-miss build, short enough that a
+// fixed prompt/matching bug (or Gemini just having a bad day for that name)
+// self-heals within a day without any manual intervention.
+const MOOD_RETRY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+function attemptedRecently(row: ArtistCacheMoodRow): boolean {
+  if (!row.mood_tagged_at) return false;
+  const attemptedAt = Date.parse(row.mood_tagged_at);
+  return Number.isFinite(attemptedAt) && Date.now() - attemptedAt < MOOD_RETRY_COOLDOWN_MS;
+}
+
+async function resolveArtistMoodsInner(env: Env, ip: string, artists: TopArtistOut[]): Promise<Map<string, MoodGuess>> {
+  const byArtistId = new Map<string, MoodGuess>();
+  if (artists.length === 0) return byArtistId;
+
+  // Only artists that already have an artist_cache row are candidates here —
+  // one always exists by this point for a real ("gemini") slot classification
+  // (upsertArtistCache above) or an artist resolved on some earlier request;
+  // an artist that got a fallback slot this round has no row yet, so its mood
+  // is left for a later request once slot resolution succeeds for real.
+  const rows = await fetchArtistCacheMoodRows(env, artists.map((a) => a.id));
+  const missing: TopArtistOut[] = [];
+  for (const artist of artists) {
+    const row = rows.get(artist.id);
+    if (!row) continue;
+    if (row.mood && isMoodId(row.mood) && row.energy !== null) {
+      byArtistId.set(artist.id, { mood: row.mood, energy: row.energy });
+    } else if (!attemptedRecently(row)) {
+      missing.push(artist);
+    }
+    // else: tagged with nothing usable, but attempted within the last 24h
+    // (recordMoodAttempt below) — left unset for this response without
+    // spending another Gemini call on it.
+  }
+  if (missing.length === 0) return byArtistId;
+
+  // Same daily cap as slot resolution (worker/rate-limit.ts) — checked again
+  // here since resolveArtistSlots above may already have spent some of it.
+  if (!(await geminiQuotaAvailable(env, ip))) return byArtistId;
+
+  let guesses: Map<string, MoodGuess> | null = null;
+  try {
+    await logGeminiCall(env, ip, "moods");
+    guesses = await classifyMoods(
+      env,
+      missing.map((a) => ({ name: a.name, genres: a.genres })),
+    );
+  } catch (err) {
+    console.error("[genre-resolution] mood tagging Gemini call failed, leaving mood unset for this batch:", err);
+  }
+  if (!guesses) return byArtistId;
+
+  for (const artist of missing) {
+    const guess = guesses.get(normalizeArtistName(artist.name));
+    if (guess) {
+      byArtistId.set(artist.id, guess);
+      await updateArtistMood(env, artist.id, guess);
+    } else {
+      // classifyMoods already tried its own name/positional matching and
+      // still came up empty for this one — record the attempt so it isn't
+      // re-sent to Gemini on every cache-miss build until the cooldown above
+      // expires (see recordMoodAttempt's doc comment).
+      await recordMoodAttempt(env, artist.id);
+    }
+  }
+  return byArtistId;
+}
+
+/** Resolves every artist in `artists` that can be to a mood/energy pair,
+ * reading/writing artist_cache's mood columns. Never persists a fallback
+ * guess (mirrors resolveArtistSlots' fallbackSlot doc comment) — an artist
+ * with no entry in the returned map just has no mood yet, which every caller
+ * (worker/village.ts, then the frontend) already treats as "today's exact
+ * behavior".
+ *
+ * Guaranteed never to throw, same as resolveArtistSlots: an unexpected
+ * failure here degrades to no moods at all rather than failing the village
+ * response. */
+export async function resolveArtistMoods(env: Env, ip: string, artists: TopArtistOut[]): Promise<Map<string, MoodGuess>> {
+  try {
+    return await resolveArtistMoodsInner(env, ip, artists);
+  } catch (err) {
+    console.error("[genre-resolution] mood tagging failed unexpectedly, leaving every mood unset:", err);
+    return new Map();
   }
 }

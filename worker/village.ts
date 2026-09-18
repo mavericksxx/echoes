@@ -34,12 +34,13 @@ import type { Env } from "./index";
 import { getAccessToken, TokenError } from "./token";
 import { spotifyGet, SpotifyRequestError } from "./spotify-fetch";
 import { deriveArtists, VALID_RANGES, type SpotifyTopArtistsResponse, type TopArtistOut } from "./top-artists";
-import { resolveArtistSlots } from "./genre-resolution";
+import { resolveArtistMoods, resolveArtistSlots } from "./genre-resolution";
 import { fetchTopTracks, bucketTracksBySlot, type SlottedSong } from "./tracks";
 import { clientIp } from "./rate-limit";
 import { slotPlaysBetween } from "./history-query";
 import { activityLevel, type ActivityLevel } from "../shared/activity";
 import { SLOTS } from "../data/loader";
+import type { MoodGuess, MoodId } from "./gemini";
 
 const CACHE_TTL_SECONDS = 30 * 60;
 const VILLAGE_ARTISTS_LIMIT = 50; // Spotify's max for /me/top/artists
@@ -129,6 +130,17 @@ export interface VillageSlot {
    * false (tracks stage failed) or none of this slot's residents have a
    * top-50 track this range — never widened to a broader fetch to fill it. */
   songs: VillageSong[];
+  /** Phase 7a: this slot's play/share-weighted dominant mood — the mood with
+   * the highest total `score` (buildSlots' rank-weighted artist score,
+   * VillageArtist.score) among its artists that have one tagged. Null when
+   * no resident artist has a mood tagged yet (new artist, quota cap, or a
+   * Gemini failure — see worker/genre-resolution.ts's resolveArtistMoods),
+   * or when the slot has no artists at all. */
+  mood: MoodId | null;
+  /** Phase 7a: this slot's score-weighted mean energy (0..1) across artists
+   * with a tagged mood/energy — same weighting and same null cases as
+   * `mood` above (always null/non-null together). */
+  energy: number | null;
 }
 
 export type VillagePayload =
@@ -179,7 +191,15 @@ function errorMessage(err: unknown): string {
 }
 
 function dormantSlots(): VillageSlot[] {
-  return SLOT_IDS.map((slotId) => ({ slotId, activity: activityLevel(0), share: 0, artists: [], songs: [] }));
+  return SLOT_IDS.map((slotId) => ({
+    slotId,
+    activity: activityLevel(0),
+    share: 0,
+    artists: [],
+    songs: [],
+    mood: null,
+    energy: null,
+  }));
 }
 
 /** Live-paused (token/Spotify stage failed): no artist roster (that only
@@ -207,7 +227,7 @@ async function pausedPayload(env: Env, range: string): Promise<VillagePayload> {
       activitySource = "history";
       slots = SLOT_IDS.map((slotId) => {
         const share = history.bySlotShare!.get(slotId) ?? 0;
-        return { slotId, activity: activityLevel(share), share, artists: [], songs: [] };
+        return { slotId, activity: activityLevel(share), share, artists: [], songs: [], mood: null, energy: null };
       });
     }
   } catch (err) {
@@ -276,6 +296,38 @@ async function fetchTopArtists(env: Env, accessToken: string, range: string, lim
   return deriveArtists(data.items);
 }
 
+/** Phase 7a: this slot's play/share-weighted dominant mood + mean energy —
+ * see VillageSlot.mood/energy's doc comments. Weighted by each artist's
+ * already-computed rank-based `score` (0 for faded artists, which this
+ * naturally excludes without a separate check); artists with no tagged mood
+ * are skipped entirely rather than counted as 0 weight toward a "known"
+ * mood. Null when nothing in `artists` has a tagged mood. */
+function aggregateSlotMood(
+  artists: VillageArtist[],
+  moodByArtistId: Map<string, MoodGuess>,
+): { mood: MoodId; energy: number } | null {
+  let weightSum = 0;
+  let energyWeightSum = 0;
+  const moodWeights = new Map<MoodId, number>();
+  for (const artist of artists) {
+    const guess = moodByArtistId.get(artist.id);
+    if (!guess || artist.score <= 0) continue;
+    weightSum += artist.score;
+    energyWeightSum += guess.energy * artist.score;
+    moodWeights.set(guess.mood, (moodWeights.get(guess.mood) ?? 0) + artist.score);
+  }
+  if (weightSum <= 0) return null;
+  let dominant: MoodId | null = null;
+  let dominantWeight = -1;
+  for (const [mood, weight] of moodWeights) {
+    if (weight > dominantWeight) {
+      dominantWeight = weight;
+      dominant = mood;
+    }
+  }
+  return { mood: dominant!, energy: energyWeightSum / weightSum };
+}
+
 /** Builds the per-slot world from a resolved current-range fetch and an
  * optional long_term baseline (for faded/absent detection — see doc comment
  * above). `slotById` covers every artist appearing in either list. */
@@ -283,6 +335,7 @@ function buildSlots(
   current: TopArtistOut[],
   baseline: TopArtistOut[],
   slotById: Map<string, { slotId: string }>,
+  moodByArtistId: Map<string, MoodGuess>,
 ): VillageSlot[] {
   const n = current.length;
   const totalRawScore = (n * (n + 1)) / 2;
@@ -321,9 +374,18 @@ function buildSlots(
   return SLOT_IDS.map((slotId) => {
     const artists = (bySlot.get(slotId) ?? []).sort((a, b) => b.score - a.score);
     const share = totalRawScore > 0 ? (slotRawScore.get(slotId) ?? 0) / totalRawScore : 0;
+    const moodAgg = aggregateSlotMood(artists, moodByArtistId);
     // songs is filled in by handleVillage's separate tracks stage below —
     // buildSlots only knows about artists.
-    return { slotId, activity: activityLevel(share), share, artists, songs: [] };
+    return {
+      slotId,
+      activity: activityLevel(share),
+      share,
+      artists,
+      songs: [],
+      mood: moodAgg?.mood ?? null,
+      energy: moodAgg?.energy ?? null,
+    };
   });
 }
 
@@ -421,10 +483,17 @@ export async function handleVillage(request: Request, env: Env): Promise<Respons
   const { bySlotId, geminiLimited, geminiError } = await resolveArtistSlots(env, ip, Array.from(union.values()));
   if (geminiError) console.error("[village] gemini stage degraded:", geminiError);
 
+  // ---- stage: mood (Phase 7a) — its own call, sharing the same daily cap
+  // resolveArtistSlots above may have already spent some of (see
+  // resolveArtistMoods' doc comment). Never throws, never blocks the slot
+  // roster on a mood miss — an artist with no entry in moodByArtistId just
+  // renders with no mood (aggregateSlotMood above treats it as unweighted). ----
+  const moodByArtistId = await resolveArtistMoods(env, ip, Array.from(union.values()));
+
   // ---- stage: assemble ----
   let payload: VillagePayload;
   try {
-    const slots = buildSlots(current, baseline, bySlotId);
+    const slots = buildSlots(current, baseline, bySlotId, moodByArtistId);
     payload = {
       connected: true,
       live: true,

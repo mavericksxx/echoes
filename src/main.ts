@@ -8,6 +8,8 @@ import type { Point } from "../data/types";
 import { ASSET_MANIFEST, SLOTS, VILLAGE, assetSize, assetUrl, getSlot } from "../data/loader";
 import { pickWeightedSlotId } from "./sample-data";
 import {
+  energyPerformMul,
+  energySpeedMul,
   makeNpc,
   setCaption,
   startPerform,
@@ -26,12 +28,12 @@ import {
   type ImageMap,
 } from "./render";
 import { bakeRecolor } from "./recolor";
-import { buildCrowd, buildResidents, drawActivityTreatment, type Resident } from "./residents";
+import { buildCrowd, buildResidents, drawActivityTreatment, drawMoodTint, type Resident } from "./residents";
 import { close as closeSidebar, initSidebar, isSidebarOpen, openSidebar, refreshSidebarContent, setSidebarImages } from "./sidebar";
 import { initTopArtists } from "./top-artists";
 import { getLiveNowPlaying, initNowPlayingCard, subscribeNowPlaying } from "./now-playing-card";
 import { initHistoryStats } from "./history-stats";
-import { getActivity, getNowPlaying, initListeningSource, isVillageLive, refreshVillage } from "./listening-source";
+import { getActivity, getMoodEnergy, getNowPlaying, initListeningSource, isVillageLive, refreshVillage } from "./listening-source";
 import { onEraChange } from "./era";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
 
@@ -572,6 +574,7 @@ function renderDistrict(): void {
   ctx.translate(-camX, -camY);
   ctx.drawImage(imgs[district.bg]!, 0, 0);
   drawActivityTreatment(ctx, level, bgW, bgH);
+  drawMoodTint(ctx, getMoodEnergy(district.id).mood, bgW, bgH);
   const allNpcs = [leader, ...residents.map((r) => r.npc), ...visibleCrowd];
   const sorted = [...allNpcs].sort((a, b) => a.y - b.y);
   sorted.forEach((npc) => {
@@ -924,19 +927,24 @@ function frame(ts: number): void {
 
   updateZoomAnim(ts);
 
-  districtNpcsBySlot.forEach((npc, slotId) =>
+  districtNpcsBySlot.forEach((npc, slotId) => {
+    const { energy } = getMoodEnergy(slotId);
     updateNpc(npc, dt, ts, {
       isActive: mode === "district" && slotId === currentDistrictId,
       nowPlayingIntervalMs: NOW_PLAYING_INTERVAL_MS,
       getNowPlaying: () => getNowPlayingFor(npc.district.id),
-      performChanceMul: ACTIVITY_TREATMENT[getActivity(slotId).level].performChanceMul,
-    }),
-  );
+      // Activity level (how busy the district is) and mood/energy (how its
+      // music feels) are independent signals — the two multipliers stack.
+      performChanceMul: ACTIVITY_TREATMENT[getActivity(slotId).level].performChanceMul * energyPerformMul(energy),
+      energySpeedMul: energySpeedMul(energy),
+    });
+  });
   allResidents.forEach(({ npc }) =>
     updateNpc(npc, dt, ts, {
       isActive: false,
       nowPlayingIntervalMs: Number.POSITIVE_INFINITY,
       getNowPlaying: () => null,
+      energySpeedMul: energySpeedMul(getMoodEnergy(npc.district.id).energy),
     }),
   );
   allCrowd.forEach((npc) =>
@@ -944,6 +952,7 @@ function frame(ts: number): void {
       isActive: false,
       nowPlayingIntervalMs: Number.POSITIVE_INFINITY,
       getNowPlaying: () => null,
+      energySpeedMul: energySpeedMul(getMoodEnergy(npc.district.id).energy),
     }),
   );
 

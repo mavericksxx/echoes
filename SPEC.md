@@ -310,6 +310,41 @@ design. Revisit only if `usage_log` shows a real 429 (then fall back to 15–30s
 
 **You'll see:** districts feel different by mood; characters talk about your music.
 
+#### Phase 7a — Mood/energy tagging (built 2026-09-19)
+- `artist_cache` grows `mood` (one of a fixed 5-value enum — `calm`, `melancholy`, `upbeat`,
+  `intense`, `dreamy` — chosen instead of Phase 7's open-ended framing so it stays a quick
+  single-word read per artist, same spirit as the 17-slot roster), `energy` (REAL 0..1), and
+  `mood_tagged_at` (`migrations/0006_artist_mood.sql`). Only `mood`/`energy` ship this half-phase —
+  personality/dialogue and live captions stay Phase 7 work.
+- `worker/gemini.ts`'s `classifyMoods` batches every artist needing a tag into one Gemini call
+  (same schema-constrained-JSON style as `classifyGenres`/`classifyArtistNames`, with `coerceMood`/
+  `clampEnergy` mirroring `coerceSlot`/`clampConfidence`), sending only artist names and (when
+  already resolved this request) their genres — never a raw Spotify payload.
+- `worker/genre-resolution.ts`'s `resolveArtistMoods` piggybacks on the existing cache-first/
+  quota-checked flow: an artist already tagged (or with no `artist_cache` row yet — this round's
+  slot resolution fell back) is skipped; the daily Gemini cap is the same one slot resolution
+  spends from (checked again, since that stage may already have used some of it); a quota miss or
+  a Gemini failure just leaves `mood`/`energy` unset — **never** a persisted fallback guess, unlike
+  `fallbackSlot` (a slot must always resolve to *something* so residents place; a mood is optional
+  flavor, so "not tagged yet" is a perfectly fine, already-handled state).
+- `/api/village`'s `VillageSlot` grows `mood`/`energy`: the play/share-weighted dominant mood (by
+  total `VillageArtist.score`, the same rank-weighted number that already drives each slot's
+  `share`) and the score-weighted mean energy across that slot's artists with a tag. Null/null when
+  no resident has one yet — never mixed with a partial guess.
+- Frontend: `src/listening-source.ts`'s `getMoodEnergy` exposes the same shape (real when
+  connected+live, a plausible per-genre sample table otherwise, so offline/demo mode exercises the
+  same visuals). `src/residents.ts`'s `drawMoodTint` layers a low-alpha color wash over a district
+  interior's existing activity-level overlay (district-interior only, same scope as that overlay —
+  the whole-village view stays untouched); `src/npc.ts`'s `energySpeedMul`/`energyPerformMul` scale
+  `WALK_SPEED` and the existing `performChanceMul` narrowly around 1 (0.85–1.15 for speed, 0.7–1.6
+  for perform chance). Null mood/energy resolves to "draw nothing" / exactly `1` everywhere — today's
+  exact behavior, unchanged.
+- **Deviation from the Phase 7 bullet's plain "cached" framing:** mood tagging is its own
+  request-scoped pass (`resolveArtistMoods`), not folded into `resolveArtistSlots` itself — an
+  artist's slot and its mood can resolve on different requests (mood only tags once a cache row
+  exists), which the "no artist_cache row yet ⇒ skipped, retried next request" rule above accounts
+  for explicitly rather than leaving as an implicit gap.
+
 ### Phase 8 — The village remembers
 - Split into 8a and 8b; both built (8a 2026-09-18, 8b 2026-09-18).
 - **8a — The play-event log starts.** Worker cron (`worker/history.ts`, wired to `wrangler.jsonc`'s

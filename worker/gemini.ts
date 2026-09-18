@@ -26,6 +26,7 @@
 
 import type { Env } from "./index";
 import { SLOTS } from "../data/loader";
+import { MOOD_IDS, type MoodId } from "../shared/mood";
 
 const MODEL_ID = "gemini-3.5-flash-lite";
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent`;
@@ -33,9 +34,19 @@ const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL
 const SLOT_IDS = SLOTS.map((s) => s.district.id);
 const SLOT_GENRE_LINES = SLOTS.map((s) => `- "${s.district.id}": ${s.district.genre}`).join("\n");
 
+// Re-exported so callers (worker/genre-resolution.ts, worker/village.ts) can
+// import both the mood roster and the classification types from this one
+// file, same as they already do for SlotGuess/coerceSlot's slot roster.
+export { MOOD_IDS, type MoodId };
+
 export interface SlotGuess {
   slotId: string;
   confidence: number;
+}
+
+export interface MoodGuess {
+  mood: MoodId;
+  energy: number;
 }
 
 /** Thrown for anything that goes wrong calling Gemini — network failure, a
@@ -47,6 +58,27 @@ export class GeminiRequestError extends Error {}
 function clampConfidence(value: unknown): number {
   const n = typeof value === "number" && Number.isFinite(value) ? value : 0;
   return Math.max(0, Math.min(1, n));
+}
+
+/** Unlike clampConfidence (a slot always needs *some* confidence number, so
+ * an unusable value defaults to 0), an unusable energy must not silently
+ * become a real-looking 0 — that would read as "confirmed very low energy"
+ * and get persisted as if it were a real classification. Returns null
+ * instead, so classifyMoods below drops the whole row rather than fabricate
+ * a fallback guess (SPEC.md's "never persist a fallback guess as if it were
+ * Gemini's" — the same rule fallbackSlot documents for slots). */
+function clampEnergy(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(1, value));
+}
+
+/** Coerces a model-returned mood to one of MOOD_IDS, or null if it isn't
+ * one — unlike coerceSlot (a slot always needs *some* id so an artist can be
+ * placed at all), an unusable mood must not silently become a real-looking
+ * MOOD_IDS[0] guess; null lets classifyMoods drop the row instead of
+ * persisting a fabricated classification (see clampEnergy's doc comment). */
+function coerceMood(value: unknown): MoodId | null {
+  return typeof value === "string" && (MOOD_IDS as readonly string[]).includes(value) ? (value as MoodId) : null;
 }
 
 /** Coerces a model-returned slot id to one of the 17 known ids — a
@@ -74,6 +106,25 @@ function resultSchema(keyName: "genre" | "artist") {
         },
       },
       required: [keyName, "slot", "confidence"],
+    },
+  };
+}
+
+// Same hand-written OpenAPI-style shape as resultSchema above, for Phase
+// 7a's mood tagging — its own function rather than a resultSchema("mood")
+// variant since the fields (mood/energy) and their types don't line up with
+// resultSchema's slot/confidence shape.
+function moodResultSchema() {
+  return {
+    type: "ARRAY",
+    items: {
+      type: "OBJECT",
+      properties: {
+        artist: { type: "STRING" },
+        mood: { type: "STRING", enum: [...MOOD_IDS] },
+        energy: { type: "NUMBER", description: "0..1 — how high-energy this artist's music reads." },
+      },
+      required: ["artist", "mood", "energy"],
     },
   };
 }
@@ -117,7 +168,10 @@ function snippet(rawBody: string): string {
  * undiagnosable failure instead of a specific one. Throws `GeminiRequestError`
  * on any failure — network, non-OK status, or an unexpected/empty response —
  * never lets a raw fetch/parse exception escape this module. */
-async function generateJson(env: Env, prompt: string, schema: ReturnType<typeof resultSchema>): Promise<string> {
+// Deliberately loose — resultSchema's and moodResultSchema's return values
+// have different property sets (slot/confidence vs mood/energy), and this
+// param only ever gets JSON.stringify'd, never inspected by shape.
+async function generateJson(env: Env, prompt: string, schema: Record<string, unknown>): Promise<string> {
   let res: Response;
   try {
     res = await fetch(`${API_URL}?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {
@@ -241,5 +295,72 @@ export async function classifyArtistNames(env: Env, names: string[]): Promise<Ma
     if (!artist) continue;
     out.set(normalizeArtistName(artist), { slotId: coerceSlot(row.slot), confidence: clampConfidence(row.confidence) });
   }
+  return out;
+}
+
+export interface MoodTagInput {
+  name: string;
+  /** Spotify-supplied genres for this artist, if already resolved this
+   * request — sent along when present since it costs nothing extra and
+   * sharpens the guess; never fetched specially for this call. */
+  genres: string[];
+}
+
+/** Classifies a batch of artists' mood + energy in one call (Phase 7a —
+ * SPEC.md's "Moods and personalities"). Sends only artist names and, when
+ * already available, their genre strings — never a raw Spotify payload, per
+ * the AI policy at the top of this file. Keyed by normalizeArtistName, same
+ * as classifyArtistNames, so callers apply the identical lookup
+ * normalization — with one addition: when the model's echoed "artist"
+ * doesn't match anything sent (name drift beyond normalizeArtistName, or a
+ * missing/empty field) but the response array has exactly one row per input
+ * artist, the row's position recovers it instead of stranding it — see
+ * worker/genre-resolution.ts's 24h retry cooldown, the other half of that
+ * fix, for what happens when it still can't be matched.
+ *
+ * A row with an invalid mood or a non-finite energy (coerceMood/clampEnergy
+ * both return null for those) is dropped entirely — never a fabricated
+ * MOOD_IDS[0]/0 guess persisted as if it were Gemini's. */
+export async function classifyMoods(env: Env, artists: MoodTagInput[]): Promise<Map<string, MoodGuess>> {
+  if (artists.length === 0) return new Map();
+  // Each input object's own "artist"/"genres" fields (rather than a
+  // free-text line) so the model has an unambiguous "artist" value to echo
+  // back — classifyArtistNames' plain string-array input doesn't carry a
+  // second field alongside the name, so it doesn't have this ambiguity.
+  const inputs = artists.map((a) => ({ artist: a.name, genres: a.genres }));
+  const prompt = [
+    "You are describing the mood/vibe and energy of musical artists, using their name and (when given) genre tags.",
+    `Moods (pick exactly one per artist): ${MOOD_IDS.join(", ")}.`,
+    "Energy is 0..1 — how high-energy/intense their music generally sounds (0 = very mellow, 1 = very high-energy).",
+    "For each artist object below, infer from general knowledge of their music.",
+    'Respond with a JSON array with one object per input artist, each with exactly the fields "artist" (copy the input object\'s "artist" field, unchanged), "mood" (one of the moods above), and "energy" (0..1).',
+    "Artists (JSON array of {artist, genres}):",
+    JSON.stringify(inputs),
+  ].join("\n");
+
+  const text = await generateJson(env, prompt, moodResultSchema());
+  const rows = safeParseArray(text);
+  const sentNames = new Set(artists.map((a) => normalizeArtistName(a.name)));
+  // Only trustworthy when the model returned exactly one row per artist sent
+  // — otherwise a row's index doesn't reliably line up with `artists`' own
+  // order (a dropped or duplicated row would shift every later one).
+  const positionalFallbackOk = rows.length === artists.length;
+
+  const out = new Map<string, MoodGuess>();
+  rows.forEach((row, i) => {
+    const mood = coerceMood(row.mood);
+    const energy = clampEnergy(row.energy);
+    if (mood === null || energy === null) return;
+
+    const echoedName = typeof row.artist === "string" ? normalizeArtistName(row.artist) : null;
+    const key =
+      echoedName && sentNames.has(echoedName)
+        ? echoedName
+        : positionalFallbackOk
+          ? normalizeArtistName(artists[i]!.name)
+          : null;
+    if (!key) return;
+    out.set(key, { mood, energy });
+  });
   return out;
 }

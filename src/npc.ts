@@ -104,6 +104,34 @@ function speedMulFor(id: string): number {
   return SPEED_MUL_MIN + frac * SPEED_MUL_SPREAD;
 }
 
+// Phase 7a: a district's energy (0..1, src/listening-source.ts's
+// getMoodEnergy) scales its characters' walk speed and spontaneous-perform
+// chance subtly around today's baseline — low energy reads as a touch more
+// idle/ambient, high energy a bit livelier, layered on top of (not
+// replacing) each character's own speedMulFor variety above. Both ranges
+// are intentionally narrow, matching SPEED_MUL_SPREAD's own subtlety. Null
+// energy (not tagged yet, sample mode's fallback aside, or a paused/never-
+// connected village) always resolves to exactly 1 — today's exact behavior.
+const ENERGY_SPEED_MIN = 0.85;
+const ENERGY_SPEED_SPREAD = 0.3; // 0.85 (energy 0) .. 1.15 (energy 1)
+
+export function energySpeedMul(energy: number | null): number {
+  if (energy === null) return 1;
+  return ENERGY_SPEED_MIN + energy * ENERGY_SPEED_SPREAD;
+}
+
+const ENERGY_PERFORM_MIN = 0.7;
+const ENERGY_PERFORM_SPREAD = 0.9; // 0.7 (energy 0) .. 1.6 (energy 1)
+
+/** Multiplies UpdateOptions.performChanceMul (already set per-caller from
+ * ACTIVITY_TREATMENT) — the two stack, since activity level and mood/energy
+ * are independent signals (how much a district is playing vs. how the music
+ * it's playing feels). */
+export function energyPerformMul(energy: number | null): number {
+  if (energy === null) return 1;
+  return ENERGY_PERFORM_MIN + energy * ENERGY_PERFORM_SPREAD;
+}
+
 // Skewed short (most idles are brief) with an occasional long stand — see
 // SPEC.md Phase 4's "varied dwell" requirement.
 const LONG_DWELL_CHANCE = 0.15;
@@ -227,6 +255,10 @@ export interface UpdateOptions {
    * district's activity level (see shared/activity.ts's ACTIVITY_TREATMENT)
    * makes its leader perform more or less often while you're inside it. */
   performChanceMul?: number;
+  /** Multiplies WALK_SPEED alongside the NPC's own speedMul (default 1) —
+   * set by the caller from its district's energy (see this file's
+   * energySpeedMul and src/listening-source.ts's getMoodEnergy). */
+  energySpeedMul?: number;
 }
 
 /** Sets `npc.dir` from the direction of its current path segment — facing
@@ -308,8 +340,10 @@ function advanceWalkFrame(npc: Npc, dt: number): void {
 /** Walks continuously toward npc.path[npc.pathIdx], advancing to the next
  * segment on arrival (no per-cell hitch — a segment already spans several
  * cells) and calling `onArrive` once the whole path is consumed. Constant
- * speed, no easing: this game's "natural" is stop-turn-go, not steering. */
-function followPath(npc: Npc, dt: number, onArrive: () => void): void {
+ * speed, no easing: this game's "natural" is stop-turn-go, not steering.
+ * `speedMul` (default 1, see UpdateOptions.energySpeedMul) multiplies
+ * WALK_SPEED alongside the NPC's own per-character speedMul. */
+function followPath(npc: Npc, dt: number, speedMul: number, onArrive: () => void): void {
   const target = npc.path[npc.pathIdx];
   if (!target) {
     onArrive();
@@ -326,7 +360,7 @@ function followPath(npc: Npc, dt: number, onArrive: () => void): void {
     else setSegmentDir(npc);
     return;
   }
-  const step = Math.min(WALK_SPEED * npc.speedMul * dt, dist);
+  const step = Math.min(WALK_SPEED * npc.speedMul * speedMul * dt, dist);
   npc.x += (dx / dist) * step;
   npc.y += (dy / dist) * step;
   advanceWalkFrame(npc, dt);
@@ -390,7 +424,7 @@ export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions
   }
 
   if (npc.state === "traveling_home") {
-    followPath(npc, dt, () => {
+    followPath(npc, dt, opts.energySpeedMul ?? 1, () => {
       npc.x = npc.home.x;
       npc.y = npc.home.y;
       const info = opts.getNowPlaying();
@@ -417,7 +451,7 @@ export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions
   }
 
   if (npc.state === "walk") {
-    followPath(npc, dt, () => {
+    followPath(npc, dt, opts.energySpeedMul ?? 1, () => {
       releaseReservation(npc);
       npc.state = "idle";
       npc.idleTimer = pickDwell();
