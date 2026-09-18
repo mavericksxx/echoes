@@ -8,8 +8,9 @@
 // Phase 3 bullet for placement-encodes-play-count + faded/asleep residents.
 
 import type { CharacterDef, DistrictDef, Point } from "../data/types";
-import { NPC_RIGS, SLOTS, assetSize } from "../data/loader";
+import { NPC_RIGS, SLOTS, assetSize, getWalkGrid } from "../data/loader";
 import { makeNpc, type Npc } from "./npc";
+import { nearestWalkable } from "./pathfinding";
 import { getArtists } from "./listening-source";
 import { bakeRecolor } from "./recolor";
 import type { ImageMap } from "./render";
@@ -106,6 +107,11 @@ const RESIDENT_DIRECTIONS: Point[] = [
 ];
 const RESIDENT_DISTANCES = [12, 26, 40];
 
+// Residents must stay small (SPEC.md Phase 4: src/residents.ts encodes play
+// count as distance from the leader, and a wide wander erases that) — 2-3
+// cells, varied a little per index rather than one fixed number.
+const RESIDENT_WANDER_RADII = [2, 3, 2];
+
 function residentOffset(i: number): Point {
   const dir = RESIDENT_DIRECTIONS[i % RESIDENT_DIRECTIONS.length]!;
   const dist = RESIDENT_DISTANCES[Math.min(i, RESIDENT_DISTANCES.length - 1)]!;
@@ -116,26 +122,24 @@ function buildResidentsForDistrict(district: DistrictDef): Resident[] {
   const artists = getArtists(district.id).slice(0, RESIDENT_CAP);
   if (artists.length === 0) return [];
   const [w, h] = assetSize(district.bg);
+  const grid = getWalkGrid(district.bg);
 
   return artists.map((artist, i) => {
     const rigId = RIG_IDS[i % RIG_IDS.length]!;
     const sheetKey = residentSheetKey(rigId, i);
     const character = residentCharacter(rigId, sheetKey);
     const offset = residentOffset(i);
-    const home = clampPoint(district.home.x + offset.x, district.home.y + offset.y, w, h);
+    // home + offset is computed at runtime, not authored data, so
+    // check:data can't validate it — snap it onto the nearest walkable cell
+    // ourselves (see SPEC.md Phase 4) or a resident can spawn on a table.
+    const rawHome = clampPoint(district.home.x + offset.x, district.home.y + offset.y, w, h);
+    const home = nearestWalkable(rawHome, grid);
     const faded = artist.faded ?? false;
-    // A faded resident is asleep, not wandering — a one-point patrol keeps
-    // makeNpc/updateNpc's existing walk logic (it just never has anywhere
-    // else to walk to) instead of needing a separate "asleep" state.
-    const patrol = faded
-      ? [home]
-      : [
-          home,
-          clampPoint(home.x - 12, home.y - 8, w, h),
-          clampPoint(home.x + 12, home.y + 6, w, h),
-          clampPoint(home.x - 6, home.y + 10, w, h),
-        ];
-    const npc = makeNpc(character, district, home, patrol);
+    // A faded resident is asleep, not wandering — wanderRadius 0 gives
+    // tryStartWander no candidate but its own current cell (always
+    // excluded), so it stays put without a separate "asleep" state in npc.ts.
+    const wanderRadius = faded ? 0 : RESIDENT_WANDER_RADII[i % RESIDENT_WANDER_RADII.length]!;
+    const npc = makeNpc(character, district, home, { wanderRadius });
     return { npc, artistName: artist.name, artistId: artist.id, faded };
   });
 }
@@ -206,11 +210,15 @@ export function drawActivityTreatment(
       const [sx, sy, ex, ey] = frame;
       const fw = ex - sx;
       const fh = ey - sy;
+      const grid = getWalkGrid(district.bg);
       ctx.save();
       ctx.globalAlpha = 0.5;
       for (let i = 0; i < treatment.crowdExtra; i++) {
         const offset = CROWD_OFFSETS[i % CROWD_OFFSETS.length]!;
-        const p = clampPoint(district.home.x + offset.x, district.home.y + offset.y, w, h);
+        // Runtime-computed, like a resident's home — snap onto the nearest
+        // walkable cell so a background villager doesn't render on a table.
+        const raw = clampPoint(district.home.x + offset.x, district.home.y + offset.y, w, h);
+        const p = nearestWalkable(raw, grid);
         ctx.drawImage(img, sx, sy, fw, fh, p.x - fw / 2, p.y - fh, fw, fh);
       }
       ctx.restore();
