@@ -30,7 +30,8 @@
     "battleSheet": "team07",
     "specials": [
       [8, 233, 25, 264]
-    ]
+    ],
+    "lacksBackArt": true
   },
   {
     "id": "sakura",
@@ -94,7 +95,8 @@
     },
     "idle": [225, 136, 240, 167],
     "battleSheet": "nejiBattle",
-    "specials": []
+    "specials": [],
+    "lacksBackArt": true
   },
   {
     "id": "rocklee",
@@ -469,7 +471,8 @@
     },
     "idle": [33, 135, 45, 165],
     "battleSheet": "tentenBattle",
-    "specials": []
+    "specials": [],
+    "lacksBackArt": true
   },
   {
     "id": "temari",
@@ -532,6 +535,7 @@
     },
     "idle": [414, 160, 433, 193],
     "battleSheet": "kankuroBattle",
-    "specials": []
+    "specials": [],
+    "lacksBackArt": true
   }
 ]

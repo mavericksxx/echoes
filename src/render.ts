@@ -1,6 +1,6 @@
 // Image loading and canvas drawing. Ported from prototypes/konoha-demo/main.js.
 
-import type { CharacterAnims, Rect } from "../data/types";
+import type { CharacterAnims, CharacterDef, Rect } from "../data/types";
 import type { Direction, Npc } from "./npc";
 import { drawOrigin, getSpecialScale, resolvePivot } from "./sprite";
 
@@ -50,6 +50,29 @@ export function getWalkFrames(anims: CharacterAnims, dir: Direction): Rect[] {
   }
 }
 
+function rectEquals(a: Rect, b: Rect): boolean {
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3];
+}
+
+const neutralIdxCache = new WeakMap<CharacterDef, number>();
+
+/** Which index into walk_down (and, by the "same index is neutral across
+ * every direction" assumption below, every other direction's array too) is
+ * this character's neutral standing pose — derived from where `idle`
+ * matches a walk_down frame, rather than hand-adding a field to all 17
+ * characters (see SPEC.md Phase 4's "fix the arrival snap"). Falls back to
+ * index 0 if `idle` doesn't match any walk_down frame, which shouldn't
+ * happen: every roster character and every resident rig (src/residents.ts)
+ * derives its `idle` from a walk_down frame already. */
+function neutralIdx(character: CharacterDef): number {
+  const cached = neutralIdxCache.get(character);
+  if (cached !== undefined) return cached;
+  const i = character.anims.walk_down.findIndex((r) => rectEquals(r, character.idle));
+  const idx = i >= 0 ? i : 0;
+  neutralIdxCache.set(character, idx);
+  return idx;
+}
+
 /** The visible camera rect in world space, used to clamp on-screen overlays
  * (like caption bubbles) so they never draw outside the viewport. */
 export interface ViewRect {
@@ -73,7 +96,16 @@ function currentSprite(npc: Npc): { rect: Rect; label: string; scale: number; sh
     return { rect: character.idle, label: "idle", scale: 1, sheet: character.sheet };
   }
   if (npc.state === "idle") {
-    return { rect: character.idle, label: "idle", scale: 1, sheet: character.sheet };
+    // Face the direction last walked, not always front — see SPEC.md Phase
+    // 4's "fix the arrival snap". `character.idle` is exactly this
+    // character's down-facing neutral frame, so it's already the correct
+    // fallback when npc.dir is "down" or when the equivalent frame doesn't
+    // exist in another direction's array.
+    const idx = neutralIdx(character);
+    const frame = getWalkFrames(character.anims, npc.dir)[idx];
+    return frame
+      ? { rect: frame, label: `walk_${npc.dir}[${idx}]`, scale: 1, sheet: character.sheet }
+      : { rect: character.idle, label: "idle", scale: 1, sheet: character.sheet };
   }
   const frames = getWalkFrames(character.anims, npc.dir);
   const i = npc.frame % frames.length;
