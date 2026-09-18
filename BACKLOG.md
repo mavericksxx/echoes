@@ -44,6 +44,6 @@ and `scripts/walkability-draft-interiors.json` are kept as historical record; 4 
 
 ## Needs the user
 - ~~Register Spotify app~~ done (client id in wrangler.jsonc); account connected 2026-09-17
-- Run `wrangler login` — Cloudflare CLI auth expired; deploys currently go through the API
+- ~~Run `wrangler login`~~ not needed: `CLOUDFLARE_API_TOKEN` is set and deploys go through it
 - Gemini API key — Phase 3
 - ~~Cloudflare login~~ done (wrangler already authenticated)
