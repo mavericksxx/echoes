@@ -8,3 +8,4 @@ dist/
 .dev.vars
 .DS_Store
 .wrangler/
+.claude/settings.local.json
