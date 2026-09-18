@@ -5,9 +5,10 @@ Done since: Phase 3 (genres as characters), Phase 3.5 (real Songs tab), **Phase 
 grids + A* — all 17 maps authored and visually verified, 2026-09-18), Phase 4.5 (camera), Phase 5a
 (now-playing card), **Phase 5b** (the village reacts to the playing track), **Phase 8a** (the
 `play_event` log), **Phase 8b** (token cache in D1, history-driven activity, era toggle + sidebar
-History strip — 2026-09-18).
+History strip — 2026-09-18), **Phase 8.5** (Wrapped on demand — `/api/wrapped`, sidebar Wrapped tab
+— 2026-09-19).
 
-Next: **Phase 8.5** (Wrapped on demand) or **Phase 6** (rate-limit ramp test).
+Next: **Phase 6** (rate-limit ramp test).
 
 Notes on the finished grid work: two rooms are tight enough to watch — `shopFlower` collapses the 5
 resident/crowd spawn offsets onto 2 distinct cells and `shopWeapons` onto 4 (the others keep all 5),
@@ -21,11 +22,8 @@ and `scripts/walkability-draft-interiors.json` are kept as historical record; 4 
   actually zoom out. Blocked on Phase 4 merging; both touch src/main.ts. Asked 2026-09-18.
 - ~~Daily rollups + history-driven world~~ done (Phase 8b, 2026-09-18) — see SPEC.md's Phase 8b
   deviations for what shipped differently than planned (no `daily_snapshot`; live joins instead).
-- **Wrapped on demand** (Phase 8.5) — minutes listened + top songs/artists/genres over arbitrary
-  ranges. Phase 8a's `play_event` log is running and Phase 8b's history-query plumbing
-  (`worker/history-query.ts`) now exists too, so most of the aggregation Wrapped needs is already
-  built — the view itself still isn't. User chose to log from today forward rather than import a
-  data export (2026-09-18).
+- ~~Wrapped on demand~~ done (Phase 8.5, 2026-09-19) — see SPEC.md's Phase 8.5 section for what
+  shipped and how it falls back to Spotify's own top lists on a thin range.
 - **Playlists as places** (Phase 8.6) — playlists become enterable buildings, distinct from genre
   districts. Verify the playlist endpoints survived Feb 2026 before scoping.
 - **Frontend could show paused-but-real activity** (Phase 8b follow-on) — `worker/village.ts`'s
