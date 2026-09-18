@@ -252,6 +252,33 @@ instead of a fake play count, and tapping a featured artist's row no longer empt
 
 **You'll see:** the village keeps changing even when the app was closed; flip between eras.
 
+### Phase 8.5 — Wrapped on demand
+- Depends on Phase 8's `play_event` history — minutes and true play counts do not exist in the
+  Spotify API (rank only), so they can only come from history we log ourselves.
+- **[decided 2026-09-18]** No data export import. The user chose to log from today forward, so
+  Wrapped is accurate from the day Phase 8 ships and empty before it. Do not backfill, and do not
+  fabricate pre-history figures — show the collection start date instead.
+- A Wrapped view over our own history: minutes listened, top songs / artists / genres, with real
+  arbitrary ranges (this week / month / year / all time) rather than Spotify's three fixed
+  `time_range` buckets.
+- Until Phase 8 has accrued data, the same view can fall back to `/me/top/*` over
+  short/medium/long_term — clearly labelled as Spotify's windows, not ours.
+
+**You'll see:** a Wrapped-style read on your listening, any time, over any range you pick.
+
+### Phase 8.6 — Playlists are places
+- **[decided 2026-09-18]** Playlists become **buildings you can enter**, not a sidebar list. A genre
+  district is who you passively listen to; a playlist is something you deliberately made. That
+  distinction is encoded spatially — they are not both districts.
+- `GET /me/playlists` + `GET /playlists/{id}/tracks`. **Unverified:** these are user-scoped so they
+  likely survived the Feb 2026 batch-endpoint removal, but confirm before scoping.
+- Entering a playlist building shows its tracks and which resident characters live inside it.
+- Playlist genre breakdown feeds Phase 8.5's Wrapped view.
+- **Deferred:** generating/saving playlists to Spotify — needs write scopes and a re-connect, and is
+  a separate feature.
+
+**You'll see:** walk into a playlist and find the music you put there.
+
 ### Phase 9 — Weekly notice board
 - Snapshot diff → Gemini weekly brief (1/week, cached) → in-world notice board UI.
 
