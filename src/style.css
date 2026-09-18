@@ -976,6 +976,14 @@ select {
   --dot: var(--color-activity-festival);
 }
 
+/* Phase 8b: subtle note under the activity pill saying whether it's driven
+   by real play history or today's Spotify rank-weighted estimate. */
+.activity-source-note {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  margin: 6px 0 0;
+}
+
 .overview-stats {
   display: flex;
   gap: var(--space-5);
@@ -1049,6 +1057,57 @@ select {
 .artist-row--faded .artist-row__name,
 .artist-row--faded .artist-row__plays {
   opacity: 0.55;
+}
+
+/* ---- history (Phase 8b) ---- */
+.history-caption {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  margin: 0 0 var(--space-2);
+}
+
+.history-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 72px;
+  padding-bottom: 1px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.history-bar {
+  flex: 1 1 0;
+  min-width: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--color-activity-active);
+}
+
+/* A real, quiet day (0 plays, nothing left unclassified) — a short flat
+   tick rather than nothing, so it still reads as "counted, just empty". */
+.history-bar--zero {
+  height: 3px;
+  background: var(--color-border-strong);
+}
+
+/* Zero plays *placed* here, but some of the day's plays are still waiting
+   on genre-resolution — distinct from a genuinely quiet day. */
+.history-bar--unplaced {
+  height: 3px;
+  background: var(--color-secondary);
+  opacity: 0.6;
+}
+
+/* Before play_event's collectingSince — there is no play data for this day
+   at all, not even a zero. */
+.history-bar--nodata {
+  height: 100%;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--color-border),
+    var(--color-border) 2px,
+    transparent 2px,
+    transparent 6px
+  );
 }
 
 /* ---- now playing card (Overview) ---- */

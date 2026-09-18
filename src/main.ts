@@ -27,11 +27,12 @@ import {
 } from "./render";
 import { bakeRecolor } from "./recolor";
 import { buildCrowd, buildResidents, drawActivityTreatment, type Resident } from "./residents";
-import { close as closeSidebar, initSidebar, isSidebarOpen, openSidebar, setSidebarImages } from "./sidebar";
+import { close as closeSidebar, initSidebar, isSidebarOpen, openSidebar, refreshSidebarContent, setSidebarImages } from "./sidebar";
 import { initTopArtists } from "./top-artists";
 import { getLiveNowPlaying, initNowPlayingCard, subscribeNowPlaying } from "./now-playing-card";
 import { initHistoryStats } from "./history-stats";
-import { getActivity, getNowPlaying, initListeningSource, isVillageLive } from "./listening-source";
+import { getActivity, getNowPlaying, initListeningSource, isVillageLive, refreshVillage } from "./listening-source";
+import { onEraChange } from "./era";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
 
 const NOW_PLAYING_INTERVAL_MS = 8000;
@@ -966,10 +967,12 @@ const urlsByKey = Object.fromEntries(
 
 history.replaceState({ echoesDistrict: null }, "", `${location.pathname}${location.search}`);
 
-Promise.all([loadImages(urlsByKey), initListeningSource()]).then(([loaded]) => {
-  images = loaded;
-  setSidebarImages(images);
-  bakeRecolors();
+// Derives residentsBySlot/allCrowd (and their lookup maps) from whatever
+// /api/village currently holds (src/listening-source.ts). Called once at
+// startup and again on every era change (see the onEraChange subscription
+// below) — an era switch fetches a different range's artists, so the
+// resident/crowd NPCs built from the old one would otherwise be stale.
+function rebuildResidentsAndCrowd(): void {
   residentsBySlot = buildResidents(images);
   allResidents = Array.from(residentsBySlot.values()).flat();
   residentArtistByNpc = new Map(allResidents.map((r) => [r.npc, r.artistName]));
@@ -977,8 +980,43 @@ Promise.all([loadImages(urlsByKey), initListeningSource()]).then(([loaded]) => {
   residentFadedByNpc = new Map(allResidents.map((r) => [r.npc, r.faded]));
   crowdBySlot = buildCrowd();
   allCrowd = Array.from(crowdBySlot.values()).flat();
+}
+
+// initTopArtists() (below) makes the era tabs interactive before this file's
+// own initial load (loadImages/initListeningSource) finishes — guards the
+// subscription below against rebuilding residents from `images` while it's
+// still {}. The initial load already fetches /api/village for whatever era
+// is current at that point, so no era change is lost either way.
+let initialLoadComplete = false;
+
+// Phase 8b: the one global era (src/era.ts) changed, from either
+// src/top-artists.ts's tabs or (were it ever added elsewhere) any other
+// origin — re-fetch /api/village for it and rebuild everything derived from
+// it. Deliberately doesn't touch camera/mode/scene state, unlike the
+// startup path below.
+onEraChange(() => {
+  if (!initialLoadComplete) return;
+  void (async () => {
+    // refreshVillage() reports false if a later era switch already
+    // superseded this fetch by the time it resolved (see its own doc
+    // comment) — skip rebuilding from a response that isn't for the era
+    // currently selected, so rapid tab switching ends on the right one
+    // instead of flashing an in-between era's residents/sidebar content.
+    const applied = await refreshVillage();
+    if (!applied) return;
+    rebuildResidentsAndCrowd();
+    refreshSidebarContent();
+  })();
+});
+
+Promise.all([loadImages(urlsByKey), initListeningSource()]).then(([loaded]) => {
+  images = loaded;
+  setSidebarImages(images);
+  bakeRecolors();
+  rebuildResidentsAndCrowd();
   applyVillageScene();
   requestAnimationFrame(frame);
+  initialLoadComplete = true;
 
   // Dev-only walkability grid painter (see SPEC.md Phase 4) — guarded and
   // dynamically imported so it, and its import of the whole walkability

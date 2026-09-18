@@ -10,6 +10,7 @@ import type { Slot } from "../data/loader";
 import { drawPortrait, type ImageMap } from "./render";
 import { SAMPLE_NOW, type Song } from "./sample-data";
 import {
+  activitySource,
   getActivity,
   getArtists,
   getNowPlaying,
@@ -236,6 +237,18 @@ function renderOverview(container: HTMLElement, ctx: SectionContext): void {
   pill.className = `activity-pill activity-pill--${level}`;
   pill.textContent = ACTIVITY_LABEL[level] ?? level;
   container.appendChild(pill);
+
+  // Phase 8b: a subtle note on whether the activity/share above (and every
+  // other district's, for consistency — worker/village.ts never mixes
+  // sources per slot) is real listening history or today's Spotify
+  // rank-weighted estimate.
+  if (live) {
+    const sourceNote = document.createElement("p");
+    sourceNote.className = "activity-source-note";
+    sourceNote.textContent =
+      activitySource() === "history" ? "Activity from your play history" : "Activity from your Spotify top artists";
+    container.appendChild(sourceNote);
+  }
 
   const stats = document.createElement("div");
   stats.className = "overview-stats";
@@ -465,10 +478,115 @@ function renderArtists(container: HTMLElement, ctx: SectionContext): void {
   container.appendChild(list);
 }
 
+// ---------------------------------------------------------------------------
+// History (Phase 8b)
+// ---------------------------------------------------------------------------
+interface HistoryDailyResponse {
+  ownerTz: string;
+  days: string[]; // 30 owner-local day strings (YYYY-MM-DD), oldest first
+  collectingSince: number | null;
+  bySlot: Record<string, number[]>;
+  unslottedByDay: number[];
+}
+
+// Fetched once at load (like src/history-stats.ts) — the log only grows on
+// a 15-min cron, so there's nothing to gain from refetching per era change
+// or per sidebar open. `undefined` means "not fetched yet", `null` means
+// "fetch failed" — both render the same "not available" message below.
+let historyDaily: HistoryDailyResponse | null | undefined;
+
+async function fetchHistoryDaily(): Promise<HistoryDailyResponse | null> {
+  try {
+    const res = await fetch("/api/history/daily");
+    if (!res.ok) return null;
+    return (await res.json()) as HistoryDailyResponse;
+  } catch {
+    return null;
+  }
+}
+
+function loadHistoryDaily(): void {
+  void fetchHistoryDaily().then((data) => {
+    historyDaily = data;
+    // If the visitor is already looking at the History tab when this
+    // resolves, refresh it in place instead of leaving it on "loading".
+    if (currentSlot && activeSectionId === "history") renderSection("history");
+  });
+}
+
+function renderHistory(container: HTMLElement, ctx: SectionContext): void {
+  if (historyDaily === undefined) {
+    const loading = document.createElement("p");
+    loading.className = "sidebar-empty";
+    loading.textContent = "Loading history…";
+    container.appendChild(loading);
+    return;
+  }
+  if (historyDaily === null) {
+    const failed = document.createElement("p");
+    failed.className = "sidebar-empty";
+    failed.textContent = "History isn't available right now.";
+    container.appendChild(failed);
+    return;
+  }
+
+  const { days, bySlot, unslottedByDay, collectingSince, ownerTz } = historyDaily;
+  const counts = bySlot[ctx.slot.district.id] ?? new Array(days.length).fill(0);
+  // Compare owner-local day strings directly (both "YYYY-MM-DD", so string
+  // order is chronological order) rather than converting collectingSince
+  // back to a Date — this must line up with the exact same owner-local
+  // calendar the Worker bucketed `days` into.
+  const collectingSinceDay =
+    collectingSince !== null
+      ? new Intl.DateTimeFormat("en-CA", { timeZone: ownerTz, year: "numeric", month: "2-digit", day: "2-digit" }).format(
+          new Date(collectingSince),
+        )
+      : null;
+
+  const caption = document.createElement("p");
+  caption.className = "history-caption";
+  caption.textContent = "Last 30 owner-local days";
+  container.appendChild(caption);
+
+  const max = Math.max(1, ...counts);
+  const bars = document.createElement("div");
+  bars.className = "history-bars";
+  days.forEach((day, i) => {
+    const bar = document.createElement("span");
+    bar.className = "history-bar";
+    const count = counts[i] ?? 0;
+    const noData = collectingSinceDay !== null ? day < collectingSinceDay : true;
+    const unplaced = !noData && count === 0 && (unslottedByDay[i] ?? 0) > 0;
+    if (noData) {
+      bar.classList.add("history-bar--nodata");
+      bar.title = `${day}: no data`;
+    } else if (unplaced) {
+      bar.classList.add("history-bar--unplaced");
+      bar.title = `${day}: plays not yet placed`;
+    } else if (count === 0) {
+      bar.classList.add("history-bar--zero");
+      bar.title = `${day}: 0 plays`;
+    } else {
+      bar.style.height = `${Math.max(8, Math.round((count / max) * 100))}%`;
+      bar.title = `${day}: ${count} play${count === 1 ? "" : "s"}`;
+    }
+    bars.appendChild(bar);
+  });
+  container.appendChild(bars);
+
+  if (collectingSinceDay === null) {
+    const empty = document.createElement("p");
+    empty.className = "sidebar-empty";
+    empty.textContent = "Listening history: just started collecting.";
+    container.appendChild(empty);
+  }
+}
+
 const SECTIONS: Section[] = [
   { id: "overview", label: "Overview", render: renderOverview },
   { id: "songs", label: "Songs", render: renderSongs },
   { id: "artists", label: "Artists", render: renderArtists },
+  { id: "history", label: "History", render: renderHistory },
 ];
 
 // ---------------------------------------------------------------------------
@@ -630,6 +748,8 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
 
   root.append(grabber, closeBtn, header, tablistEl, panelHost, footer);
   backdrop.addEventListener("click", () => close());
+
+  loadHistoryDaily();
 }
 
 export function openSidebar(slot: Slot, opts: OpenSidebarOptions = {}): void {
@@ -692,4 +812,24 @@ export function isSidebarOpen(): boolean {
 
 export function sidebarSlotId(): string | null {
   return currentSlot?.district.id ?? null;
+}
+
+/** Re-renders whichever section is currently showing, if the sidebar is
+ * open — used by main.ts's era-change subscription so an open panel doesn't
+ * keep showing the previous era's activity/artists/songs after
+ * src/listening-source.ts's village data has already moved on. A no-op if
+ * the sidebar is closed (nothing to refresh). */
+export function refreshSidebarContent(): void {
+  if (!currentSlot) return;
+  // Phase 8b: an era change can fetch an entirely different artist roster —
+  // if the Songs tab's artist filter (an id, set from a resident/artist row
+  // tap — see renderSongs's synthetic-option comment above) no longer
+  // exists in the new era, drop it. Left alone, the control would silently
+  // reset its *displayed* value to "All artists" while songsArtistFilter
+  // stayed pointed at the vanished id, filtering the list down to nothing
+  // with no visible way to clear it.
+  if (songsArtistFilter && !getArtists(currentSlot.district.id).some((a) => a.id === songsArtistFilter)) {
+    songsArtistFilter = "";
+  }
+  renderSection(activeSectionId);
 }

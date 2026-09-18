@@ -37,12 +37,67 @@ import { deriveArtists, VALID_RANGES, type SpotifyTopArtistsResponse, type TopAr
 import { resolveArtistSlots } from "./genre-resolution";
 import { fetchTopTracks, bucketTracksBySlot, type SlottedSong } from "./tracks";
 import { clientIp } from "./rate-limit";
+import { slotPlaysBetween } from "./history-query";
 import { activityLevel, type ActivityLevel } from "../shared/activity";
 import { SLOTS } from "../data/loader";
 
 const CACHE_TTL_SECONDS = 30 * 60;
 const VILLAGE_ARTISTS_LIMIT = 50; // Spotify's max for /me/top/artists
 const SLOT_IDS = SLOTS.map((s) => s.district.id);
+
+// Phase 8b: maps a village range to the play_event window judged equivalent
+// to it — short_term (Spotify's own window is "approximately 4 weeks") gets
+// the same 28 days, medium_term ("approximately 6 months") gets 180 days,
+// long_term is all logged history (Phase 8a started collecting 2026-09-18,
+// so "all time" here is naturally bounded by that start date, not an
+// arbitrary lookback). `null` means "from the beginning".
+const HISTORY_WINDOW_MS: Record<string, number | null> = {
+  short_term: 28 * 24 * 60 * 60 * 1000,
+  medium_term: 180 * 24 * 60 * 60 * 1000,
+  long_term: null,
+};
+
+// Below this many *slotted* plays in the window, today's Spotify
+// rank-weighted share is more trustworthy than a history-derived one — a
+// handful of plays would let one or two artists swing a slot's whole share.
+// Applied uniformly: either every slot in the response uses history, or
+// every slot uses the rank-weighted share — never mixed per slot, since a
+// visitor comparing two districts should be comparing the same kind of
+// number for both.
+const MIN_SLOTTED_PLAYS_FOR_HISTORY = 50;
+
+interface HistoryActivity {
+  /** Per-slot share (0..1) of slotted plays in the window, or `null` if
+   * there isn't enough history yet to trust it (see
+   * MIN_SLOTTED_PLAYS_FOR_HISTORY) — callers keep every slot on whichever
+   * source this is, never mixed. */
+  bySlotShare: Map<string, number> | null;
+  /** slottedPlays / totalPlays for the window, 0 if the window has no plays
+   * at all — how much of it is actually classified yet, regardless of
+   * whether bySlotShare ended up populated. */
+  historyCoverage: number;
+  /** Every play in the window, slotted or not. */
+  historyPlays: number;
+}
+
+/** Resolves `range`'s history window and decides whether there's enough D1
+ * play history to drive activity/share from real plays instead of today's
+ * Spotify rank-weighted numbers (SPEC.md's Phase 8b). Never throws — a D1
+ * query failure here should degrade to the Spotify-driven numbers, not fail
+ * the whole village. */
+async function historyActivityForRange(env: Env, range: string): Promise<HistoryActivity> {
+  const windowMs = HISTORY_WINDOW_MS[range] ?? null;
+  const toMs = Date.now();
+  const fromMs = windowMs === null ? 0 : toMs - windowMs;
+  const { bySlot, slottedPlays, totalPlays } = await slotPlaysBetween(env, fromMs, toMs);
+  const historyCoverage = totalPlays > 0 ? slottedPlays / totalPlays : 0;
+  if (slottedPlays < MIN_SLOTTED_PLAYS_FOR_HISTORY) {
+    return { bySlotShare: null, historyCoverage, historyPlays: totalPlays };
+  }
+  const bySlotShare = new Map<string, number>();
+  for (const slotId of SLOT_IDS) bySlotShare.set(slotId, (bySlot[slotId] ?? 0) / slottedPlays);
+  return { bySlotShare, historyCoverage, historyPlays: totalPlays };
+}
 
 export interface VillageArtist {
   id: string;
@@ -96,6 +151,18 @@ export type VillagePayload =
        * empty (no top-50 track for its residents this range). */
       songsLive: boolean;
       cachedAt: string | null;
+      /** Phase 8b: whether every slot's activity/share above came from real
+       * play_event history or from today's Spotify rank-weighted share
+       * (see historyActivityForRange) — never mixed per slot. */
+      activitySource: "history" | "spotify";
+      /** slottedPlays / totalPlays for this range's history window, 0 if the
+       * window has no logged plays yet. Meaningful even when
+       * activitySource is "spotify" (not enough slotted plays yet) — it's
+       * what tells a caller *how close* the history source is to kicking in. */
+      historyCoverage: number;
+      /** Every play_event row in this range's history window, slotted or
+       * not — 0 before Phase 8a had collected anything. */
+      historyPlays: number;
     };
 
 /** An unexpected failure at some stage of building the village — returned as
@@ -115,16 +182,50 @@ function dormantSlots(): VillageSlot[] {
   return SLOT_IDS.map((slotId) => ({ slotId, activity: activityLevel(0), share: 0, artists: [], songs: [] }));
 }
 
-function pausedPayload(range: string): VillagePayload {
+/** Live-paused (token/Spotify stage failed): no artist roster (that only
+ * ever comes from Spotify), but Phase 8b's history is D1-only, so this
+ * *payload* no longer has to flatten every slot to dormant — if there's
+ * enough play_event history for this range, activity/share still reflect
+ * real listening. Falls back to dormantSlots() if there isn't (including on
+ * a D1 query failure — this must never itself throw).
+ *
+ * Not yet wired into what a paused visitor actually sees: src/listening-
+ * source.ts's getActivity()/getArtists() only read a village payload while
+ * isVillageLive() (live === true), so today a paused response's real
+ * activity numbers here are inspectable via the API but the frontend still
+ * falls back to sample data while paused. Tracked in BACKLOG.md. */
+async function pausedPayload(env: Env, range: string): Promise<VillagePayload> {
+  let slots = dormantSlots();
+  let activitySource: "history" | "spotify" = "spotify";
+  let historyCoverage = 0;
+  let historyPlays = 0;
+  try {
+    const history = await historyActivityForRange(env, range);
+    historyCoverage = history.historyCoverage;
+    historyPlays = history.historyPlays;
+    if (history.bySlotShare) {
+      activitySource = "history";
+      slots = SLOT_IDS.map((slotId) => {
+        const share = history.bySlotShare!.get(slotId) ?? 0;
+        return { slotId, activity: activityLevel(share), share, artists: [], songs: [] };
+      });
+    }
+  } catch (err) {
+    console.error("[village] paused-payload history stage failed, falling back to dormant slots:", err);
+  }
+
   return {
     connected: true,
     live: false,
     range,
-    slots: dormantSlots(),
+    slots,
     geminiLimited: false,
     geminiError: null,
     songsLive: false,
     cachedAt: null,
+    activitySource,
+    historyCoverage,
+    historyPlays,
   };
 }
 
@@ -143,6 +244,27 @@ async function writeCache(key: Request, payload: VillagePayload): Promise<void> 
     headers: { "Content-Type": "application/json", "Cache-Control": `s-maxage=${CACHE_TTL_SECONDS}` },
   });
   await caches.default.put(key, res);
+}
+
+// Phase 8b cheap win: the raw long_term artist list, cached separately from
+// cacheKeyFor's whole-payload-per-range cache (see handleVillage's spotify
+// stage) so a short_term or medium_term build within CACHE_TTL_SECONDS can
+// reuse it without a second Spotify call.
+function baselineCacheKey(): Request {
+  return new Request("https://echoes-cache.internal/village/baseline/long_term");
+}
+
+async function readBaselineCache(): Promise<TopArtistOut[] | null> {
+  const res = await caches.default.match(baselineCacheKey());
+  if (!res) return null;
+  return (await res.json()) as TopArtistOut[];
+}
+
+async function writeBaselineCache(artists: TopArtistOut[]): Promise<void> {
+  const res = new Response(JSON.stringify(artists), {
+    headers: { "Content-Type": "application/json", "Cache-Control": `s-maxage=${CACHE_TTL_SECONDS}` },
+  });
+  await caches.default.put(baselineCacheKey(), res);
 }
 
 async function fetchTopArtists(env: Env, accessToken: string, range: string, limit: number): Promise<TopArtistOut[]> {
@@ -222,7 +344,7 @@ export async function handleVillage(request: Request, env: Env): Promise<Respons
   try {
     accessToken = await getAccessToken(env);
   } catch (err) {
-    if (err instanceof TokenError) return Response.json(pausedPayload(range));
+    if (err instanceof TokenError) return Response.json(await pausedPayload(env, range));
     console.error("[village] token stage failed unexpectedly:", err);
     return Response.json({ error: errorMessage(err), where: "token" } satisfies VillageErrorPayload);
   }
@@ -243,14 +365,49 @@ export async function handleVillage(request: Request, env: Env): Promise<Respons
   // ---- stage: spotify ----
   let current: TopArtistOut[];
   let baseline: TopArtistOut[];
+  // Only true when `baseline` above was actually just fetched from Spotify
+  // (this request *is* long_term, or the baseline cache missed) — gates the
+  // cache write below so a cache *hit* doesn't re-arm its own TTL on every
+  // read. Without this, the baseline cache would rewrite its expiry on
+  // every non-long_term build that hit it and never actually go stale/
+  // refresh again.
+  let baselineFetched = false;
   try {
     current = await fetchTopArtists(env, accessToken, range, VILLAGE_ARTISTS_LIMIT);
-    baseline =
-      range === "long_term" ? current : await fetchTopArtists(env, accessToken, "long_term", VILLAGE_ARTISTS_LIMIT);
+    if (range === "long_term") {
+      baseline = current;
+      baselineFetched = true;
+    } else {
+      // Cheap win (Phase 8b): the long_term baseline fetch is identical for
+      // every non-long_term build within CACHE_TTL_SECONDS, so cache its raw
+      // artist list under its own key — separate from cacheKeyFor's whole-
+      // payload cache, which is keyed per range and wouldn't help a
+      // short_term build reuse long_term's fetch.
+      let cachedBaseline: TopArtistOut[] | null = null;
+      try {
+        cachedBaseline = await readBaselineCache();
+      } catch (err) {
+        console.error("[village] baseline cache read failed, refetching:", err);
+      }
+      if (cachedBaseline) {
+        baseline = cachedBaseline;
+      } else {
+        baseline = await fetchTopArtists(env, accessToken, "long_term", VILLAGE_ARTISTS_LIMIT);
+        baselineFetched = true;
+      }
+    }
   } catch (err) {
-    if (err instanceof SpotifyRequestError) return Response.json(pausedPayload(range));
+    if (err instanceof SpotifyRequestError) return Response.json(await pausedPayload(env, range));
     console.error("[village] spotify stage failed unexpectedly:", err);
     return Response.json({ error: errorMessage(err), where: "spotify" } satisfies VillageErrorPayload);
+  }
+
+  if (baselineFetched) {
+    try {
+      await writeBaselineCache(baseline);
+    } catch (err) {
+      console.error("[village] baseline cache write failed (response still returned):", err);
+    }
   }
 
   const union = new Map<string, TopArtistOut>();
@@ -277,10 +434,36 @@ export async function handleVillage(request: Request, env: Env): Promise<Respons
       geminiError,
       songsLive: true, // tentative — the tracks stage below may flip this
       cachedAt: new Date().toISOString(),
+      // Defaults below — the history stage right after this overrides them
+      // when there's enough D1 history to trust (see historyActivityForRange).
+      activitySource: "spotify",
+      historyCoverage: 0,
+      historyPlays: 0,
     };
   } catch (err) {
     console.error("[village] assemble stage failed unexpectedly:", err);
     return Response.json({ error: errorMessage(err), where: "assemble" } satisfies VillageErrorPayload);
+  }
+
+  // ---- stage: history activity (Phase 8b) — its own try/catch, deliberately
+  // outside "assemble": a D1 query failure here must never turn a perfectly
+  // good Spotify-driven response into an error payload, it should just leave
+  // the rank-weighted numbers already in `payload` alone. Overrides every
+  // slot's activity/share uniformly (never mixed per slot — see
+  // historyActivityForRange's doc comment). ----
+  try {
+    const history = await historyActivityForRange(env, range);
+    payload.historyCoverage = history.historyCoverage;
+    payload.historyPlays = history.historyPlays;
+    if (history.bySlotShare) {
+      payload.activitySource = "history";
+      payload.slots = payload.slots.map((slot) => {
+        const share = history.bySlotShare!.get(slot.slotId) ?? 0;
+        return { ...slot, share, activity: activityLevel(share) };
+      });
+    }
+  } catch (err) {
+    console.error("[village] history activity stage failed, using spotify-driven share:", err);
   }
 
   // ---- stage: tracks (Phase 3.5) — its own try/catch, deliberately outside

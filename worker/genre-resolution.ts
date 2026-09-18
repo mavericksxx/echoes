@@ -28,7 +28,7 @@
 
 import type { Env } from "./index";
 import type { TopArtistOut } from "./top-artists";
-import { classifyArtistNames, classifyGenres, type SlotGuess } from "./gemini";
+import { classifyArtistNames, classifyGenres, normalizeArtistName, type SlotGuess } from "./gemini";
 import { geminiQuotaAvailable, logGeminiCall } from "./rate-limit";
 import { SLOTS } from "../data/loader";
 
@@ -266,7 +266,12 @@ async function resolveArtistSlotsInner(
     }
 
     for (const artist of withoutGenres) {
-      const guess = nameGuesses?.get(artist.name);
+      // Match Gemini's echoed name normalized (see gemini.ts's
+      // normalizeArtistName) rather than exact-string — a mismatch here
+      // just falls through to the deterministic fallback below and never
+      // gets cached, so the same artist would otherwise get re-sent to
+      // Gemini every cron run.
+      const guess = nameGuesses?.get(normalizeArtistName(artist.name));
       const slot: ArtistSlot = guess
         ? { slotId: guess.slotId, confidence: guess.confidence, source: "gemini" }
         : { slotId: fallbackSlot(artist.name), confidence: 0.05, source: "fallback" };

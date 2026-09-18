@@ -204,6 +204,18 @@ export async function classifyGenres(env: Env, genres: string[]): Promise<Map<st
   return out;
 }
 
+/** Normalizes an artist name for matching Gemini's echoed "artist" field
+ * back to the name that was sent — trim, lowercase, Unicode-normalize
+ * (NFC). Gemini doesn't always echo the input byte-for-byte (whitespace/
+ * case/diacritic-composition can drift even though the prompt asks for it
+ * "unchanged"), and an exact-string lookup miss there silently re-sends the
+ * same artist to Gemini every cron run instead of ever caching it. Exported
+ * so worker/genre-resolution.ts's lookup applies the exact same
+ * normalization this file used to build the map's keys. */
+export function normalizeArtistName(name: string): string {
+  return name.trim().toLowerCase().normalize("NFC");
+}
+
 /** Classifies a batch of artist names directly into the 17 roster slots —
  * used only when Spotify returned no genres at all for that artist (the
  * common case for this account; see SPEC.md's "Reality check"). Sends only
@@ -227,7 +239,7 @@ export async function classifyArtistNames(env: Env, names: string[]): Promise<Ma
   for (const row of safeParseArray(text)) {
     const artist = typeof row.artist === "string" ? row.artist : null;
     if (!artist) continue;
-    out.set(artist, { slotId: coerceSlot(row.slot), confidence: clampConfidence(row.confidence) });
+    out.set(normalizeArtistName(artist), { slotId: coerceSlot(row.slot), confidence: clampConfidence(row.confidence) });
   }
   return out;
 }

@@ -14,6 +14,7 @@
 
 import { activityLevel, type ActivityLevel } from "../shared/activity";
 import { getListening, nowPlayingSong, totalPlays, topArtists as sampleTopArtists, type Song } from "./sample-data";
+import { getEra } from "./era";
 
 export interface ArtistEntry {
   name: string;
@@ -70,6 +71,10 @@ export type VillagePayload =
        * `songs` is `[]` in that case, distinct from a slot that's genuinely
        * empty this range. */
       songsLive: boolean;
+      /** Phase 8b: whether every slot's activity/share above came from real
+       * play_event history or from today's Spotify rank-weighted share
+       * (worker/village.ts's historyActivityForRange) — never mixed per slot. */
+      activitySource: "history" | "spotify";
     };
 
 let village: VillagePayload = { connected: false };
@@ -79,9 +84,12 @@ function indexVillage(payload: VillagePayload): void {
   villageBySlot = payload.connected ? new Map(payload.slots.map((s) => [s.slotId, s])) : new Map();
 }
 
+/** Phase 8b: /api/village is fetched for the current global era (src/era.ts)
+ * — the single source of truth shared with src/top-artists.ts's panel, so
+ * the two never disagree about which window of listening they're showing. */
 async function fetchVillage(): Promise<VillagePayload> {
   try {
-    const res = await fetch("/api/village");
+    const res = await fetch(`/api/village?range=${getEra()}`);
     if (!res.ok) return { connected: false };
     return (await res.json()) as VillagePayload;
   } catch {
@@ -97,6 +105,26 @@ export async function initListeningSource(): Promise<void> {
   indexVillage(village);
 }
 
+/** Re-fetches /api/village for whatever era is current and swaps it in —
+ * called by main.ts's onEraChange subscription, which then rebuilds the
+ * resident/crowd NPCs from the fresh data (see src/residents.ts's
+ * getArtists dependency) and refreshes the sidebar if it's open.
+ *
+ * Returns whether the fetched payload was actually applied. Rapid era
+ * switching can start a second fetch before the first one resolves; if this
+ * one's `range` no longer matches the *current* era by the time it comes
+ * back, some later switch has already superseded it (and started its own
+ * refreshVillage() call), so it's discarded rather than momentarily
+ * flashing a stale era's data — the caller must skip rebuilding
+ * residents/crowd or the sidebar from a discarded response. */
+export async function refreshVillage(): Promise<boolean> {
+  const payload = await fetchVillage();
+  if (payload.connected && payload.range !== getEra()) return false;
+  village = payload;
+  indexVillage(village);
+  return true;
+}
+
 export function isVillageLive(): boolean {
   return village.connected && village.live;
 }
@@ -107,6 +135,13 @@ export function isVillageConnected(): boolean {
 
 export function villageGeminiLimited(): boolean {
   return village.connected && village.geminiLimited;
+}
+
+/** Phase 8b: which source is driving every district's activity/share right
+ * now. "spotify" whenever not connected+live (there's nothing else to
+ * report), matching every other accessor here's fallback convention. */
+export function activitySource(): "history" | "spotify" {
+  return village.connected ? village.activitySource : "spotify";
 }
 
 /** True once connected+live, unless the tracks stage itself failed

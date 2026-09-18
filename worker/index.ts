@@ -14,12 +14,15 @@
 // 5a adds /api/now-playing (now-playing.ts) for the display-only now-playing
 // card. Phase 8a adds a `scheduled()` export (wrangler.jsonc's
 // `triggers.crons`) driving worker/history.ts's play-event log, plus
-// /api/history/stats for its small frontend readout.
+// /api/history/stats for its small frontend readout. Phase 8b adds
+// /api/history/daily (history-daily.ts) for the sidebar's per-district
+// 30-day strip.
 
 import { handleTopArtists } from "./top-artists";
 import { handleVillage } from "./village";
 import { handleNowPlaying } from "./now-playing";
 import { runHistorySync, handleHistoryStats } from "./history";
+import { handleHistoryDaily } from "./history-daily";
 import { clientIp, enforceRateLimit, RateLimitError, RATE_LIMIT_RULES } from "./rate-limit";
 
 export interface Env {
@@ -31,6 +34,9 @@ export interface Env {
   TOKEN_KEY: string;
   /** Gemini API key (free tier) — a Worker secret (`wrangler secret put GEMINI_API_KEY`). Used only by worker/gemini.ts. */
   GEMINI_API_KEY: string;
+  /** The one owner's IANA timezone (wrangler.jsonc's `vars`) — worker/history-daily.ts buckets
+   * /api/history/daily's 30-day strip into their local calendar days, not each visitor's. */
+  OWNER_TZ: string;
 }
 
 /** Maps a route to its rate-limit bucket — every /api/* route is limited
@@ -43,6 +49,9 @@ const ROUTE_BUCKETS: Record<string, keyof typeof RATE_LIMIT_RULES> = {
   "/api/village": "village",
   "/api/now-playing": "nowPlaying",
   "/api/history/stats": "historyStats",
+  // D1-only reads too (worker/history-daily.ts) — same generous limit as
+  // historyStats, reusing its rule rather than defining a near-identical one.
+  "/api/history/daily": "historyStats",
 };
 
 export default {
@@ -85,6 +94,10 @@ export default {
 
     if (url.pathname === "/api/history/stats") {
       return handleHistoryStats(env);
+    }
+
+    if (url.pathname === "/api/history/daily") {
+      return handleHistoryDaily(env);
     }
 
     // Reached only when a request matches neither a rate-limited /api/*
