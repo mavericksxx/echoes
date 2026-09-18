@@ -56,6 +56,15 @@ const SPOTIFY_TIME_RANGE: Record<WrappedRange, string> = {
   all: "long_term",
 };
 
+// Same key/TTL convention as worker/top-artists.ts's own caches.default use
+// (SPEC.md: "Spotify-calling endpoints served from the Worker's cache so
+// visitors can't burn the Spotify quota" — a per-IP rate-limit bucket alone
+// doesn't satisfy that, since a handful of visitors each triggering one
+// uncached fallback is exactly the burst a 429 ban punishes app-wide). Keyed
+// by time_range, not by WrappedRange — week and month share short_term, so
+// this is at most 3 distinct cache entries, never 4.
+const FALLBACK_CACHE_TTL_SECONDS = 30 * 60;
+
 export interface WrappedTrackOut {
   id: string;
   name: string;
@@ -238,6 +247,31 @@ async function historyPayload(
   };
 }
 
+/** The only part of the Spotify fallback worth caching — the ranked
+ * tracks/artists lists themselves (collectingSince/totalPlays/approxMinutes
+ * etc. are always computed fresh per request, per the caller). */
+interface WrappedFallbackFragment {
+  topTracks: WrappedTrackOut[];
+  topArtists: WrappedArtistOut[];
+}
+
+function fallbackCacheKeyFor(timeRange: string): Request {
+  return new Request(`https://echoes-cache.internal/wrapped-fallback/${timeRange}`);
+}
+
+async function readFallbackCache(key: Request): Promise<WrappedFallbackFragment | null> {
+  const res = await caches.default.match(key);
+  if (!res) return null;
+  return (await res.json()) as WrappedFallbackFragment;
+}
+
+async function writeFallbackCache(key: Request, fragment: WrappedFallbackFragment): Promise<void> {
+  const res = new Response(JSON.stringify(fragment), {
+    headers: { "Content-Type": "application/json", "Cache-Control": `s-maxage=${FALLBACK_CACHE_TTL_SECONDS}` },
+  });
+  await caches.default.put(key, res);
+}
+
 /** Attempts the Spotify top-lists fallback; returns null on anything that
  * should fall through to the (thin) history payload instead — not
  * connected, an active 429 ban, or the Spotify calls themselves failing.
@@ -245,7 +279,12 @@ async function historyPayload(
  * route in this Worker (top-artists.ts/tracks.ts only ever catch
  * SpotifyRequestError and let anything else 500) — SPEC.md's Phase 8.5 says
  * a failed fallback must never turn into an error response for this
- * endpoint, only the quieter history payload the caller falls back to. */
+ * endpoint, only the quieter history payload the caller falls back to.
+ *
+ * The actual Spotify calls only ever happen on a cache miss (see
+ * readFallbackCache below) — a failure is never cached, so the next request
+ * gets a fresh attempt instead of being stuck serving nothing for 30
+ * minutes. */
 async function spotifyFallbackPayload(
   env: Env,
   range: WrappedRange,
@@ -263,6 +302,22 @@ async function spotifyFallbackPayload(
   if (accessToken === null) return null;
 
   const timeRange = SPOTIFY_TIME_RANGE[range];
+  const cacheKey = fallbackCacheKeyFor(timeRange);
+
+  const cached = await readFallbackCache(cacheKey);
+  if (cached) {
+    return {
+      range,
+      source: "spotify",
+      collectingSince,
+      totalPlays: null,
+      approxMinutes: null,
+      topTracks: cached.topTracks,
+      topArtists: cached.topArtists,
+      topGenres: [],
+      unclassifiedPlays: 0,
+    };
+  }
 
   try {
     const [tracks, artistsData] = await Promise.all([
@@ -285,6 +340,8 @@ async function spotifyFallbackPayload(
       plays: null,
       rank: a.rank,
     }));
+
+    await writeFallbackCache(cacheKey, { topTracks, topArtists });
 
     return {
       range,
@@ -313,8 +370,7 @@ export async function handleWrapped(request: Request, env: Env): Promise<Respons
 
   const nowMs = Date.now();
   const { fromMs, toMs } = windowFor(range, nowMs);
-  const collectingSince = await fetchCollectingSince(env);
-  const totals = await windowTotals(env, fromMs, toMs);
+  const [collectingSince, totals] = await Promise.all([fetchCollectingSince(env), windowTotals(env, fromMs, toMs)]);
 
   if (totals.totalPlays >= MIN_HISTORY_PLAYS) {
     return Response.json(await historyPayload(env, range, fromMs, toMs, collectingSince, totals));

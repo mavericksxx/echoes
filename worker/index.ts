@@ -55,10 +55,13 @@ const ROUTE_BUCKETS: Record<string, keyof typeof RATE_LIMIT_RULES> = {
   // D1-only reads too (worker/history-daily.ts) — same generous limit as
   // historyStats, reusing its rule rather than defining a near-identical one.
   "/api/history/daily": "historyStats",
-  // Phase 8.5: can fall back to a couple of Spotify calls (worker/wrapped.ts),
-  // but so can /api/top-artists at the same "topArtists" bucket's rate — the
-  // D1-only common case doesn't need its own stricter rule either, so this
-  // reuses historyStats same as /api/history/daily above.
+  // Phase 8.5: the common case is D1-only, same as /api/history/daily above.
+  // When it does fall back to Spotify (worker/wrapped.ts), that fallback is
+  // itself cached in caches.default by time_range (same 30-min-TTL
+  // convention as worker/top-artists.ts) — that cache, not this per-IP
+  // bucket, is what actually keeps a burst of visitors from burning the
+  // Spotify quota. This bucket is just abuse protection on top, same role
+  // it plays for every other route here.
   "/api/wrapped": "historyStats",
 };
 

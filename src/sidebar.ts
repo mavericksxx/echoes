@@ -836,6 +836,17 @@ function renderWrappedContent(container: HTMLElement, data: WrappedPayload): voi
     data.topGenres.forEach((g) => list.appendChild(buildWrappedGenreRow(g)));
     container.appendChild(list);
   }
+
+  // Same "not yet placed" language as the History tab's unplaced-day bars
+  // (renderHistory above) — a play can be logged before genre-resolution.ts
+  // gets to its artist, so topGenres/unclassifiedPlays never add up to
+  // totalPlays exactly, and that gap shouldn't read as missing data.
+  if (data.unclassifiedPlays > 0) {
+    const note = document.createElement("p");
+    note.className = "activity-source-note";
+    note.textContent = `${data.unclassifiedPlays} play${data.unclassifiedPlays === 1 ? "" : "s"} not yet placed in a genre`;
+    container.appendChild(note);
+  }
 }
 
 function renderWrapped(container: HTMLElement): void {
