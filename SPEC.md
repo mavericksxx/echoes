@@ -255,7 +255,15 @@ instead of a fake play count, and tapping a featured artist's row no longer empt
   between levels over ~200ms with easing. Smooth to use, crisp at rest. Rejected fully-continuous
   zoom for that shimmer, and a phone/desktop split for the divergent feel.
 
-**You'll see:** zoom glides instead of jumping, and the whole village fits on a phone screen.
+- **Village caption is oversized on phone (2026-09-18).** "Drag to look around Konoha. Tap anyone to
+  see their genre." wraps to two lines and takes a band off the top of the map, and it never goes
+  away. Shrink it and dismiss it after a few seconds or on first interaction — it's a one-time hint.
+- **Topbar glass reads muddy over the map art.** The sidebar and top-artists panel got
+  `--color-glass-panel` in the Phase 3.5 fix pass; the topbar kept the lighter `--color-glass`, which
+  goes blotchy over the village's greens and browns. Give it the heavier treatment.
+
+**You'll see:** zoom glides instead of jumping, the whole village fits on a phone screen, and the
+map isn't covered by chrome.
 
 ### Phase 5 — Live reactions
 - Split into 5a and 5b; 5a is the user-visible half and ships first.
