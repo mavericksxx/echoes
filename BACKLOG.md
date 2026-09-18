@@ -37,14 +37,8 @@ and `scripts/walkability-draft-interiors.json` are kept as historical record; 4 
   than a quick wire-through.
 
 ## Known exposure (not a bug, not fixed yet)
-- **`wrangler deploy` silently drops the cron schedule.** The API token lacks `Zone / Workers
-  Routes / Edit`, so the deploy's trigger step fails on the route re-assertion — and routes and
-  crons are deployed together, so it aborts before registering `crons` from wrangler.jsonc. The
-  Worker still uploads and goes live, which is why this reads as a harmless error but isn't: on
-  2026-09-18 it shipped Phase 8a with no cron at all, meaning the play log would never have run.
-  Until the token gains that permission, **after every deploy** verify with
-  `GET /accounts/{id}/workers/scripts/echoes/schedules` and re-register with a `PUT` of
-  `[{"cron":"*/15 * * * *"}]` if the list comes back empty.
+- ~~`wrangler deploy` silently drops the cron schedule~~ fixed 2026-09-18: the API token gained
+  `Zone / Workers Routes / Edit`, so deploys now register routes and the cron together.
 
 - ~~`getAccessToken`'s access-token cache is per-isolate~~ fixed (Phase 8b's Stage 1, 2026-09-18) —
   `worker/token.ts` now persists the encrypted access token + expiry in `spotify_token` and reads it
