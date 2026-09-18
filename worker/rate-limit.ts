@@ -33,6 +33,11 @@ export const RATE_LIMIT_RULES: Record<string, RateLimitRule> = {
   health: { windowSeconds: 60, max: 120 },
   topArtists: { windowSeconds: 60, max: 60 },
   village: { windowSeconds: 60, max: 20 },
+  // Polled adaptively (~10s while playing) by every open tab — this is the
+  // one endpoint expected to be hit the most per visitor, but the shared
+  // ~10s caches.default cache in worker/now-playing.ts is what actually
+  // bounds real Spotify calls; this is just per-IP abuse protection on top.
+  nowPlaying: { windowSeconds: 60, max: 60 },
 };
 
 function bucketKey(ip: string, bucket: string, windowStart: number): string {

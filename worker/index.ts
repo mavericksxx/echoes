@@ -10,10 +10,13 @@
 // straight off Cloudflare's static-asset layer without this fetch handler
 // running at all; a header set here on env.ASSETS.fetch()'s result would be
 // dead code for exactly the response it needs to reach (fix pass, 2026-09-17
-// — a first attempt tried exactly that and it silently never fired).
+// — a first attempt tried exactly that and it silently never fired). Phase
+// 5a adds /api/now-playing (now-playing.ts) for the display-only now-playing
+// card.
 
 import { handleTopArtists } from "./top-artists";
 import { handleVillage } from "./village";
+import { handleNowPlaying } from "./now-playing";
 import { clientIp, enforceRateLimit, RateLimitError, RATE_LIMIT_RULES } from "./rate-limit";
 
 export interface Env {
@@ -35,6 +38,7 @@ const ROUTE_BUCKETS: Record<string, keyof typeof RATE_LIMIT_RULES> = {
   "/api/health": "health",
   "/api/top-artists": "topArtists",
   "/api/village": "village",
+  "/api/now-playing": "nowPlaying",
 };
 
 export default {
@@ -69,6 +73,10 @@ export default {
 
     if (url.pathname === "/api/village") {
       return handleVillage(request, env);
+    }
+
+    if (url.pathname === "/api/now-playing") {
+      return handleNowPlaying(env);
     }
 
     // Reached only when a request matches neither a rate-limited /api/*
