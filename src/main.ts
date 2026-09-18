@@ -7,7 +7,15 @@ import "./style.css";
 import type { Point } from "../data/types";
 import { ASSET_MANIFEST, SLOTS, VILLAGE, assetSize, assetUrl, getSlot } from "../data/loader";
 import { pickWeightedSlotId } from "./sample-data";
-import { makeNpc, setCaption, startPerform, updateNpc, type Npc, type NowPlayingInfo } from "./npc";
+import {
+  makeNpc,
+  setCaption,
+  startPerform,
+  triggerNowPlayingReaction,
+  updateNpc,
+  type Npc,
+  type NowPlayingInfo,
+} from "./npc";
 import {
   drawCaptions,
   drawNpc,
@@ -21,8 +29,8 @@ import { bakeRecolor } from "./recolor";
 import { buildCrowd, buildResidents, drawActivityTreatment, type Resident } from "./residents";
 import { close as closeSidebar, initSidebar, isSidebarOpen, openSidebar, setSidebarImages } from "./sidebar";
 import { initTopArtists } from "./top-artists";
-import { initNowPlayingCard } from "./now-playing-card";
-import { getActivity, getNowPlaying, initListeningSource } from "./listening-source";
+import { getLiveNowPlaying, initNowPlayingCard, subscribeNowPlaying } from "./now-playing-card";
+import { getActivity, getNowPlaying, initListeningSource, isVillageLive } from "./listening-source";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
 
 const NOW_PLAYING_INTERVAL_MS = 8000;
@@ -113,6 +121,22 @@ const villageNpcs: Npc[] = SLOTS.map((slot) => {
   return makeNpc(slot.character, slot.district, anchor, { mapKey: VILLAGE.mapImage, wanderRadius: 5 });
 });
 
+// Phase 5b: react the moment the live poll reports a new track, instead of
+// waiting on each leader's own nowPlayingIntervalMs timer — "within
+// seconds" per SPEC.md's Phase 5. Fires both places a leader can be seen:
+// this slot's district-interior instance (always ticked, frame()'s
+// districtNpcsBySlot loop) and its whole-village instance (villageNpcs,
+// ticked only while mode==="village" — see tickVillage()), so the reaction
+// is there waiting whichever view you're in when the track actually changed.
+subscribeNowPlaying((info) => {
+  if (!info) return;
+  const now = performance.now();
+  const districtLeader = districtNpcsBySlot.get(info.slotId);
+  if (districtLeader) triggerNowPlayingReaction(districtLeader, now);
+  const villageLeader = villageNpcs.find((n) => n.district.id === info.slotId);
+  if (villageLeader) triggerNowPlayingReaction(villageLeader, now);
+});
+
 // Populated once images have loaded (see buildResidents) — districts with no
 // listening data get no residents (they stay dormant/leader-only).
 let residentsBySlot = new Map<string, Resident[]>();
@@ -128,7 +152,16 @@ let residentFadedByNpc = new Map<Npc, boolean>();
 let crowdBySlot = new Map<string, Npc[]>();
 let allCrowd: Npc[] = [];
 
+// Phase 5b: once the village is live, "now playing" comes from the real
+// currently-playing poll (src/now-playing-card.ts), not the sample data —
+// and only the one slot the live track's primary artist resolved to reacts
+// (worker/now-playing.ts's slotId). Every other slot gets null, same as
+// before. The sample-data path (village not live) is untouched.
 function getNowPlayingFor(slotId: string): NowPlayingInfo | null {
+  if (isVillageLive()) {
+    const live = getLiveNowPlaying();
+    return live && live.slotId === slotId ? { artist: live.artist, song: live.song } : null;
+  }
   const song = getNowPlaying(slotId);
   return song ? { artist: song.artist, song: song.title } : null;
 }

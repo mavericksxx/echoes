@@ -15,6 +15,16 @@
 // Any failure here (token, Spotify, or an unrecognized payload shape)
 // degrades to `{ playing: false, track: null }` with HTTP 200, never a
 // 5xx — a rate-limit blip must read as "no card", not take the page down.
+//
+// Phase 5b adds `slotId`: which district (if any) should react to this
+// track. The payload only carries artist *display names*, so the frontend
+// alone can't map a track to a slot — resolved here instead, the same
+// bucketing rule as worker/tracks.ts's Phase 3.5 Songs tab: look up the
+// track's *primary* artist (`artistIds[0]`) in `artist_cache.slot_id`
+// (populated by the existing /api/village artist pipeline). No cache hit,
+// no reaction — never a fresh Gemini call or a new artist_cache row here,
+// so this costs zero additional AI usage. Resolved before writeCache so the
+// D1 read happens at most once per ~10s cache window, not once per poll.
 
 import type { Env } from "./index";
 import { getAccessToken, TokenError } from "./token";
@@ -33,7 +43,7 @@ interface SpotifyTrackItem {
   name: string;
   duration_ms: number;
   album: { name: string; images: SpotifyImage[] };
-  artists: { name: string }[];
+  artists: { id: string; name: string }[];
   external_urls: { spotify: string };
 }
 
@@ -58,6 +68,14 @@ export interface NowPlayingTrack {
   spotifyUrl: string;
   durationMs: number;
   progressMs: number;
+  /** Every artist id on the track, same order as Spotify's `artists` array —
+   * [0] is primary, the one `slotId` is resolved from (see this file's doc
+   * comment). */
+  artistIds: string[];
+  /** The district this track should make react, or null if the primary
+   * artist has no cached slot (a genuinely unknown artist, or the D1 lookup
+   * itself failed — see resolveSlotId). Never widened past artist_cache. */
+  slotId: string | null;
 }
 
 export type NowPlayingPayload = { playing: boolean; track: NowPlayingTrack | null };
@@ -86,7 +104,11 @@ async function writeCache(key: Request, payload: NowPlayingPayload): Promise<voi
 /** Turns Spotify's raw currently-playing shape into the small payload the
  * card needs. `data` is null on a 204 (nothing playing at all); explicit
  * `is_playing: false` and the podcast/episode case (`item` present but not
- * a track) are both treated as "not playing" rather than a crash. */
+ * a track) are both treated as "not playing" rather than a crash.
+ *
+ * `slotId` is left null here — handleNowPlaying resolves it afterward (a D1
+ * read, so it can't happen inside this sync function) and fills it in
+ * before caching. */
 function toPayload(data: SpotifyCurrentlyPlaying | null): NowPlayingPayload {
   if (!data || !data.is_playing || !data.item || data.currently_playing_type !== "track") {
     return NOT_PLAYING;
@@ -103,8 +125,28 @@ function toPayload(data: SpotifyCurrentlyPlaying | null): NowPlayingPayload {
       spotifyUrl: track.external_urls.spotify,
       durationMs: track.duration_ms,
       progressMs: data.progress_ms ?? 0,
+      artistIds: track.artists.map((a) => a.id),
+      slotId: null,
     },
   };
+}
+
+/** Looks up the primary artist's resolved slot in `artist_cache` (populated
+ * by /api/village's Phase 3 genre-resolution pipeline) — see this file's
+ * doc comment for why this is a pure cache read, never a fresh Gemini call.
+ * A D1 failure degrades to null (no reaction), matching every other
+ * failure path in this file — a slot lookup breaking must never take the
+ * now-playing card down with it. */
+async function resolveSlotId(env: Env, primaryArtistId: string): Promise<string | null> {
+  try {
+    const row = await env.DB.prepare(`SELECT slot_id FROM artist_cache WHERE artist_id = ? AND slot_id IS NOT NULL`)
+      .bind(primaryArtistId)
+      .first<{ slot_id: string }>();
+    return row?.slot_id ?? null;
+  } catch (err) {
+    console.error("[now-playing] slot lookup failed, degrading to no reaction:", err);
+    return null;
+  }
 }
 
 export async function handleNowPlaying(env: Env): Promise<Response> {
@@ -136,6 +178,14 @@ export async function handleNowPlaying(env: Env): Promise<Response> {
     if (err instanceof SpotifyRequestError) return Response.json(NOT_PLAYING);
     console.error("[now-playing] spotify stage failed unexpectedly:", err);
     return Response.json(NOT_PLAYING);
+  }
+
+  // Resolve which district (if any) reacts to this track — before caching,
+  // so the D1 read rides the same ~10s window as the Spotify call above
+  // rather than running once per poll (see this file's doc comment).
+  if (payload.playing && payload.track) {
+    const primaryArtistId = payload.track.artistIds[0];
+    payload.track.slotId = primaryArtistId ? await resolveSlotId(env, primaryArtistId) : null;
   }
 
   try {

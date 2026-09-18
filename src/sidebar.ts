@@ -20,6 +20,7 @@ import {
   type ArtistEntry,
 } from "./listening-source";
 import { coverPlaceholderGradient } from "./cover-art";
+import { getLiveNowPlaying } from "./now-playing-card";
 
 let images: ImageMap = {};
 export function setSidebarImages(loaded: ImageMap): void {
@@ -276,9 +277,17 @@ function renderOverview(container: HTMLElement, ctx: SectionContext): void {
   if (now) {
     container.appendChild(buildNowPlayingCard(now));
   } else if (live) {
-    // Real currently-playing polling is a later phase (SPEC.md) — say so
-    // rather than showing a stale sample track.
-    empty.textContent = "Live “now playing” arrives in a later phase.";
+    // Phase 5b: live currently-playing exists now, but it resolves to exactly
+    // one district (worker/now-playing.ts's slotId) — so only that district's
+    // panel has something to show, and the rest are genuinely quiet rather
+    // than unimplemented. Deliberately a plain line, not buildNowPlayingCard:
+    // the live payload carries title/artist only, and the card wants the full
+    // Song shape (cover art, Spotify link) that the sample path has.
+    const liveNow = getLiveNowPlaying();
+    empty.textContent =
+      liveNow && liveNow.slotId === slotId
+        ? `${liveNow.song} — ${liveNow.artist}`
+        : "Nothing playing in this district right now.";
     container.appendChild(empty);
   } else {
     empty.textContent = "Nothing playing right now.";

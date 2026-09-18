@@ -14,6 +14,15 @@
 // resumes on focus — nothing is gained by polling a tab nobody is looking
 // at, and worker/now-playing.ts's own shared cache is what actually bounds
 // real Spotify calls regardless of how any one tab behaves.
+//
+// Phase 5b: this module also publishes the resolved live now-playing state
+// (subscribeNowPlaying/getLiveNowPlaying below) so src/main.ts can make the
+// right district's leader react — reusing this same poll rather than
+// running a second one, per SPEC.md's Phase 5 note ("5b uses the same
+// poll"). Subscribers are notified only on an actual track transition (a
+// new track id, including going from "some track" to "nothing playing" or
+// vice versa), not on every poll tick — that's what lets the reaction fire
+// off the transition instead of a fixed timer.
 
 import { coverPlaceholderGradient } from "./cover-art";
 
@@ -31,6 +40,13 @@ interface NowPlayingTrack {
   spotifyUrl: string;
   durationMs: number;
   progressMs: number;
+  /** Every artist id on the track — mirrors worker/now-playing.ts's
+   * NowPlayingTrack. Unused here directly; `slotId` below is what the
+   * server already resolved from it. */
+  artistIds: string[];
+  /** The district that should react to this track, or null (an unresolved
+   * artist, or the server's D1 lookup degraded) — see worker/now-playing.ts. */
+  slotId: string | null;
 }
 
 type NowPlayingResponse = { playing: boolean; track: NowPlayingTrack | null };
@@ -47,6 +63,47 @@ let isShown = false;
 let lastTrackId: string | null = null;
 let pollTimer: number | undefined;
 let hideTimer: number | undefined;
+
+// ---------------------------------------------------------------------------
+// Live now-playing publishing (Phase 5b) — see this file's doc comment.
+// ---------------------------------------------------------------------------
+export interface LiveNowPlaying {
+  slotId: string;
+  artist: string;
+  song: string;
+}
+
+type NowPlayingListener = (info: LiveNowPlaying | null) => void;
+const listeners = new Set<NowPlayingListener>();
+
+let liveInfo: LiveNowPlaying | null = null;
+// Tracked separately from lastTrackId above (which resets on hideCard and
+// exists purely to skip redundant DOM/image churn) — this is what decides
+// whether a transition actually happened, independent of card visibility.
+let liveTrackId: string | null = null;
+
+/** Registers `cb` to run whenever the resolved live now-playing state
+ * changes — i.e. on a genuine track transition, not on every ~10s poll. */
+export function subscribeNowPlaying(cb: NowPlayingListener): void {
+  listeners.add(cb);
+}
+
+/** The current live now-playing state, if any track is playing whose
+ * primary artist resolves to a district. Same value the last subscriber
+ * notification carried; exposed for callers that just need a point-in-time
+ * read (src/main.ts's getNowPlayingFor). */
+export function getLiveNowPlaying(): LiveNowPlaying | null {
+  return liveInfo;
+}
+
+function updateLiveNowPlaying(data: NowPlayingResponse): void {
+  const track = data.playing ? data.track : null;
+  const trackId = track?.id ?? null;
+  if (trackId === liveTrackId) return; // no transition — nothing to notify
+  liveTrackId = trackId;
+  liveInfo = track?.slotId ? { slotId: track.slotId, artist: track.artist, song: track.title } : null;
+  listeners.forEach((cb) => cb(liveInfo));
+}
 
 function clearPollTimer(): void {
   if (pollTimer !== undefined) window.clearTimeout(pollTimer);
@@ -129,6 +186,7 @@ function scheduleNext(delayMs: number): void {
 
 async function poll(): Promise<void> {
   const data = await fetchNowPlaying();
+  updateLiveNowPlaying(data);
   if (data.playing && data.track) {
     renderTrack(data.track);
     showCard();

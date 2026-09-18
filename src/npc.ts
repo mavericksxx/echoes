@@ -316,6 +316,32 @@ function followPath(npc: Npc, dt: number, onArrive: () => void): void {
   advanceWalkFrame(npc, dt);
 }
 
+/** Sends npc home to perform (the "traveling_home" state below, which walks
+ * it to npc.home and then calls startPerform on arrival) — factored out so
+ * both this file's own periodic isActive check and an external transition
+ * trigger (triggerNowPlayingReaction, below) share the exact same
+ * walk-then-perform sequence. */
+function goHomeToPerform(npc: Npc, now: number): void {
+  npc.lastNowPlaying = now;
+  releaseReservation(npc);
+  npc.state = "traveling_home";
+  npc.path = findPath({ x: npc.x, y: npc.y }, npc.home, npc.grid) ?? [];
+  npc.pathIdx = 0;
+  if (npc.path.length > 0) setSegmentDir(npc);
+}
+
+/** Triggers this NPC's walk-home-and-perform sequence immediately, bypassing
+ * the isActive/nowPlayingIntervalMs gate updateNpc checks below — used when
+ * a live now-playing transition is detected out-of-band (see
+ * src/now-playing-card.ts's subscribeNowPlaying, wired up in main.ts) so the
+ * reaction lands within seconds of the real Spotify change instead of
+ * waiting on this NPC's own timer (SPEC.md Phase 5b). No-ops if the NPC is
+ * already traveling home or performing, so a rapid back-to-back track
+ * change can't interrupt a reaction already in flight. */
+export function triggerNowPlayingReaction(npc: Npc, now: number): void {
+  if (npc.state === "idle" || npc.state === "walk") goHomeToPerform(npc, now);
+}
+
 export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions): void {
   const { character } = npc;
 
@@ -325,12 +351,7 @@ export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions
     (npc.state === "idle" || npc.state === "walk") &&
     opts.getNowPlaying()
   ) {
-    npc.lastNowPlaying = now;
-    releaseReservation(npc);
-    npc.state = "traveling_home";
-    npc.path = findPath({ x: npc.x, y: npc.y }, npc.home, npc.grid) ?? [];
-    npc.pathIdx = 0;
-    if (npc.path.length > 0) setSegmentDir(npc);
+    goHomeToPerform(npc, now);
   }
 
   if (npc.captionTimer > 0) {
