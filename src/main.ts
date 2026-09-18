@@ -184,10 +184,23 @@ function prefersReducedMotion(): boolean {
 const VILLAGE_AUTO_MAX_ZOOM = 3;
 const ZOOM_MIN = 1;
 const ZOOM_MAX = 4;
+const ZOOM_ANIM_MS = 200; // matches SPEC.md Phase 4.5's "~200ms with easing"
 
 /** The user's explicit zoom choice (+/- buttons, wheel, pinch), overriding
  * the mode's automatic default until the mode changes. */
 let manualZoom: number | null = null;
+
+/** The lowest zoom `computeZoom()` will settle on for the given viewport.
+ * Normally ZOOM_MIN (1) — but in village view, if the map doesn't fit the
+ * viewport at zoom 1 in some axis (a phone-width screen against the 767px
+ * town map), the floor drops to the exact fit-to-screen ratio instead, so
+ * the whole map can always be shown. That fractional value is a legitimate
+ * resting level (see autoZoom's doc comment and stepZoom), not a violation
+ * of "integer zoom at rest" — it's the one deliberate exception. */
+function zoomFloor(availW: number, availH: number): number {
+  if (mode !== "village") return ZOOM_MIN;
+  return Math.min(ZOOM_MIN, availW / mapW, availH / mapH);
+}
 
 /** District view's automatic zoom is fixed (3 desktop / 2 phone). Village
  * view's automatic zoom fits the whole map to the viewport when possible:
@@ -202,11 +215,19 @@ let manualZoom: number | null = null;
  * tap targets still meet the 44px minimum at zoom 1, just without the extra
  * margin. Either default can still be overridden by the zoom controls, up
  * to ZOOM_MAX.
+ *
+ * Below zoom 1, though, "floor" turns into 0 on a narrow-enough viewport —
+ * the town map (767x758) is wider than a phone screen, so floor(availW/mapW)
+ * is 0 there. zoomFloor() catches that case and returns the true (unfloored)
+ * fit-to-screen ratio instead; when it does, that ratio *is* the auto zoom,
+ * so the whole village is always visible on load.
  */
 function autoZoom(availW: number, availH: number): number {
   if (mode === "village") {
+    const floor = zoomFloor(availW, availH);
+    if (floor < ZOOM_MIN) return floor;
     const fitZoom = Math.floor(Math.min(availW / mapW, availH / mapH));
-    let z = Math.max(ZOOM_MIN, Math.min(VILLAGE_AUTO_MAX_ZOOM, fitZoom));
+    let z = Math.min(VILLAGE_AUTO_MAX_ZOOM, fitZoom);
     if (isDesktop() && z < 2) z = 2;
     return z;
   }
@@ -214,7 +235,7 @@ function autoZoom(availW: number, availH: number): number {
 }
 
 function computeZoom(availW: number, availH: number): number {
-  if (manualZoom !== null) return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, manualZoom));
+  if (manualZoom !== null) return Math.max(zoomFloor(availW, availH), Math.min(ZOOM_MAX, manualZoom));
   return autoZoom(availW, availH);
 }
 
@@ -234,14 +255,19 @@ function setMapSize(key: string): void {
   mapH = h;
 }
 
-/** Resizes the canvas's backing store to an integer fraction of its
- * container, then re-stretches it via CSS to an exact integer multiple —
- * never a fractional scale, and never larger than the container (no crop). */
-function fitCanvas(): void {
+/** Resizes the canvas's backing store to a fraction of its container at the
+ * given zoom, then re-stretches it via CSS — an exact integer multiple at
+ * the resting zoom levels (never a fractional scale there — see
+ * zoomAnim/stepZoom's doc comment), and never larger than the container (no
+ * crop). Also used mid-flight by the zoom animation, at whatever fractional
+ * zoom the current eased frame lands on; fitCaptionLayer() reads the same
+ * viewW/zoom this just set, so the caption layer and #game's box can never
+ * disagree, animated or not. */
+function applyCanvasSize(zoomValue: number): void {
   const rect = stageArea.getBoundingClientRect();
   const availW = Math.max(1, Math.floor(rect.width));
   const availH = Math.max(1, Math.floor(rect.height));
-  zoom = computeZoom(availW, availH);
+  zoom = zoomValue;
   viewW = Math.max(1, Math.floor(availW / zoom));
   viewH = Math.max(1, Math.floor(availH / zoom));
   canvas.width = viewW;
@@ -251,6 +277,18 @@ function fitCanvas(): void {
   ctx.imageSmoothingEnabled = false;
   clampCamera();
   fitCaptionLayer(availW, availH);
+}
+
+/** Recomputes the resting zoom for the current viewport/mode and applies it.
+ * Cancels any in-flight zoom animation — called on mode changes and layout
+ * changes (resize, orientation, desktop/phone breakpoint), where whatever
+ * the animation was easing toward is no longer meaningful. */
+function fitCanvas(): void {
+  zoomAnim = null;
+  const rect = stageArea.getBoundingClientRect();
+  const availW = Math.max(1, Math.floor(rect.width));
+  const availH = Math.max(1, Math.floor(rect.height));
+  applyCanvasSize(computeZoom(availW, availH));
 }
 
 /** Sizes and positions the caption overlay to exactly cover #game's
@@ -282,13 +320,39 @@ function centerCamera(): void {
   clampCamera();
 }
 
-/** Changes zoom by `delta` integer steps (clamped to [ZOOM_MIN, ZOOM_MAX]),
+/** An in-flight glide between two resting zoom levels (see stepZoom). Holds
+ * the focal point in both client and world space so every eased frame —
+ * not just the endpoints — can re-derive camX/camY that keep that world
+ * point under that screen point, exactly like stepZoom's instant case did
+ * before this existed. */
+interface ZoomAnim {
+  fromZoom: number;
+  toZoom: number;
+  startTs: number;
+  focalClientX: number;
+  focalClientY: number;
+  worldX: number;
+  worldY: number;
+}
+let zoomAnim: ZoomAnim | null = null;
+
+function easeOutCubic(t: number): number {
+  return 1 - (1 - t) ** 3;
+}
+
+/** Changes zoom by `delta` integer steps (clamped to [zoomFloor, ZOOM_MAX] —
+ * see zoomFloor's doc comment for the fractional phone-fit exception),
  * keeping the world point under `focalClient` (a client-space point — the
  * cursor, the pinch midpoint, or the view center for the +/- buttons) fixed
- * on screen, the way scroll-to-zoom works in map apps. Zooming out below
+ * on screen, the way scroll-to-zoom works in map apps. The change glides
+ * over ZOOM_ANIM_MS (see updateZoomAnim) rather than snapping, unless
+ * prefers-reduced-motion asks for an instant cut. Zooming out below
  * ZOOM_MIN while inside a district exits to the village instead of clamping
- * (see exitToVillage). */
+ * (see exitToVillage). Calling this again while a glide is already running
+ * retargets it from the live in-flight zoom instead of queuing — see
+ * `fromZoom: zoom` below, `zoom` being whatever updateZoomAnim last drew. */
 function stepZoom(delta: number, focalClient?: { x: number; y: number }): void {
+  dismissVillageCaption();
   const beforeRect = canvas.getBoundingClientRect();
   const focal = focalClient ?? {
     x: beforeRect.left + beforeRect.width / 2,
@@ -297,19 +361,63 @@ function stepZoom(delta: number, focalClient?: { x: number; y: number }): void {
   const worldX = (focal.x - beforeRect.left) / zoom + camX;
   const worldY = (focal.y - beforeRect.top) / zoom + camY;
 
-  const base = manualZoom ?? zoom;
-  const next = Math.round(base) + delta;
+  const stageRect = stageArea.getBoundingClientRect();
+  const availW = Math.max(1, Math.floor(stageRect.width));
+  const availH = Math.max(1, Math.floor(stageRect.height));
+  const floor = zoomFloor(availW, availH);
+
+  // The resting level to step from: the current target if one's already
+  // set (including mid-glide), else the live zoom. Below ZOOM_MIN, we're
+  // sitting on the fractional phone-fit floor, which isn't itself an
+  // integer rung — stepping "in" from there always lands on ZOOM_MIN (the
+  // first real rung), and stepping "out" further has nowhere lower to go.
+  const currentLevel = manualZoom ?? zoom;
+  const next = currentLevel < ZOOM_MIN - 1e-9 ? (delta > 0 ? ZOOM_MIN : currentLevel) : Math.round(currentLevel) + delta;
+
   if (mode === "district" && next < ZOOM_MIN) {
+    zoomAnim = null;
     exitToVillage();
     return;
   }
-  manualZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next));
-  fitCanvas();
+  const targetZoom = Math.max(floor, Math.min(ZOOM_MAX, next));
+  manualZoom = targetZoom;
+  if (Math.abs(targetZoom - zoom) < 1e-6) return; // already there — e.g. "-" at the floor
 
-  const afterRect = canvas.getBoundingClientRect();
-  camX = worldX - (focal.x - afterRect.left) / zoom;
-  camY = worldY - (focal.y - afterRect.top) / zoom;
+  if (prefersReducedMotion()) {
+    zoomAnim = null;
+    applyCanvasSize(targetZoom);
+    const afterRect = canvas.getBoundingClientRect();
+    camX = worldX - (focal.x - afterRect.left) / zoom;
+    camY = worldY - (focal.y - afterRect.top) / zoom;
+    clampCamera();
+    return;
+  }
+
+  zoomAnim = {
+    fromZoom: zoom,
+    toZoom: targetZoom,
+    startTs: performance.now(),
+    focalClientX: focal.x,
+    focalClientY: focal.y,
+    worldX,
+    worldY,
+  };
+}
+
+/** Advances the in-flight zoom glide (if any) by one animation frame,
+ * applying the eased zoom for `ts` and re-deriving the camera so the
+ * glide's focal point stays fixed on screen throughout — not just at the
+ * end. Called once per rAF from frame(), before rendering. */
+function updateZoomAnim(ts: number): void {
+  if (!zoomAnim) return;
+  const t = Math.min(1, (ts - zoomAnim.startTs) / ZOOM_ANIM_MS);
+  const z = zoomAnim.fromZoom + (zoomAnim.toZoom - zoomAnim.fromZoom) * easeOutCubic(t);
+  applyCanvasSize(z);
+  const rect = canvas.getBoundingClientRect();
+  camX = zoomAnim.worldX - (zoomAnim.focalClientX - rect.left) / zoom;
+  camY = zoomAnim.worldY - (zoomAnim.focalClientY - rect.top) / zoom;
   clampCamera();
+  if (t >= 1) zoomAnim = null;
 }
 
 function screenToWorld(clientX: number, clientY: number): Point {
@@ -368,7 +476,7 @@ function applyVillageScene(): void {
   // topbar's flex row (see [hidden] in style.css).
   topbarContext.hidden = true;
   backBtn.hidden = true;
-  villageCaption.hidden = false;
+  if (!villageCaptionDismissed) villageCaption.hidden = false;
 }
 
 function enterDistrict(slotId: string, opts: { pushState?: boolean } = {}): void {
@@ -568,6 +676,7 @@ function pointerMid(a: { x: number; y: number }, b: { x: number; y: number }) {
 }
 
 canvas.addEventListener("pointerdown", (ev) => {
+  dismissVillageCaption();
   canvas.setPointerCapture(ev.pointerId);
   activePointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
 
@@ -737,6 +846,27 @@ backBtn.addEventListener("click", () => exitToVillage());
 zoomInBtn.addEventListener("click", () => stepZoom(1));
 zoomOutBtn.addEventListener("click", () => stepZoom(-1));
 
+// Village caption: a one-time hint, not persistent chrome — fades out (the
+// CSS transition; see .village-caption.is-dismissed) on a timeout or the
+// user's first drag/tap/zoom, whichever comes first (see the pointerdown
+// and stepZoom call sites below). Once dismissed it stays dismissed for the
+// session — applyVillageScene() checks the flag before un-hiding it — so
+// exiting a district back to the village doesn't resurrect it.
+const VILLAGE_CAPTION_TIMEOUT_MS = 6000;
+let villageCaptionDismissed = false;
+function dismissVillageCaption(): void {
+  if (villageCaptionDismissed) return;
+  villageCaptionDismissed = true;
+  villageCaption.classList.add("is-dismissed");
+  // Layout space is only reclaimed once the fade finishes, not immediately —
+  // .main's height doesn't depend on this element either way (flex:1 1 auto
+  // with min-height:0, sized by its flex parent, not its content), so this
+  // can't shift #game/.stage-area regardless, but waiting for the fade
+  // avoids the text visibly popping out mid-transition.
+  villageCaption.addEventListener("transitionend", () => (villageCaption.hidden = true), { once: true });
+}
+window.setTimeout(dismissVillageCaption, VILLAGE_CAPTION_TIMEOUT_MS);
+
 const resizeObserver = new ResizeObserver(() => fitCanvas());
 resizeObserver.observe(stageArea);
 window.addEventListener("orientationchange", () => fitCanvas());
@@ -753,6 +883,8 @@ function frame(ts: number): void {
   if (lastTs === null) lastTs = ts;
   const dt = Math.min(0.05, (ts - lastTs) / 1000);
   lastTs = ts;
+
+  updateZoomAnim(ts);
 
   districtNpcsBySlot.forEach((npc, slotId) =>
     updateNpc(npc, dt, ts, {
