@@ -9,6 +9,15 @@ import type { Env } from "./index";
 const API_BASE = "https://api.spotify.com/v1";
 const MAX_RETRIES = 4;
 const BASE_BACKOFF_MS = 500;
+// Post-Feb-2026 reports show Retry-After ranging from seconds up to 13-18
+// hours, app-wide per Client ID (SPEC.md's "Spotify API constraints").
+// Sleeping through a value that large would either run well past what
+// Cloudflare lets a scheduled invocation (or a visitor's request) live for,
+// or just hang the caller for hours. Anything longer than this is treated as
+// non-retryable instead: the 429 usage_log row (written below, with
+// retry_after_raw) is exactly what worker/history.ts's pre-flight ban check
+// reads before the cron tries Spotify again at all.
+const MAX_RETRY_AFTER_SECONDS = 60;
 
 export class SpotifyRequestError extends Error {
   constructor(public status: number) {
@@ -127,9 +136,13 @@ export async function spotifyGet<T>(env: Env, endpoint: string, accessToken: str
       const extra = usageExtraFromHeaders(res);
       extra.quotaReason = await readQuotaReason(res);
       await logUsage(env, endpoint, res.status, retry429Count, extra);
-      if (attempt === MAX_RETRIES) throw new SpotifyRequestError(429);
       const retryAfter = res.headers.get("Retry-After");
-      await sleep(retryAfter ? Number(retryAfter) * 1000 : backoffMs(attempt));
+      const retryAfterSeconds = retryAfter ? Number(retryAfter) : null;
+      if (retryAfterSeconds !== null && retryAfterSeconds > MAX_RETRY_AFTER_SECONDS) {
+        throw new SpotifyRequestError(429);
+      }
+      if (attempt === MAX_RETRIES) throw new SpotifyRequestError(429);
+      await sleep(retryAfterSeconds !== null ? retryAfterSeconds * 1000 : backoffMs(attempt));
       continue;
     }
 

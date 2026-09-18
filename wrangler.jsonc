@@ -21,6 +21,13 @@
   "observability": {
     "enabled": true
   },
+  // Phase 8a: play-event log. Every 15 min, worker/index.ts's `scheduled()`
+  // calls worker/history.ts's runHistorySync to backfill recently-played —
+  // see that file for the active-429-ban check that runs before any of this
+  // ever touches Spotify.
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
   "vars": {
     // Public PKCE client id — there is no client secret for this app. Safe
     // to commit (see SPEC.md's "Auth & tokens" section).

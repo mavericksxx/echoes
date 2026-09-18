@@ -330,3 +330,51 @@
     original token — cranking it everywhere would have made those heavy for no readability gain. The
     raised alpha alone (before any blur/saturate) keeps text legible even without `backdrop-filter`
     support.
+
+- **Phase 8a — The play-event log starts (2026-09-18):**
+  - `migrations/0004_play_event.sql` adds `play_event` (IDs/facts only: `played_at` epoch ms as the
+    primary key, `track_id`, `primary_artist_id`, `artist_ids` JSON array, `duration_ms`,
+    `context_uri`), `track_cache` (name/artists/album/art/url, keyed by `track_id`), and
+    `history_sync` (an append-only run log). Purely additive.
+  - `worker/history.ts`'s `runHistorySync`, driven by a new `scheduled()` export in
+    `worker/index.ts` on a 15-min cron (`wrangler.jsonc`'s `triggers.crons`): checks for an active
+    429 ban (newest `usage_log` row with `status = 429`, `created_at + retry_after_raw` still in the
+    future) before ever calling Spotify; otherwise calls `GET /me/player/recently-played?limit=50`
+    (deliberately no `after` cursor — see SPEC.md's Phase 8 deviations) and inserts new plays plus
+    seeds `track_cache`/`artist_cache` in one `env.DB.batch()` round trip. Skips items with a null
+    `track.id`, `is_local: true`, or a null primary artist id. Detects a likely history gap
+    (`inserted === fetched` on a non-first run — the endpoint only ever retains the newest 50, no
+    paging) and records it rather than trying to recover. Never throws; every exit path either
+    returns quietly (not connected) or logs a `history_sync` row.
+  - `worker/spotify-fetch.ts`: a `Retry-After` over 60s now throws `SpotifyRequestError(429)`
+    immediately instead of sleeping — post-Feb-2026 reports put this value as high as 13-18 hours
+    (SPEC.md), which would otherwise mean a multi-hour sleep inside a scheduled invocation (Cloudflare
+    kills those long before that) or a hung visitor request. The 429 `usage_log` row is already
+    written before this point, which is exactly what the cron's ban check reads.
+  - `GET /api/history/stats` (`worker/history.ts`'s `handleHistoryStats`) returns
+    `{ collectingSince, plays, lastPlayedAt, lastSyncAt }`, D1-only (no `caches.default` entry — it's
+    already just two small local tables). New `historyStats` entries in `worker/index.ts`'s
+    `ROUTE_BUCKETS` and `worker/rate-limit.ts`'s `RATE_LIMIT_RULES`, same limit as `topArtists`.
+  - `src/history-stats.ts`'s `initHistoryStats` fetches that endpoint once on load and renders a
+    small "Collecting since 18 Sep · 42 plays logged" readout (`.history-readout`, `index.html` +
+    `src/style.css`), fixed bottom-left specifically so it never competes with the topbar on a phone.
+    Honest empty state: nothing renders until data exists rather than showing "0 plays" as a result.
+    `src/main.ts` picks up one import + one `void initHistoryStats();` call — kept minimal since two
+    other phases are editing that file in parallel.
+  - `scripts/spotify-disconnect.mjs` now also deletes `play_event`, `track_cache`, and
+    `history_sync` — otherwise "disconnect deletes every row" (SPEC.md) would have gone false the
+    moment this shipped.
+  - **Verified `artist_cache` seeding is invisible to the village pipeline.** The cron's seed insert
+    never sets `slot_id` (only `artist_id`/`name`/`genres='[]'`/`image_url`/`cached_at`), and the only
+    two places anything reads or writes `artist_cache` are `worker/genre-resolution.ts`'s
+    `fetchCachedArtists` (`... AND slot_id IS NOT NULL` — confirmed locally that a seeded row with a
+    null `slot_id` returns zero rows from this exact query) and `upsertArtistCache` (`INSERT ...
+    ON CONFLICT(artist_id) DO UPDATE SET` every column — so a later real classification fully
+    overwrites a seed row rather than merging with it).
+  - **Scope:** this is the logging half of Phase 8 only (SPEC.md's 8a/8b split). No
+    `daily_snapshot` rollups, no history-driven activity levels, no sidebar History section, no
+    era/time-range toggle — those are Phase 8b. Deviations from the original plan (no `after` cursor,
+    no `slot_id` on `play_event`, why `track_cache` exists) and known omissions (sub-30s/private/
+    podcast plays, `duration_ms` being track length not listened time, the per-isolate token-cache
+    exposure this cron makes more frequent) are documented in SPEC.md's Phase 8 section and
+    BACKLOG.md.

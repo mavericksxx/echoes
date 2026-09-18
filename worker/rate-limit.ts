@@ -38,6 +38,10 @@ export const RATE_LIMIT_RULES: Record<string, RateLimitRule> = {
   // ~10s caches.default cache in worker/now-playing.ts is what actually
   // bounds real Spotify calls; this is just per-IP abuse protection on top.
   nowPlaying: { windowSeconds: 60, max: 60 },
+  // D1-only reads of two small tables (worker/history.ts's
+  // handleHistoryStats) — no Spotify call it could ever burn, so the same
+  // generous limit as topArtists/health.
+  historyStats: { windowSeconds: 60, max: 60 },
 };
 
 function bucketKey(ip: string, bucket: string, windowStart: number): string {
