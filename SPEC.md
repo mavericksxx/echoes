@@ -80,7 +80,7 @@ Status legend: **[decided]** locked in · **[default]** proposed, revisit if nee
 - **[decided]** The site never depends on a live token: it always renders from D1 (last known village + songs). If refresh fails, visitors still see the village with a subtle "live updates paused" state; the owner gets a notice (email/log) to reconnect.
 
 ### Data model (D1, derived data only)
-- **[default]** Tables: `genre_slot_map` (raw genre/tag → one of the 17 slots, with source + confidence), `artist_cache` (artist id → slot, mood/energy, NPC text; TTL), `daily_snapshot` (rolled up from `play_event` + top-items per time range), `play_event` (derived: timestamp, artist id, slot; **source of truth**), `world_state` (current district states), `agent_event` (evolution-agent actions, reasoning, before/after diff), `llm_cache` (prompt hash → output), `usage_log` (Spotify requests + 429s, Gemini tokens/cost).
+- **[default]** Tables: `genre_slot_map` (raw genre/tag → one of the 17 slots, with source + confidence), `artist_cache` (artist id → slot, mood/energy, NPC text; TTL), `daily_snapshot` (rolled up from `play_event` + top-items per time range), `play_event` (derived: timestamp, artist id, slot; **source of truth**), `world_state` (current district states), `agent_event` (evolution-agent actions, reasoning, before/after diff), `llm_cache` (prompt hash → output), `usage_log` (Spotify requests + 429s, Gemini tokens/cost). **Correction (Phase 8a, 2026-09-18):** `play_event` as actually built has no `slot` column — see Phase 8's section below for why (a slot is a re-classifiable inference, not a fact about a play). It also adds `track_cache` (not listed here originally), for reasons also covered there.
 - **[decided]** Disconnect deletes every row + the refresh token.
 
 ### Sprite & map data
@@ -293,19 +293,65 @@ map isn't covered by chrome.
 **You'll see:** districts feel different by mood; characters talk about your music.
 
 ### Phase 8 — The village remembers
-- Worker cron backfills `recently-played` every 15–30 min → `play_event`.
-- Daily rollup into `daily_snapshot`; activity levels use history; faded/festival states.
-- Time-range toggle (short/medium/long).
+- Split into 8a and 8b; 8a is the logging half and ships first (built 2026-09-18).
+- **8a — The play-event log starts.** Worker cron (`worker/history.ts`, wired to `wrangler.jsonc`'s
+  `triggers.crons`) polls `GET /me/player/recently-played?limit=50` every 15 min, checks for an
+  active 429 ban before ever calling Spotify (reads the newest `usage_log` row with `status = 429`;
+  SPEC.md's rate-limit research records `Retry-After` values up to 13–18 hours, app-wide, since the
+  cron runs with nobody watching), and appends new plays to `play_event` via a single `env.DB.batch()`
+  of `INSERT OR IGNORE` statements — 45-50 ignored duplicates per run is fine and expected.
+  `track_cache`/`artist_cache` get seeded for free from each item's inline data, at zero extra
+  Spotify calls. `/api/history/stats` + a small "Collecting since ... · N plays logged" readout
+  (`src/history-stats.ts`) are the only visible surface — no rollups, no activity levels driven by
+  history, no sidebar History section, no era toggle. Those are 8b, built on the rows 8a starts
+  collecting today. Every day this isn't running is a day of data Phase 8.5's Wrapped can never
+  recover — see that section's "no backfill" decision.
+- **8b — daily rollups + the history-driven world (not yet built).** Daily rollup into
+  `daily_snapshot`; activity levels use history; faded/festival states. Time-range toggle
+  (short/medium/long). Sidebar gains a **History** section (this genre's activity over time).
 
-- Sidebar gains a **History** section (this genre's activity over time).
+**Deviations from this file's original plan (8a, built 2026-09-18):**
+- **No `after` cursor on the recently-played call**, despite that being the obvious way to avoid
+  re-fetching the same items every 15 min. Offline/downloaded listening syncs to Spotify later
+  carrying its *original* `played_at`, which can be older than `MAX(played_at)` already stored — a
+  forward-only cursor would permanently miss those plays. The response is capped at 50 items either
+  way, so a cursor buys nothing a cheap `INSERT OR IGNORE` doesn't already give for free, and costs
+  correctness.
+- **No `slot_id` column on `play_event`**, despite the Data model section above originally saying
+  "`play_event` (derived: timestamp, artist id, slot)". A slot is a re-classifiable inference, not a
+  fact about a play — `worker/genre-resolution.ts` already refuses to persist a low-confidence
+  fallback guess to `artist_cache` for exactly this reason (see its doc comment). Freezing a slot per
+  play would bake in whatever guess existed 15 minutes after the play aired, forever, even after a
+  real Gemini classification later corrects it. 8b joins through `artist_cache.slot_id` at query time
+  instead, so every play always reflects the *current* best classification of its artist.
+- **`track_cache` exists at all**, not just `play_event` + a join against `artist_cache`. Spotify
+  removed the batch `GET /tracks` endpoint in Feb 2026 (see "Spotify API constraints" above), so
+  re-resolving a play's title/art at display time would cost one single-item Spotify call per
+  historical row, and any row logged before such a table existed would be a permanent hole in Phase
+  8.5's Wrapped. `track_cache` is populated at cron time straight from the inline `track` object
+  `recently-played` already returns — zero extra Spotify calls. Same category and justification as
+  `artist_cache` (migrations/0001_init.sql), which has stored Spotify names/art in D1 since Phase 1.
+- **Known, unfixable omissions:** plays under ~30s, private-session plays, and podcast episodes never
+  appear in `recently-played` at all — Spotify simply never sends them, there's nothing to filter.
+  `duration_ms` is a track's catalog length, not time actually listened (Spotify's API exposes no
+  listened-duration signal at all), so Phase 8.5's "minutes listened" is really "minutes of tracks
+  logged as played" and must be labelled as approximate, never exact.
+- **Known exposure, not fixed in 8a:** `getAccessToken`'s access-token cache is per-isolate
+  (`worker/token.ts`), and a cron firing every 15 min will often land on a cold isolate — expect
+  roughly one refresh-token POST per run instead of one per ~50 minutes (the token's real TTL).
+  Spotify's PKCE refresh rotates the refresh token on use, so two isolates refreshing concurrently
+  (already possible before 8a) becomes a more frequent pre-existing race, not a new one. The real fix
+  — persist the encrypted access token + expiry in `spotify_token` so `getAccessToken` reads it
+  before ever refreshing — is out of scope for 8a; tracked in BACKLOG.md.
 
-**You'll see:** the village keeps changing even when the app was closed; flip between eras.
+**You'll see (8a):** a small readout proves plays are being logged from today forward. The village
+itself doesn't look any different yet — that's 8b.
 
 ### Phase 8.5 — Wrapped on demand
-- Depends on Phase 8's `play_event` history — minutes and true play counts do not exist in the
+- Depends on Phase 8a's `play_event` history — minutes and true play counts do not exist in the
   Spotify API (rank only), so they can only come from history we log ourselves.
 - **[decided 2026-09-18]** No data export import. The user chose to log from today forward, so
-  Wrapped is accurate from the day Phase 8 ships and empty before it. Do not backfill, and do not
+  Wrapped is accurate from the day Phase 8a shipped and empty before it. Do not backfill, and do not
   fabricate pre-history figures — show the collection start date instead.
 - A Wrapped view over our own history: minutes listened, top songs / artists / genres, with real
   arbitrary ranges (this week / month / year / all time) rather than Spotify's three fixed

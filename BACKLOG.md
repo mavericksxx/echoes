@@ -26,11 +26,25 @@ Old: **Phase 1 — Village on screen with sample data** (deployed to echoes.part
 - **Now-playing widget** (Phase 5a) — display-only card top-right, no controls. Asked 2026-09-18.
 - **Camera fixes** (Phase 4.5) — eased zoom animation + fractional fit-to-screen so phones can
   actually zoom out. Blocked on Phase 4 merging; both touch src/main.ts. Asked 2026-09-18.
+- **Daily rollups + history-driven world** (Phase 8b) — `daily_snapshot`, activity levels from
+  history, era/time-range toggle, sidebar History section. Builds on Phase 8a's `play_event` log
+  (built 2026-09-18), which only logs — none of 8b exists yet.
 - **Wrapped on demand** (Phase 8.5) — minutes listened + top songs/artists/genres over arbitrary
-  ranges. Blocked on Phase 8's history log; Spotify's API has no counts or durations. User chose to
-  log from today forward rather than import a data export (2026-09-18).
+  ranges. Phase 8a's `play_event` log is now running (built 2026-09-18), so data is accruing from
+  today forward, but Wrapped itself (the view) isn't built — still blocked on that plus Phase 8b's
+  `daily_snapshot`. User chose to log from today forward rather than import a data export
+  (2026-09-18).
 - **Playlists as places** (Phase 8.6) — playlists become enterable buildings, distinct from genre
   districts. Verify the playlist endpoints survived Feb 2026 before scoping.
+
+## Known exposure (not a bug, not fixed yet)
+- **`getAccessToken`'s access-token cache is per-isolate** (`worker/token.ts:19-20`). Phase 8a's
+  15-min cron (`worker/history.ts`) will often land on a cold isolate, so expect roughly one
+  refresh-token POST per cron run instead of one per ~50 minutes (the token's actual TTL). Spotify's
+  PKCE refresh rotates the refresh token on use, so two isolates refreshing concurrently — already
+  possible before 8a — becomes a more frequent pre-existing race, not a new one. Fix: persist the
+  encrypted access token + expiry in `spotify_token` so `getAccessToken` reads it before ever
+  refreshing. Out of scope for 8a (SPEC.md's Phase 8 section).
 
 ## Needs the user
 - ~~Register Spotify app~~ done (client id in wrangler.jsonc); account connected 2026-09-17

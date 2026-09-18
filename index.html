@@ -48,6 +48,14 @@
                something is actually playing. -->
           <aside class="now-playing-card" id="nowPlayingCard" hidden aria-hidden="true" aria-label="Now playing"></aside>
 
+          <!-- Phase 8a: small, unobtrusive play-event log readout, populated
+               by src/history-stats.ts. Starts hidden — shown only once
+               /api/history/stats resolves, so there's never a flash of
+               "0 plays" before the real number is known. Fixed bottom-left
+               (see style.css) specifically so it never competes with the
+               topbar on a phone. -->
+          <p class="history-readout" id="historyReadout" hidden></p>
+
           <main class="main" id="main">
             <div class="stage-area" id="stageArea">
               <canvas id="game" tabindex="0" aria-label="Village stage"></canvas>

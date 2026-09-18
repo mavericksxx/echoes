@@ -12,11 +12,14 @@
 // dead code for exactly the response it needs to reach (fix pass, 2026-09-17
 // — a first attempt tried exactly that and it silently never fired). Phase
 // 5a adds /api/now-playing (now-playing.ts) for the display-only now-playing
-// card.
+// card. Phase 8a adds a `scheduled()` export (wrangler.jsonc's
+// `triggers.crons`) driving worker/history.ts's play-event log, plus
+// /api/history/stats for its small frontend readout.
 
 import { handleTopArtists } from "./top-artists";
 import { handleVillage } from "./village";
 import { handleNowPlaying } from "./now-playing";
+import { runHistorySync, handleHistoryStats } from "./history";
 import { clientIp, enforceRateLimit, RateLimitError, RATE_LIMIT_RULES } from "./rate-limit";
 
 export interface Env {
@@ -39,6 +42,7 @@ const ROUTE_BUCKETS: Record<string, keyof typeof RATE_LIMIT_RULES> = {
   "/api/top-artists": "topArtists",
   "/api/village": "village",
   "/api/now-playing": "nowPlaying",
+  "/api/history/stats": "historyStats",
 };
 
 export default {
@@ -79,11 +83,24 @@ export default {
       return handleNowPlaying(env);
     }
 
+    if (url.pathname === "/api/history/stats") {
+      return handleHistoryStats(env);
+    }
+
     // Reached only when a request matches neither a rate-limited /api/*
     // route above nor a real static file (those are served directly off
     // Cloudflare's asset layer without invoking this handler at all) — i.e.
     // effectively just the "asset not found" fallthrough. See public/_headers
     // for the CSP that used to be (incorrectly) applied here.
     return env.ASSETS.fetch(request);
+  },
+
+  // Phase 8a: 15-min play-event log (wrangler.jsonc's `triggers.crons`).
+  // `runHistorySync` never throws (every failure path logs a `history_sync`
+  // row and returns instead) — `waitUntil` just makes sure the isolate stays
+  // alive until its D1 writes land rather than being torn down the instant
+  // this handler returns.
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(runHistorySync(env));
   },
 } satisfies ExportedHandler<Env>;

@@ -20,6 +20,9 @@ DELETE FROM spotify_token;
 DELETE FROM artist_cache;
 DELETE FROM usage_log;
 DELETE FROM genre_slot_map;
+DELETE FROM play_event;
+DELETE FROM track_cache;
+DELETE FROM history_sync;
 `;
 
 async function main() {
@@ -37,7 +40,8 @@ async function main() {
     await unlink(sqlFile).catch(() => {});
   }
   console.log(
-    "\nDisconnected: spotify_token, artist_cache, usage_log, and genre_slot_map are now empty in the remote D1 database.",
+    "\nDisconnected: spotify_token, artist_cache, usage_log, genre_slot_map, play_event, track_cache, and " +
+      "history_sync are now empty in the remote D1 database.",
   );
 }
 

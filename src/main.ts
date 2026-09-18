@@ -30,6 +30,7 @@ import { buildCrowd, buildResidents, drawActivityTreatment, type Resident } from
 import { close as closeSidebar, initSidebar, isSidebarOpen, openSidebar, setSidebarImages } from "./sidebar";
 import { initTopArtists } from "./top-artists";
 import { getLiveNowPlaying, initNowPlayingCard, subscribeNowPlaying } from "./now-playing-card";
+import { initHistoryStats } from "./history-stats";
 import { getActivity, getNowPlaying, initListeningSource, isVillageLive } from "./listening-source";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
 
@@ -87,6 +88,7 @@ initSidebar(sidebarRoot, sidebarBackdrop, {
 });
 initTopArtists();
 initNowPlayingCard();
+void initHistoryStats();
 
 let images: ImageMap = {};
 let mode: Mode = "village"; // default view: the whole village, everyone present
