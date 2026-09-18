@@ -28,6 +28,13 @@ and `scripts/walkability-draft-interiors.json` are kept as historical record; 4 
   data export (2026-09-18).
 - **Playlists as places** (Phase 8.6) — playlists become enterable buildings, distinct from genre
   districts. Verify the playlist endpoints survived Feb 2026 before scoping.
+- **Frontend could show paused-but-real activity** (Phase 8b follow-on) — `worker/village.ts`'s
+  `pausedPayload` already computes real history-driven activity/share while live-paused (see its doc
+  comment), but `src/listening-source.ts`'s `getActivity()`/`getArtists()` only read a village
+  payload while `isVillageLive()`, so a paused visitor still sees sample-data activity today even
+  when the API itself has something real to show. Not done here: mixing real activity numbers with
+  sample-data artist rosters (paused means no real roster either) needs its own design pass rather
+  than a quick wire-through.
 
 ## Known exposure (not a bug, not fixed yet)
 - **`wrangler deploy` silently drops the cron schedule.** The API token lacks `Zone / Workers

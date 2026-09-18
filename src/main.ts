@@ -997,7 +997,13 @@ let initialLoadComplete = false;
 onEraChange(() => {
   if (!initialLoadComplete) return;
   void (async () => {
-    await refreshVillage();
+    // refreshVillage() reports false if a later era switch already
+    // superseded this fetch by the time it resolved (see its own doc
+    // comment) — skip rebuilding from a response that isn't for the era
+    // currently selected, so rapid tab switching ends on the right one
+    // instead of flashing an in-between era's residents/sidebar content.
+    const applied = await refreshVillage();
+    if (!applied) return;
     rebuildResidentsAndCrowd();
     refreshSidebarContent();
   })();

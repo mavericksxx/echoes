@@ -108,10 +108,21 @@ export async function initListeningSource(): Promise<void> {
 /** Re-fetches /api/village for whatever era is current and swaps it in —
  * called by main.ts's onEraChange subscription, which then rebuilds the
  * resident/crowd NPCs from the fresh data (see src/residents.ts's
- * getArtists dependency) and refreshes the sidebar if it's open. */
-export async function refreshVillage(): Promise<void> {
-  village = await fetchVillage();
+ * getArtists dependency) and refreshes the sidebar if it's open.
+ *
+ * Returns whether the fetched payload was actually applied. Rapid era
+ * switching can start a second fetch before the first one resolves; if this
+ * one's `range` no longer matches the *current* era by the time it comes
+ * back, some later switch has already superseded it (and started its own
+ * refreshVillage() call), so it's discarded rather than momentarily
+ * flashing a stale era's data — the caller must skip rebuilding
+ * residents/crowd or the sidebar from a discarded response. */
+export async function refreshVillage(): Promise<boolean> {
+  const payload = await fetchVillage();
+  if (payload.connected && payload.range !== getEra()) return false;
+  village = payload;
   indexVillage(village);
+  return true;
 }
 
 export function isVillageLive(): boolean {

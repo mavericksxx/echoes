@@ -90,9 +90,13 @@ export async function handleHistoryDaily(env: Env): Promise<Response> {
     const idx = dayIndex.get(dayStr);
     if (idx === undefined) continue; // outside the 30 owner-local days after bucketing (the safety margin's job)
     if (row.slot_id) {
-      bySlot[row.slot_id]![idx]++;
+      // Guard against a slot_id that isn't one of today's SLOT_IDS (a
+      // roster change, or any other inconsistency) — bySlot[row.slot_id]
+      // would otherwise be undefined and the increment below would throw.
+      const dayCounts = bySlot[row.slot_id];
+      if (dayCounts) dayCounts[idx]!++;
     } else {
-      unslottedByDay[idx]++;
+      unslottedByDay[idx]!++;
     }
   }
 

@@ -820,5 +820,16 @@ export function sidebarSlotId(): string | null {
  * src/listening-source.ts's village data has already moved on. A no-op if
  * the sidebar is closed (nothing to refresh). */
 export function refreshSidebarContent(): void {
-  if (currentSlot) renderSection(activeSectionId);
+  if (!currentSlot) return;
+  // Phase 8b: an era change can fetch an entirely different artist roster —
+  // if the Songs tab's artist filter (an id, set from a resident/artist row
+  // tap — see renderSongs's synthetic-option comment above) no longer
+  // exists in the new era, drop it. Left alone, the control would silently
+  // reset its *displayed* value to "All artists" while songsArtistFilter
+  // stayed pointed at the vanished id, filtering the list down to nothing
+  // with no visible way to clear it.
+  if (songsArtistFilter && !getArtists(currentSlot.district.id).some((a) => a.id === songsArtistFilter)) {
+    songsArtistFilter = "";
+  }
+  renderSection(activeSectionId);
 }

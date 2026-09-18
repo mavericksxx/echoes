@@ -183,11 +183,17 @@ function dormantSlots(): VillageSlot[] {
 }
 
 /** Live-paused (token/Spotify stage failed): no artist roster (that only
- * ever comes from Spotify), but Phase 8b's history is D1-only, so a token
- * failure no longer has to flatten every slot to dormant — if there's
+ * ever comes from Spotify), but Phase 8b's history is D1-only, so this
+ * *payload* no longer has to flatten every slot to dormant — if there's
  * enough play_event history for this range, activity/share still reflect
  * real listening. Falls back to dormantSlots() if there isn't (including on
- * a D1 query failure — this must never itself throw). */
+ * a D1 query failure — this must never itself throw).
+ *
+ * Not yet wired into what a paused visitor actually sees: src/listening-
+ * source.ts's getActivity()/getArtists() only read a village payload while
+ * isVillageLive() (live === true), so today a paused response's real
+ * activity numbers here are inspectable via the API but the frontend still
+ * falls back to sample data while paused. Tracked in BACKLOG.md. */
 async function pausedPayload(env: Env, range: string): Promise<VillagePayload> {
   let slots = dormantSlots();
   let activitySource: "history" | "spotify" = "spotify";
@@ -359,10 +365,18 @@ export async function handleVillage(request: Request, env: Env): Promise<Respons
   // ---- stage: spotify ----
   let current: TopArtistOut[];
   let baseline: TopArtistOut[];
+  // Only true when `baseline` above was actually just fetched from Spotify
+  // (this request *is* long_term, or the baseline cache missed) — gates the
+  // cache write below so a cache *hit* doesn't re-arm its own TTL on every
+  // read. Without this, the baseline cache would rewrite its expiry on
+  // every non-long_term build that hit it and never actually go stale/
+  // refresh again.
+  let baselineFetched = false;
   try {
     current = await fetchTopArtists(env, accessToken, range, VILLAGE_ARTISTS_LIMIT);
     if (range === "long_term") {
       baseline = current;
+      baselineFetched = true;
     } else {
       // Cheap win (Phase 8b): the long_term baseline fetch is identical for
       // every non-long_term build within CACHE_TTL_SECONDS, so cache its raw
@@ -375,7 +389,12 @@ export async function handleVillage(request: Request, env: Env): Promise<Respons
       } catch (err) {
         console.error("[village] baseline cache read failed, refetching:", err);
       }
-      baseline = cachedBaseline ?? (await fetchTopArtists(env, accessToken, "long_term", VILLAGE_ARTISTS_LIMIT));
+      if (cachedBaseline) {
+        baseline = cachedBaseline;
+      } else {
+        baseline = await fetchTopArtists(env, accessToken, "long_term", VILLAGE_ARTISTS_LIMIT);
+        baselineFetched = true;
+      }
     }
   } catch (err) {
     if (err instanceof SpotifyRequestError) return Response.json(await pausedPayload(env, range));
@@ -383,10 +402,12 @@ export async function handleVillage(request: Request, env: Env): Promise<Respons
     return Response.json({ error: errorMessage(err), where: "spotify" } satisfies VillageErrorPayload);
   }
 
-  try {
-    await writeBaselineCache(baseline);
-  } catch (err) {
-    console.error("[village] baseline cache write failed (response still returned):", err);
+  if (baselineFetched) {
+    try {
+      await writeBaselineCache(baseline);
+    } catch (err) {
+      console.error("[village] baseline cache write failed (response still returned):", err);
+    }
   }
 
   const union = new Map<string, TopArtistOut>();
