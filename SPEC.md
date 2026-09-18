@@ -13,6 +13,27 @@ See `IDEA.md` for the concept. This spec breaks the build into **vertical slices
 - **Storage policy:** no indefinite storage of raw Spotify Content. Persist only *derived* stats (play counts, district tallies, snapshots of our own world state); expire raw API responses; delete all on disconnect.
 - **AI policy:** training ML models on Spotify Content is banned. We only do inference with off-the-shelf models, never fine-tune; send minimal fields (artist names, tags, counts).
 - **Rate limits:** undocumented (rolling 30s window, Dev Mode lower than Extended). Always honor 429 `Retry-After` with exponential backoff.
+- **[researched 2026-09-18]** Spotify has **never published a number** for Dev Mode limits, before or
+  after Feb 2026 — treat any specific figure found online as folklore. What is documented:
+  - **Two separate mechanisms.** The rolling-30s **rate limit** is *app-wide* (per Client ID). A
+    distinct Dev Mode **quota** returns 429 with `"reason": "QUOTA_EXCEEDED"`, and since
+    **2026-07-23** is counted **per developer account**, pooled across up to 25 Client IDs. Any other
+    Dev Mode app on the same Spotify account shares Echoes' quota.
+  - **The downside is asymmetric.** Post-Feb-2026 reports show `Retry-After` ranging from seconds to
+    **13–18 hours**, sometimes absent entirely. Because the limit is app-wide, one bad 429 takes down
+    the whole site's data, not just the polling feature. This is the reason to poll conservatively.
+  - **Field norm for currently-playing polling is 5–30s, skewed slow.** Home Assistant's Spotify
+    integration defaults to 30s; PresenceJam-Desktop defaults to 30s with a 5s floor; spotify-player
+    is event-driven. A flat 5s is the aggressive end of what real 2026 projects run.
+  - **[decided]** Phase 5a polls **~10s while playing** with **track-end skip-ahead** (use
+    `progress_ms`/`duration_ms` to sleep until the track is about to end rather than polling blind),
+    30–60s idle. Fall back to 15–30s if `usage_log` shows any 429s.
+  - No evidence `/me/player/*` is metered separately. `X-RateLimit-*` headers are undocumented and
+    unconfirmed — log them if present, don't rely on them.
+- **Log headers, not just status.** `spotifyGet` currently records endpoint/status/retry count and
+  discards response headers and bodies. Capture `Retry-After` raw, any `X-RateLimit-*`, the `Date`
+  header, and a 429 body's `error.reason`. This is how we measure headroom passively instead of by
+  provoking failures — do this before Phase 6's ramp test.
 - **Live listening:** no push/webhooks — polling only. App open: `currently-playing` every ~5s while playing, 30–60s when paused/idle. App closed: Worker cron pulls `recently-played` (50-item cap) every 15–30 min to backfill history. Intervals are provisional until the rate-limit test below.
 
 ## Stack (proposed)
@@ -238,7 +259,8 @@ instead of a fake play count, and tapping a featured artist's row no longer empt
 
 ### Phase 5 — Live reactions
 - Split into 5a and 5b; 5a is the user-visible half and ships first.
-- **5a — Now-playing widget.** Poll currently-playing (~5s playing / 30–60s idle) through the
+- **5a — Now-playing widget.** Poll currently-playing (**~10s playing / 30–60s idle**, see the
+  rate-limit findings below) through the
   wrapper, and show it top-right as a **display-only** card: cover art, title, artist. **No transport
   controls** — the user explicitly asked for a view, not a player (2026-09-18). Hides when nothing
   is playing. Spotify attribution rules apply as in Phase 3.5 (unmodified art, links out, logo).
