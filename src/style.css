@@ -121,6 +121,10 @@
   --z-tabbar: 20;
   --z-backdrop: 25;
   --z-sidebar: 30;
+  /* Phase 13b's onboarding walkthrough: above every other overlay (sidebar
+     included) — it can be reopened at any time via the topbar's "?" button,
+     not just on a first visit, and should always sit on top when it is. */
+  --z-onboarding: 40;
 
   color-scheme: light;
 }
@@ -1171,6 +1175,34 @@ select {
   padding: var(--space-3) 0;
 }
 
+/* Phase 13b: a failed tab fetch (History/Wrapped/Playlists/Notice board/
+   Chronicle — see src/sidebar.ts's renderFetchError) — same .sidebar-empty
+   text, plus a manual retry action, so it reads as a recoverable state
+   rather than a message indistinguishable from a tab that's just empty. */
+.sidebar-empty--error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.sidebar-retry-btn {
+  appearance: none;
+  border: 1.5px solid var(--ink);
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-body);
+  border-radius: 3px;
+  padding: 3px var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  cursor: pointer;
+  min-height: 32px;
+}
+.sidebar-retry-btn:hover {
+  background: rgba(29, 39, 72, 0.08);
+}
+
 /* ---- character (Phase 7b) ---- */
 .character-personality {
   font-size: var(--text-sm);
@@ -2062,6 +2094,21 @@ select {
   }
 }
 
+/* Phase 13b: idle state (src/now-playing-card.ts's renderIdle) — connected,
+   but nothing playing right now. Same paper card, just visibly quieter: a
+   muted cover square (no art to show) and no Spotify link (the <a> has no
+   href), so it never reads as a broken/dead track link. */
+.now-playing-card--idle .now-playing-card__link {
+  cursor: default;
+}
+.now-playing-card--idle .now-playing-card__cover {
+  opacity: 0.5;
+}
+.now-playing-card--idle .now-playing-card__title {
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
 /* ==========================================================================
    Phase 8a — history readout (src/history-stats.ts). A single small line of
    text, fixed bottom-left, deliberately far from the topbar (the user has
@@ -2094,5 +2141,120 @@ select {
     left: calc(var(--space-3) + var(--safe-left));
     bottom: calc(var(--space-3) + var(--safe-bottom));
   }
+}
+
+/* ==========================================================================
+   Phase 13b — onboarding (src/onboarding.ts). A small centered modal with
+   its own backdrop, not a reuse of .top-artists-backdrop/.sidebar-backdrop's
+   shapes (a one-time walkthrough, not persistent chrome) — sits above every
+   other overlay in the app (see --z-onboarding), touch- and phone-width
+   friendly down to ~390px, focus-trapped while open (src/onboarding.ts).
+   ========================================================================== */
+.onboarding-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-onboarding);
+  background: rgba(29, 39, 72, 0.45);
+}
+
+.onboarding-modal {
+  position: fixed;
+  z-index: calc(var(--z-onboarding) + 1);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, calc(100vw - 2 * var(--space-4)));
+  max-height: calc(100dvh - 2 * var(--space-5));
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-4) var(--space-4);
+  /* Same paper ground + fibre lines as .topbar/.sidebar/.top-artists-panel —
+     one material across every paper surface in this file. */
+  background: repeating-linear-gradient(0deg, rgba(29, 39, 72, 0.035) 0 1px, transparent 1px 5px), var(--color-glass-panel);
+  border: 1px solid var(--wood);
+  border-radius: 6px;
+  box-shadow: 0 24px 48px -20px rgba(0, 0, 0, 0.55);
+}
+
+.onboarding-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.onboarding-title {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  color: var(--color-text);
+  margin: var(--space-1) 0 0;
+}
+
+.onboarding-body {
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-4);
+}
+
+.onboarding-dots {
+  display: flex;
+  gap: 6px;
+  margin-bottom: var(--space-4);
+}
+
+.onboarding-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-border-strong);
+}
+
+/* --seal-deep, not --seal (see its :root comment) — non-text here (a plain
+   dot, not a status glyph reserved by the mission-scroll direction), but
+   kept consistent with the rest of this file's "real progress = seal" idiom. */
+.onboarding-dot.is-active {
+  background: var(--seal-deep);
+}
+
+.onboarding-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-4);
+  cursor: pointer;
+}
+
+.onboarding-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.onboarding-btn {
+  appearance: none;
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: 3px;
+  border: 1.5px solid var(--ink);
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  cursor: pointer;
+}
+.onboarding-btn:hover {
+  background: rgba(29, 39, 72, 0.08);
+}
+
+.onboarding-btn--primary {
+  background: var(--ink);
+  color: var(--paper);
+}
+.onboarding-btn--primary:hover {
+  background: var(--wood-dark);
 }
 

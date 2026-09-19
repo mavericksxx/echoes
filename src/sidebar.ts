@@ -248,6 +248,31 @@ function buildArtistRow(artist: ArtistEntry, onSelect: () => void): HTMLButtonEl
 }
 
 // ---------------------------------------------------------------------------
+// Shared fetch-error state (Phase 13b) — every tab below that owns its own
+// fetch (History, Wrapped, Playlists, Notice board/This week, Chronicle)
+// renders this when that fetch actually *failed*, instead of the plain
+// .sidebar-empty line each of those tabs already used for both "failed" and
+// "genuinely nothing here yet" alike. A visitor gets a way to try again
+// instead of a message indistinguishable from an empty, working tab.
+// Retrying doesn't refetch inline — `onRetry` clears the tab's own cache
+// variable/entry and re-renders, which runs straight back into that tab's
+// normal load-if-not-cached path, same as opening it fresh would.
+// ---------------------------------------------------------------------------
+function renderFetchError(container: HTMLElement, message: string, onRetry: () => void): void {
+  const wrap = document.createElement("div");
+  wrap.className = "sidebar-empty sidebar-empty--error";
+  const text = document.createElement("p");
+  text.textContent = message;
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "sidebar-retry-btn";
+  retry.textContent = "Retry";
+  retry.addEventListener("click", onRetry);
+  wrap.append(text, retry);
+  container.appendChild(wrap);
+}
+
+// ---------------------------------------------------------------------------
 // Village today (Phase 11) — a small always-visible card showing the daily
 // village agent's weather/time-of-day/festival/visitor state, built once in
 // initSidebar (below tablistEl's header, above every tab panel) since it's
@@ -660,10 +685,11 @@ function renderHistory(container: HTMLElement, ctx: SectionContext): void {
     return;
   }
   if (historyDaily === null) {
-    const failed = document.createElement("p");
-    failed.className = "sidebar-empty";
-    failed.textContent = "History isn't available right now.";
-    container.appendChild(failed);
+    renderFetchError(container, "History isn't available right now.", () => {
+      historyDaily = undefined;
+      loadHistoryDaily();
+      renderSection("history");
+    });
     return;
   }
 
@@ -1025,10 +1051,10 @@ function renderWrapped(container: HTMLElement): void {
     return;
   }
   if (cached === "error") {
-    const failed = document.createElement("p");
-    failed.className = "sidebar-empty";
-    failed.textContent = "Wrapped isn't available right now.";
-    container.appendChild(failed);
+    renderFetchError(container, "Wrapped isn't available right now.", () => {
+      wrappedCache.delete(wrappedRange);
+      renderSection("wrapped");
+    });
     return;
   }
 
@@ -1284,10 +1310,10 @@ function renderPlaylistDetail(container: HTMLElement, playlist: { id: string; na
     return;
   }
   if (cached === "error" || !cached.connected) {
-    const failed = document.createElement("p");
-    failed.className = "sidebar-empty";
-    failed.textContent = "Couldn't load this playlist right now.";
-    container.appendChild(failed);
+    renderFetchError(container, "Couldn't load this playlist right now.", () => {
+      playlistDetailCache.delete(playlist.id);
+      renderSection("playlists");
+    });
     return;
   }
   if (!cached.live) {
@@ -1333,10 +1359,10 @@ function renderPlaylists(container: HTMLElement): void {
     return;
   }
   if (cached === "error") {
-    const failed = document.createElement("p");
-    failed.className = "sidebar-empty";
-    failed.textContent = "Playlists aren't available right now.";
-    container.appendChild(failed);
+    renderFetchError(container, "Playlists aren't available right now.", () => {
+      playlistsCache = undefined;
+      renderSection("playlists");
+    });
     return;
   }
 
@@ -1554,7 +1580,14 @@ function renderNoticeBoard(container: HTMLElement): void {
     container.appendChild(loading);
     return;
   }
-  if (cached === "error" || !cached.brief) {
+  if (cached === "error") {
+    renderFetchError(container, "The notice board isn't available right now.", () => {
+      weeklyBriefCache = undefined;
+      renderSection("notice-board");
+    });
+    return;
+  }
+  if (!cached.brief) {
     const empty = document.createElement("p");
     empty.className = "sidebar-empty";
     empty.textContent = "The notice board is empty — the first brief arrives after a full week of history.";
@@ -1592,7 +1625,14 @@ function renderThisWeek(container: HTMLElement, ctx: SectionContext): void {
     container.appendChild(loading);
     return;
   }
-  if (cached === "error" || !cached.brief) {
+  if (cached === "error") {
+    renderFetchError(container, "This week's notes aren't available right now.", () => {
+      weeklyBriefCache = undefined;
+      renderSection("this-week");
+    });
+    return;
+  }
+  if (!cached.brief) {
     const empty = document.createElement("p");
     empty.className = "sidebar-empty";
     empty.textContent = "No weekly notes yet — the first brief arrives after a full week of history.";
@@ -2099,7 +2139,14 @@ function renderChronicle(container: HTMLElement): void {
     container.appendChild(loading);
     return;
   }
-  if (cached === "error" || cached.runs.length === 0) {
+  if (cached === "error") {
+    renderFetchError(container, "The chronicle isn't available right now.", () => {
+      chronicleCache = undefined;
+      renderSection("chronicle");
+    });
+    return;
+  }
+  if (cached.runs.length === 0) {
     const empty = document.createElement("p");
     empty.className = "sidebar-empty";
     empty.textContent = "No agent runs yet — check back after the village's first overnight review.";

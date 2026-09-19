@@ -37,11 +37,27 @@
               <button type="button" class="topbar-btn" id="topArtistsBtn" aria-expanded="false" aria-controls="topArtistsPanel" hidden>
                 Top artists
               </button>
+              <button type="button" class="topbar-btn" id="helpBtn" aria-label="How Echoes works">?</button>
             </div>
           </header>
 
           <div class="top-artists-backdrop" id="topArtistsBackdrop" hidden></div>
           <aside class="top-artists-panel" id="topArtistsPanel" hidden aria-hidden="true" aria-label="Your top artists"></aside>
+
+          <!-- Phase 13b: first-visit onboarding, reopenable any time from
+               #helpBtn above — populated by src/onboarding.ts. Starts hidden;
+               shown automatically on a first visit (nothing dismissed yet in
+               localStorage) or on demand. -->
+          <div class="onboarding-backdrop" id="onboardingBackdrop" hidden></div>
+          <div
+            class="onboarding-modal"
+            id="onboardingModal"
+            hidden
+            aria-hidden="true"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="onboardingTitle"
+          ></div>
 
           <!-- Phase 5a: display-only now-playing card, populated by
                src/now-playing-card.ts. Starts hidden — shown only while

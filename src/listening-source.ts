@@ -154,6 +154,18 @@ export function isVillageConnected(): boolean {
   return village.connected;
 }
 
+/** True once connected+live but every district's artist roster is empty for
+ * the current era — a brand-new/empty Spotify account, distinct from the
+ * normal case of one or two quiet districts. Lets main.ts show one friendly
+ * explanation instead of 17 leaders silently idling with nothing to react
+ * to, which would otherwise read as broken rather than "just no data yet"
+ * (SPEC.md's Phase 13 edge-state polish). */
+export function isVillageEmpty(): boolean {
+  if (!isVillageLive()) return false;
+  const slots = Array.from(villageBySlot.values());
+  return slots.length > 0 && slots.every((s) => s.artists.length === 0);
+}
+
 export function villageGeminiLimited(): boolean {
   return village.connected && village.geminiLimited;
 }

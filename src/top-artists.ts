@@ -35,12 +35,17 @@ let lastConnected = false;
 
 function setStatusChip(state: "not-connected" | "connected" | "paused"): void {
   statusChip.classList.remove("status-chip--connected", "status-chip--paused");
+  statusChip.title = "";
   if (state === "connected") {
     statusChip.classList.add("status-chip--connected");
     statusChip.textContent = "Connected";
   } else if (state === "paused") {
     statusChip.classList.add("status-chip--paused");
     statusChip.textContent = "Live paused";
+    // Phase 13b: the chip alone doesn't explain itself (opening the "Top
+    // artists" panel does, via renderPanel's own message below, but that's
+    // an extra tap) — a hover tooltip covers desktop pointer users too.
+    statusChip.title = "Live Spotify updates are paused — showing sample data until it reconnects.";
   } else {
     // Phase 3: the whole village (districts, residents, activity) now runs
     // on this same connection state (see src/listening-source.ts) — make

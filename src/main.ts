@@ -49,6 +49,7 @@ import {
   getNowPlaying,
   initListeningSource,
   isVillageConnected,
+  isVillageEmpty,
   isVillageLive,
   refreshVillage,
 } from "./listening-source";
@@ -58,6 +59,7 @@ import { onEraChange } from "./era";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
 import { downloadRecording, isRecordingSupported, startRecording, takeSnapshot, type Recording } from "./capture";
 import { initSoundToggle, playFootstep, updateWeatherAmbience } from "./sound";
+import { initOnboarding } from "./onboarding";
 
 const NOW_PLAYING_INTERVAL_MS = 8000;
 const VILLAGE_EVENT_INTERVAL_MS = 5000;
@@ -107,6 +109,9 @@ const snapshotBtn = el<HTMLButtonElement>("snapshotBtn");
 const recordBtn = el<HTMLButtonElement>("recordBtn");
 const soundBtn = el<HTMLButtonElement>("soundBtn");
 const recordIndicator = el<HTMLSpanElement>("recordIndicator");
+const helpBtn = el<HTMLButtonElement>("helpBtn");
+const onboardingBackdrop = el<HTMLDivElement>("onboardingBackdrop");
+const onboardingModal = el<HTMLDivElement>("onboardingModal");
 
 const sidebarRoot = el<HTMLElement>("sidebar");
 const sidebarBackdrop = el<HTMLDivElement>("sidebarBackdrop");
@@ -126,6 +131,7 @@ initSidebar(sidebarRoot, sidebarBackdrop, {
 initTopArtists();
 initNowPlayingCard();
 void initHistoryStats();
+initOnboarding(onboardingBackdrop, onboardingModal, helpBtn);
 
 let images: ImageMap = {};
 let mode: Mode = "village"; // default view: the whole village, everyone present
@@ -1107,6 +1113,18 @@ if (!isRecordingSupported()) {
   });
 }
 
+// Phase 13b: swaps the village caption's default "how to look around" hint
+// for a friendly explanation when the connected account genuinely has no
+// listening data yet (src/listening-source.ts's isVillageEmpty) — called
+// once at startup, right before the caption first shows, so a brand-new
+// account reads as "waiting for its first play" rather than 17 leaders
+// silently idling with no obvious reason why.
+function applyEmptyAccountCaption(): void {
+  if (!isVillageEmpty()) return;
+  villageCaption.textContent =
+    "No listening logged on this account yet — the village fills in once Parth's first play comes through.";
+}
+
 // Village caption: a one-time hint, not persistent chrome — fades out (the
 // CSS transition; see .village-caption.is-dismissed) on a timeout or the
 // user's first drag/tap/zoom, whichever comes first (see the pointerdown
@@ -1290,6 +1308,7 @@ Promise.all([loadImages(urlsByKey), initListeningSource()]).then(async ([loaded]
   // the already-in-flight worldFetch above instead of starting a second one.
   await initWorldState(isVillageConnected(), worldFetch);
   rebuildResidentsAndCrowd();
+  applyEmptyAccountCaption();
   rebuildVisitors();
   applyVillageScene();
   requestAnimationFrame(frame);
