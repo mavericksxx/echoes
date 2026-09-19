@@ -56,8 +56,9 @@ const PAN_KEY_SPEED = 260; // world px/sec for arrow-key panning in village view
 const DRAG_THRESHOLD = 6; // css px before a pointer-down counts as a drag, not a tap
 const SCENE_TRANSITION_MS = 220; // matches --duration-base in style.css
 // Phase 9: the notice board's fixed world-space spot — an open patch of the
-// town map with no character anchor nearby (data/village.json's anchors are
-// all >120px away), village-view only, same as villageNpcs' own map.
+// town map with no character anchor right on top of it (data/village.json's
+// nearest anchor, sakura, is still ~104px away; every other anchor is
+// farther), village-view only, same as villageNpcs' own map.
 const NOTICE_BOARD_POS: Point = { x: 380, y: 380 };
 
 type Mode = "village" | "district";

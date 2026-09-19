@@ -624,10 +624,18 @@ it computes the snapshot diff by fetching a generously padded window of `play_ev
 as `worker/history-daily.ts`, deliberately not exact epoch-midnight math), then gates generation so
 it fires **at most once per week**: a `ready` row for the latest complete week means nothing to do;
 no row, or a `pending` one (a prior Gemini attempt failed or hit quota) whose `last_attempt_at` is
-more than `RETRY_COOLDOWN_MS` (4 hours) old, attempts generation. Below `MIN_WEEK_PLAYS` (20) raw
-plays in the week, it writes a `ready` template row with no Gemini call at all (SPEC.md's "too
-little data" case) — that's final for the week, never retried, since a fully-elapsed week's data
-can't retroactively grow. Otherwise one batched Gemini call (`generateJson` from `worker/gemini.ts`,
+more than `RETRY_COOLDOWN_MS` (4 hours) old, attempts generation. A **grace window** skips generation
+entirely for the first `BRIEF_GRACE_HOURS` (6) of owner-local Monday, so the cron doesn't treat the
+week that just ended as "complete" before `worker/history.ts`'s own 15-min cron has had a few ticks
+to finish syncing Sunday's last plays. A week that starts before the earliest logged play is skipped
+outright too — no row at all, not even a template — so a partial first week never gets a (misleading)
+brief; history began Friday 2026-09-18, so the week of Mon 2026-09-14 (which only has Fri-Sun of
+real data) is skipped and the first real brief is for the week of Mon 2026-09-21 — the first
+Monday-Sunday week entirely after history started. Below
+`MIN_WEEK_PLAYS` (20) raw plays in an otherwise-eligible week, it writes a `ready` template row with
+no Gemini call at all (SPEC.md's "too little data" case) — that's final for the week, never retried,
+since a fully-elapsed week's data can't retroactively grow. Otherwise one batched Gemini call
+(`generateJson` from `worker/gemini.ts`,
 which stays the only file that calls out to Gemini) gets a prompt carrying only derived per-slot
 play counts, slot genres, and new-artist names — never a raw Spotify payload. "brief" is a new
 non-core `GeminiCallKind` (`worker/rate-limit.ts`), backing off from the shared reserve like

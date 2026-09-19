@@ -356,9 +356,10 @@ export function drawNoticeBoard(ctx: CanvasRenderingContext2D, x: number, y: num
 
 /** Hit-tests a world-space point against the notice board's drawn footprint
  * (see drawNoticeBoard) — same bottom-anchored box shape as hitTestNpc, just
- * for a fixed prop instead of a moving sprite. */
+ * for a fixed prop instead of a moving sprite. Wider than the board's own
+ * ±12px drawn width so it's still an easy tap target on a phone. */
 export function hitTestNoticeBoard(boardX: number, boardY: number, wx: number, wy: number): boolean {
-  return wx > boardX - 16 && wx < boardX + 16 && wy > boardY - 40 && wy < boardY + 4;
+  return wx > boardX - 22 && wx < boardX + 22 && wy > boardY - 40 && wy < boardY + 4;
 }
 
 /** A soft ground ring under the selected NPC (the one whose sidebar is open). */

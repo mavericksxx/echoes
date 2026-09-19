@@ -58,6 +58,15 @@ const MIN_WEEK_PLAYS = 20;
 // appear once the cron has already looked at a fully-elapsed week.
 const RETRY_COOLDOWN_MS = 4 * 60 * 60 * 1000;
 
+// A brief for "the latest complete week" is only actually safe to compute
+// once owner-local Monday has been underway a little while — right at
+// Monday 00:00, the cron would already consider Sunday's week "complete"
+// even though worker/history.ts's own 15-min cron may not have synced
+// Sunday's last plays yet. Skipping the first BRIEF_GRACE_HOURS of Monday
+// gives history a few cron ticks to catch up before the week's numbers are
+// computed.
+const BRIEF_GRACE_HOURS = 6;
+
 const MAX_NEW_ARTISTS = 5;
 const MAX_HEADLINE_CHARS = 160;
 const MAX_NOTE_CHARS = 120;
@@ -76,16 +85,24 @@ function errorMessage(err: unknown): string {
 // Owner-local week math (see this file's doc comment on why this buckets by
 // formatted day string instead of computing exact epoch boundaries).
 // ---------------------------------------------------------------------------
-const WEEKDAY_INDEX: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
 
 /** The 7 owner-local day strings ("YYYY-MM-DD") for the Monday-Sunday week
  * `weeksAgo` weeks before the current (possibly in-progress) one — 0 is this
- * week, 1 is the last *complete* week, 2 is the week before that. */
-function weekDayStrings(dayFmt: Intl.DateTimeFormat, weekdayFmt: Intl.DateTimeFormat, nowMs: number, weeksAgo: number): string[] {
-  const todayWeekday = weekdayFmt.format(new Date(nowMs));
-  const daysSinceMonday = WEEKDAY_INDEX[todayWeekday] ?? 0;
-  const mondayMs = nowMs - daysSinceMonday * DAY_MS - weeksAgo * 7 * DAY_MS;
-  return Array.from({ length: 7 }, (_, i) => dayFmt.format(new Date(mondayMs + i * DAY_MS)));
+ * week, 1 is the last *complete* week, 2 is the week before that.
+ *
+ * Pure calendar arithmetic on `dayFmt`'s formatted date parts, not epoch-ms
+ * subtraction — `nowMs - N*DAY_MS` can land on the wrong owner-local
+ * calendar day across a DST transition (a 23h or 25h owner-local day means
+ * "7 days ago" isn't always exactly 7*86400000 ms ago). Rebuilding "today"
+ * as a UTC-anchored date (Date.UTC on the *parts*, not the instant) and
+ * stepping by whole days from there sidesteps the DST question entirely —
+ * every step is a clean calendar day, never a fractional one. */
+function weekDayStrings(dayFmt: Intl.DateTimeFormat, nowMs: number, weeksAgo: number): string[] {
+  const [y, m, d] = dayFmt.format(new Date(nowMs)).split("-").map(Number);
+  const todayUtc = Date.UTC(y!, m! - 1, d!);
+  const daysSinceMonday = (new Date(todayUtc).getUTCDay() + 6) % 7;
+  const monday = todayUtc - (daysSinceMonday + weeksAgo * 7) * DAY_MS;
+  return Array.from({ length: 7 }, (_, i) => new Date(monday + i * DAY_MS).toISOString().slice(0, 10));
 }
 
 // ---------------------------------------------------------------------------
@@ -122,8 +139,8 @@ interface SnapshotDiff {
 async function computeSnapshotDiff(
   env: Env,
   dayFmt: Intl.DateTimeFormat,
-  thisWeekDays: string[],
-  lastWeekDays: string[],
+  targetWeekDays: string[],
+  priorWeekDays: string[],
   nowMs: number,
 ): Promise<SnapshotDiff> {
   const fromMs = nowMs - (WINDOW_DAYS_BACK + FETCH_SAFETY_MARGIN_DAYS) * DAY_MS;
@@ -148,8 +165,8 @@ async function computeSnapshotDiff(
     }>(),
   ]);
 
-  const thisWeekSet = new Set(thisWeekDays);
-  const lastWeekSet = new Set(lastWeekDays);
+  const targetWeekSet = new Set(targetWeekDays);
+  const priorWeekSet = new Set(priorWeekDays);
 
   const bySlotThis: Record<string, number> = {};
   const bySlotLast: Record<string, number> = {};
@@ -158,13 +175,13 @@ async function computeSnapshotDiff(
 
   for (const row of rows) {
     const dayStr = dayFmt.format(new Date(row.played_at));
-    if (thisWeekSet.has(dayStr)) {
+    if (targetWeekSet.has(dayStr)) {
       totalPlaysThisWeek++;
       if (row.slot_id) bySlotThis[row.slot_id] = (bySlotThis[row.slot_id] ?? 0) + 1;
       const existing = perArtistThis.get(row.artist_id);
       if (existing) existing.plays++;
       else perArtistThis.set(row.artist_id, { artistId: row.artist_id, name: row.name ?? row.artist_id, slotId: row.slot_id, plays: 1 });
-    } else if (lastWeekSet.has(dayStr)) {
+    } else if (priorWeekSet.has(dayStr)) {
       if (row.slot_id) bySlotLast[row.slot_id] = (bySlotLast[row.slot_id] ?? 0) + 1;
     }
   }
@@ -173,7 +190,7 @@ async function computeSnapshotDiff(
   const newArtists = Array.from(perArtistThis.values())
     .filter((a) => {
       const firstPlayed = firstPlayedByArtist.get(a.artistId);
-      return firstPlayed !== undefined && thisWeekSet.has(dayFmt.format(new Date(firstPlayed)));
+      return firstPlayed !== undefined && targetWeekSet.has(dayFmt.format(new Date(firstPlayed)));
     })
     .sort((a, b) => b.plays - a.plays)
     .slice(0, MAX_NEW_ARTISTS);
@@ -343,6 +360,10 @@ async function upsertBrief(
 /**
  * Runs one cron cycle's worth of weekly-brief work. Gating (SPEC.md's Phase
  * 9 task):
+ *  - Owner-local Monday, before BRIEF_GRACE_HOURS has elapsed -> too early,
+ *    skip entirely (nothing written, not even for a prior week).
+ *  - The latest complete week starts before the earliest logged play ->
+ *    pre-history/partial week, skip entirely, no row ever written for it.
  *  - No row yet for the latest complete week -> generate (first attempt).
  *  - Row exists with status 'ready' -> nothing to do, this week is done.
  *  - Row exists with status 'pending' (a prior attempt failed or hit quota)
@@ -364,11 +385,30 @@ export async function runWeeklyBrief(env: Env): Promise<void> {
 async function runWeeklyBriefInner(env: Env): Promise<void> {
   const nowMs = Date.now();
   const dayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: env.OWNER_TZ, year: "numeric", month: "2-digit", day: "2-digit" });
+  // Only used for the grace-window check below — weekDayStrings itself does
+  // its own calendar arithmetic off dayFmt now (DST-safe, see its doc
+  // comment), so this isn't needed there anymore.
   const weekdayFmt = new Intl.DateTimeFormat("en-US", { timeZone: env.OWNER_TZ, weekday: "short" });
+  const hourFmt = new Intl.DateTimeFormat("en-US", { timeZone: env.OWNER_TZ, hour: "2-digit", hourCycle: "h23" });
 
-  const thisWeekDays = weekDayStrings(dayFmt, weekdayFmt, nowMs, 1); // the latest *complete* week
-  const lastWeekDays = weekDayStrings(dayFmt, weekdayFmt, nowMs, 2); // the week before it, for the diff
-  const weekStart = thisWeekDays[0]!;
+  if (weekdayFmt.format(new Date(nowMs)) === "Mon" && Number(hourFmt.format(new Date(nowMs))) < BRIEF_GRACE_HOURS) {
+    return; // see BRIEF_GRACE_HOURS's doc comment
+  }
+
+  const targetWeekDays = weekDayStrings(dayFmt, nowMs, 1); // the latest *complete* week
+  const priorWeekDays = weekDayStrings(dayFmt, nowMs, 2); // the week before it, for the diff
+  const weekStart = targetWeekDays[0]!;
+
+  // History only started 2026-09-18 (Phase 8a) — a week that starts before
+  // the very first logged play would get either an empty/near-empty
+  // template brief (noise, not a real "first week" the owner would want to
+  // see) or, worse, a partial first week whose numbers can never be
+  // corrected once the cron has moved past it. Skip writing any row at all
+  // for such a week; the first real brief lands for the first Monday-Sunday
+  // week that's entirely within logged history.
+  const earliestPlayRow = await env.DB.prepare("SELECT MIN(played_at) AS min_played FROM play_event").first<{ min_played: number | null }>();
+  const earliestPlayedAt = earliestPlayRow?.min_played ?? null;
+  if (earliestPlayedAt === null || weekStart < dayFmt.format(new Date(earliestPlayedAt))) return;
 
   const existing = await readExistingRow(env, weekStart);
   if (existing) {
@@ -377,7 +417,7 @@ async function runWeeklyBriefInner(env: Env): Promise<void> {
     if (sinceAttemptMs < RETRY_COOLDOWN_MS) return;
   }
 
-  const diff = await computeSnapshotDiff(env, dayFmt, thisWeekDays, lastWeekDays, nowMs);
+  const diff = await computeSnapshotDiff(env, dayFmt, targetWeekDays, priorWeekDays, nowMs);
   const stats: StoredStats = { movers: diff.movers, topNewArtists: diff.newArtists.map((a) => ({ artistId: a.artistId, plays: a.plays })) };
 
   if (diff.totalPlaysThisWeek < MIN_WEEK_PLAYS) {
