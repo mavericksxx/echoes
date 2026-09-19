@@ -2462,31 +2462,9 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
 }
 
 /** Unhides the panel and marks it "is-open" — shared by openSidebar and
- * openVillagePanel so the two entry points can't drift apart on how a panel
- * actually becomes visible (they used to each carry their own copy of this).
- *
- * Deliberately synchronous, not requestAnimationFrame-deferred like the
- * original version of this code: rAF-ing the "is-open" class add left a
- * window — between this call returning and the next paint — where
- * `root.hidden` was already false but `isSidebarOpen()` (which checks for
- * "is-open") still reported closed. On a *first* open specifically, that
- * window also covered the calls this function used to run *after* it
- * (renderHeader/renderVillageToday/renderSection, and hooks.onSectionChange
- * inside the latter) — so anything reacting to onSectionChange while it was
- * still mid-flight (main.ts's topbar aria-current sync) could observe "the
- * section changed" before the panel had actually committed to opening, and,
- * if a repaint landed in that exact window, would show a styled-active
- * button over a panel that hadn't visually appeared yet. `void
- * root.offsetHeight` forces the browser to commit the just-unhidden
- * ("closed") layout before the very next line flips it to "is-open", so the
- * transition still animates — the same effect the rAF was going for, just
- * guaranteed to land in this tick instead of racing the next one. Called
- * *before* the render calls below (not after, as before) precisely so that
- * by the time renderSection's onSectionChange hook fires, `isSidebarOpen()`
- * already reflects the truth; a click handler is one synchronous task, so
- * the browser paints the fully-built result regardless of this reordering —
- * nothing renders content into a still-hidden panel now, it renders it into
- * a panel that (as far as the DOM is concerned) is already open. */
+ * openVillagePanel. Runs before the render calls so isSidebarOpen() is
+ * already true when renderSection's onSectionChange hook fires; the forced
+ * layout commits the unhidden state first so the open transition still plays. */
 function revealPanel(): void {
   root.hidden = false;
   backdrop.hidden = false;
