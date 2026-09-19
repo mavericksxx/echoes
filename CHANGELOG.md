@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- **Phase 7 — Moods and personalities:** Gemini mood/energy per artist tints districts and scales NPC
+  walk speed/performing; per-slot personality + dialogue (info card + sidebar Character tab); AI
+  captions per song. Moods/personas/captions back off to keep 100/day of the Gemini cap for genre
+  sorting; captions capped at 60/day. Migrations 0006–0008.
 - **Phase 6 — Rate limits:** Passive audit of `usage_log` (0 × 429 over ~37h, peak 10 req/30s); ramp
   test skipped to avoid a 13–18h ban; current poll intervals kept. Results in SPEC.md.
 - **Phase 5a — Now-playing:** Shortened the idle poll to 15s so the listening card appears sooner;
