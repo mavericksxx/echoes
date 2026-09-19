@@ -127,7 +127,12 @@ VALUES (1, '${encrypted}', '${scope.replace(/'/g, "''")}', '${now}')
 ON CONFLICT(id) DO UPDATE SET
   encrypted_refresh_token = excluded.encrypted_refresh_token,
   scope = excluded.scope,
-  updated_at = excluded.updated_at;
+  updated_at = excluded.updated_at,
+  -- Drop the Worker's cached access token (worker/token.ts): it was minted
+  -- under the old scopes and would otherwise be served until it expires.
+  encrypted_access_token = NULL,
+  access_expires_at = NULL,
+  version = version + 1;
 `;
   if (process.argv.includes("--print-sql")) {
     const out = path.join(os.tmpdir(), "echoes-token.sql");
