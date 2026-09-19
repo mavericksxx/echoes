@@ -610,6 +610,48 @@ idea above has something real to build on top of once map/building work is sched
 
 **You'll see:** a narrated weekly read on your taste in the village.
 
+**Built (2026-09-19).** `migrations/0009_weekly_brief.sql` adds `weekly_brief`, one row per
+owner-local Monday-start week (`OWNER_TZ`): headline, a few global notes (JSON array), per-slot
+notes (JSON object, slot id -> one line), the stats it was generated from (JSON: per-slot plays
+this week vs last week, top new artists by id + play count — never names, per the storage rule;
+names are always joined from `artist_cache` at read time), `generated_at`, and a `status`
+(`ready`/`pending`) + `last_attempt_at` pair for the retry rule below.
+
+`worker/weekly-brief.ts`'s `runWeeklyBrief` rides the *existing* 15-min cron
+(`worker/index.ts`'s `scheduled()`, right after `worker/history.ts`'s sync — no new cron trigger):
+it computes the snapshot diff by fetching a generously padded window of `play_event` joined to
+`artist_cache` and bucketing each row by its own owner-local calendar-day string (same technique
+as `worker/history-daily.ts`, deliberately not exact epoch-midnight math), then gates generation so
+it fires **at most once per week**: a `ready` row for the latest complete week means nothing to do;
+no row, or a `pending` one (a prior Gemini attempt failed or hit quota) whose `last_attempt_at` is
+more than `RETRY_COOLDOWN_MS` (4 hours) old, attempts generation. Below `MIN_WEEK_PLAYS` (20) raw
+plays in the week, it writes a `ready` template row with no Gemini call at all (SPEC.md's "too
+little data" case) — that's final for the week, never retried, since a fully-elapsed week's data
+can't retroactively grow. Otherwise one batched Gemini call (`generateJson` from `worker/gemini.ts`,
+which stays the only file that calls out to Gemini) gets a prompt carrying only derived per-slot
+play counts, slot genres, and new-artist names — never a raw Spotify payload. "brief" is a new
+non-core `GeminiCallKind` (`worker/rate-limit.ts`), backing off from the shared reserve like
+moods/persona, no dedicated sub-cap (it's inherently rare). A failed/capped attempt writes a
+`pending` row (stats only, no headline yet) instead of throwing, so a later cron tick retries.
+
+`GET /api/weekly-brief` (`worker/weekly-brief.ts`) is D1-only — reads the most recent `ready` row
+(so a `pending` retry never blanks the board mid-attempt), joins `artist_cache` for its new
+artists' current names, and is cached in `caches.default` for 30 minutes like every other endpoint
+here, behind the same generous per-IP bucket `/api/history/daily` reuses (no Spotify/Gemini call
+this route can ever trigger). Response is `{ brief: WeeklyBriefOut | null }` — `null` before the
+first week's brief exists.
+
+Frontend: a small wooden-signpost notice board, drawn with plain canvas primitives (no new ripped
+assets) at a fixed spot on the village map, away from every character anchor. Tapping it (village
+view only) opens the sidebar straight to a new global **Notice board** tab — pushed onto
+`src/sidebar.ts`'s `SECTIONS` the same way Wrapped/Playlists are (ignores `ctx.slot`) — showing the
+headline, global notes, a simple this-week-vs-last movers list, and any brand-new artists. Each
+character's sidebar also gets the spec'd per-slot **This week** tab, showing that slot's one-line
+note or an explicit "nothing this week" empty state. Both tabs share one fetch/cache. Loading and
+empty ("first brief arrives after a full week of history") states are explicit, never a blank tab.
+Sample-data mode (`!isVillageConnected()`, `src/sample-data.ts`'s `SAMPLE_BRIEF`) shows a
+handwritten brief exercising every field, same convention as Phase 8.6's `SAMPLE_PLAYLISTS`.
+
 ### Phase 10 — Talk to the Hokage (agent #1)
 - Chat UI + Gemini function calling with tools `get_top_artists`, `get_recent_plays`, `get_slot_history`, `get_weekly_brief`, `find_artist`; daily chat limit.
 - Camera pans to the district a tool call is about.

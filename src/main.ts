@@ -20,8 +20,10 @@ import {
 } from "./npc";
 import {
   drawCaptions,
+  drawNoticeBoard,
   drawNpc,
   drawSelectionRing,
+  hitTestNoticeBoard,
   hitTestNpc,
   loadImages,
   type CaptionLabel,
@@ -29,7 +31,15 @@ import {
 } from "./render";
 import { bakeRecolor } from "./recolor";
 import { buildCrowd, buildResidents, drawActivityTreatment, drawMoodTint, type Resident } from "./residents";
-import { close as closeSidebar, initSidebar, isSidebarOpen, openSidebar, refreshSidebarContent, setSidebarImages } from "./sidebar";
+import {
+  close as closeSidebar,
+  initSidebar,
+  isSidebarOpen,
+  openSidebar,
+  refreshSidebarContent,
+  setSidebarImages,
+  sidebarSlotId,
+} from "./sidebar";
 import { initTopArtists } from "./top-artists";
 import { getLiveNowPlaying, initNowPlayingCard, subscribeNowPlaying } from "./now-playing-card";
 import { initHistoryStats } from "./history-stats";
@@ -45,6 +55,10 @@ const DISTRICT_ZOOM_DESKTOP = 3;
 const PAN_KEY_SPEED = 260; // world px/sec for arrow-key panning in village view
 const DRAG_THRESHOLD = 6; // css px before a pointer-down counts as a drag, not a tap
 const SCENE_TRANSITION_MS = 220; // matches --duration-base in style.css
+// Phase 9: the notice board's fixed world-space spot — an open patch of the
+// town map with no character anchor nearby (data/village.json's anchors are
+// all >120px away), village-view only, same as villageNpcs' own map.
+const NOTICE_BOARD_POS: Point = { x: 380, y: 380 };
 
 type Mode = "village" | "district";
 
@@ -627,6 +641,7 @@ function renderVillage(): void {
   ctx.save();
   ctx.translate(-camX, -camY);
   ctx.drawImage(images[VILLAGE.mapImage]!, 0, 0);
+  drawNoticeBoard(ctx, NOTICE_BOARD_POS.x, NOTICE_BOARD_POS.y);
 
   const view = { camX, camY, viewW, viewH };
   const sorted = villageDrawOrder();
@@ -696,11 +711,31 @@ function interactionPool(): Npc[] {
   return [];
 }
 
+/** Phase 9: opens the sidebar straight to the global Notice board section
+ * (same "ignores whichever character's header is showing" convention as the
+ * Wrapped/Playlists tabs — see src/sidebar.ts's SECTIONS). Keeps whatever
+ * character's sidebar is already open (if any) rather than forcing one, so
+ * tapping the board mid-conversation doesn't change whose portrait is
+ * showing; falls back to the roster's first slot when nothing's open yet, a
+ * slot chosen only because *something* has to own the header chrome. */
+function openNoticeBoard(): void {
+  const slotId = sidebarSlotId();
+  const slot = slotId ? getSlot(slotId) : SLOTS[0]!;
+  openSidebar(slot, { section: "notice-board", showEnter: false });
+}
+
 function handleTap(clientX: number, clientY: number): void {
   const world = screenToWorld(clientX, clientY);
   const hit = interactionPool().find((npc) => hitTestNpc(npc, world.x, world.y));
-  if (hit) openSidebarForNpc(hit);
-  else if (isSidebarOpen()) closeSidebar();
+  if (hit) {
+    openSidebarForNpc(hit);
+    return;
+  }
+  if (mode === "village" && hitTestNoticeBoard(NOTICE_BOARD_POS.x, NOTICE_BOARD_POS.y, world.x, world.y)) {
+    openNoticeBoard();
+    return;
+  }
+  if (isSidebarOpen()) closeSidebar();
 }
 
 // Two-finger pinch-to-zoom tracks every active pointer by id; a single

@@ -1517,6 +1517,18 @@ select {
   image-rendering: pixelated;
 }
 
+/* ---- notice board (Phase 9) ---- */
+/* The brief's headline — a poster-weight line, same display face as a
+   sidebar-heading but standalone (no trailing brush-stroke rule; the
+   "Week of ..." caption right under it plays that grounding role instead). */
+.notice-board-headline {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  line-height: var(--leading-tight);
+  color: var(--color-text);
+  margin: 0 0 var(--space-1);
+}
+
 /* ==========================================================================
    Desktop: the sidebar becomes a floating glass panel inset over the map
    (position: absolute, 16px inset, 400px wide) instead of a full-screen

@@ -318,6 +318,49 @@ export function hitTestNpc(npc: Npc, wx: number, wy: number): boolean {
   return wx > npc.x - half && wx < npc.x + half && wy > npc.y - 40 && wy < npc.y + 10;
 }
 
+/** Phase 9: the village's notice board — a small wooden signpost + parchment
+ * board, drawn with plain canvas primitives (SPEC.md's task: "no new ripped
+ * assets"), anchored at its ground point `(x, y)` the same way an NPC anchors
+ * at its feet. Mission-scroll palette (wood/paper/ink/seal), even though
+ * this is the pixel-art canvas rather than the paper-chrome sidebar — it's
+ * meant to read as an in-world prop built from the same village materials. */
+export function drawNoticeBoard(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+
+  ctx.fillStyle = "#6a4527"; // --wood
+  ctx.fillRect(-9, -24, 3, 24);
+  ctx.fillRect(6, -24, 3, 24);
+
+  ctx.fillStyle = "#dcd6bd"; // --paper
+  ctx.fillRect(-12, -34, 24, 16);
+  ctx.strokeStyle = "#3e2814"; // --wood-dark
+  ctx.lineWidth = 1;
+  ctx.strokeRect(-12, -34, 24, 16);
+
+  ctx.strokeStyle = "rgba(29, 39, 72, 0.55)"; // --ink, muted — reads as scribbled notice lines
+  ctx.beginPath();
+  ctx.moveTo(-8, -29);
+  ctx.lineTo(6, -29);
+  ctx.moveTo(-8, -25);
+  ctx.lineTo(2, -25);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.fillStyle = "#b8321f"; // --seal
+  ctx.arc(7, -29, 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+/** Hit-tests a world-space point against the notice board's drawn footprint
+ * (see drawNoticeBoard) — same bottom-anchored box shape as hitTestNpc, just
+ * for a fixed prop instead of a moving sprite. */
+export function hitTestNoticeBoard(boardX: number, boardY: number, wx: number, wy: number): boolean {
+  return wx > boardX - 16 && wx < boardX + 16 && wy > boardY - 40 && wy < boardY + 4;
+}
+
 /** A soft ground ring under the selected NPC (the one whose sidebar is open). */
 export function drawSelectionRing(ctx: CanvasRenderingContext2D, npc: Npc): void {
   ctx.save();
