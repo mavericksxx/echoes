@@ -713,6 +713,90 @@ select {
   }
 }
 
+/* Phase 13a: Snapshot / Record / Sound (src/capture.ts, src/sound.ts) —
+   fixed to the viewport rather than nested in .stage-area, same idiom as
+   .now-playing-card/.history-readout below, and offset by the same
+   topbar-clearing formula .now-playing-card uses (mirrored to the left) so
+   it reads as one more piece of floating HUD chrome, not part of the map. */
+.media-controls {
+  position: fixed;
+  z-index: var(--z-floating);
+  top: calc(var(--topbar-h) + var(--safe-top) + var(--space-2));
+  left: calc(var(--space-3) + var(--safe-left));
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  max-width: calc(100vw - 2 * var(--space-3));
+}
+
+.media-btn {
+  appearance: none;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--wood);
+  background: var(--color-glass);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 16px 32px -18px rgba(0, 0, 0, 0.6);
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.media-btn:hover {
+  background: rgba(29, 39, 72, 0.08);
+}
+
+.media-btn:active {
+  transform: scale(0.96);
+}
+
+/* Reuses --seal-deep the same way the "Connected" hanko stamp does (see
+   .status-chip--connected) — a genuine live-state signal, not decoration. */
+.media-btn[aria-pressed="true"] {
+  background: var(--seal-deep);
+  border-color: var(--seal-deep);
+  color: var(--paper);
+}
+
+.media-controls__indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--seal-deep);
+  background: var(--color-glass);
+  border: 1px solid var(--seal-deep);
+  border-radius: var(--radius-pill);
+}
+
+.media-controls__indicator::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--seal-deep);
+  animation: media-rec-pulse 1s ease-in-out infinite;
+}
+
+@keyframes media-rec-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
 
 /* ==========================================================================
    Sidebar — the mission scroll itself: a paper panel over the map on

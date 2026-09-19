@@ -1,6 +1,16 @@
 # Changelog
 
 ## Unreleased
+- **Phase 13 (part A) — Show it off:** three new controls in the stage chrome, no new dependencies.
+  **Snapshot** (`src/capture.ts`) flattens the game canvas and its caption overlay into one PNG
+  (`echoes-YYYY-MM-DD.png`), stamped with "Parth is listening to …" when something's live. **Record**
+  captures the game canvas via `canvas.captureStream` + `MediaRecorder` (mp4 where supported, else
+  webm) for up to 10s with a visible countdown, then downloads the clip; hidden entirely on browsers
+  without `MediaRecorder` (older iOS Safari). **Sound** (`src/sound.ts`, new module) adds small
+  synthesized WebAudio cues — no asset files: a soft click on sidebar/tab actions, throttled footstep
+  ticks for the village camera's arrow-key pan, and a filtered-noise ambience bed for rain/storm
+  weather (silent otherwise). Muted by default; the toggle persists to `localStorage` (try/catch
+  guarded) and the shared `AudioContext` is created lazily on the first user gesture.
 - **Phase 12 — Village chronicle:** `GET /api/chronicle` (D1-only, reuses `/api/world`'s rate-limit
   bucket) returns the last ~30 days of `agent_run` rows newest-first, each with its `agent_event`
   rows in id order and both before/after `WorldState` snapshots. Sidebar gains a global **Chronicle**

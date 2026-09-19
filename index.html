@@ -64,6 +64,20 @@
                 <button type="button" class="zoom-btn" id="zoomInBtn" aria-label="Zoom in">+</button>
                 <button type="button" class="zoom-btn" id="zoomOutBtn" aria-label="Zoom out">&minus;</button>
               </div>
+              <!-- Phase 13a: Snapshot / Record / Sound — src/capture.ts and
+                   src/sound.ts. Fixed (not part of .stage-area's own box),
+                   top-left, clearing the topbar the same way
+                   .now-playing-card's top-right offset does, so it never
+                   competes with .zoom-controls (bottom-right) or
+                   .history-readout (bottom-left) for a corner. -->
+              <div class="media-controls" id="mediaControls">
+                <button type="button" class="media-btn" id="snapshotBtn" aria-label="Save a snapshot of the village">Snapshot</button>
+                <button type="button" class="media-btn" id="recordBtn" aria-pressed="false" aria-label="Record a short clip of the village">
+                  Record
+                </button>
+                <button type="button" class="media-btn" id="soundBtn" aria-pressed="false" aria-label="Turn sound on">Sound</button>
+                <span class="media-controls__indicator" id="recordIndicator" hidden aria-live="polite"></span>
+              </div>
             </div>
 
             <p class="village-caption" id="villageCaption">
