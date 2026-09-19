@@ -1548,6 +1548,15 @@ function renderThisWeek(container: HTMLElement, ctx: SectionContext): void {
 interface HokageTurn {
   role: "user" | "model";
   text: string;
+  /** Set when the fetch for this user turn's reply failed (network error, a
+   * non-OK status) — it stays in hokageHistory so it's still visible in the
+   * log (the "couldn't reach the Hokage" note beneath it explains why it
+   * never got an answer), but is excluded from the history sent to
+   * /api/hokage on the *next* send (see sendHokageMessage's `sent` below).
+   * Left in, a second question typed after a failed one would send two
+   * "user" turns back to back with no "model" turn between them — Gemini's
+   * `contents` require strict user/model alternation and 400 otherwise. */
+  failed?: boolean;
 }
 interface HokageResponse {
   reply: string;
@@ -1607,7 +1616,8 @@ function sendHokageMessage(rawText: string): void {
   const text = rawText.trim();
   if (!text || hokageBusy) return;
 
-  hokageHistory.push({ role: "user", text });
+  const turn: HokageTurn = { role: "user", text };
+  hokageHistory.push(turn);
   hokageBusy = true;
   hokageError = false;
   hokageLimited = false;
@@ -1625,10 +1635,14 @@ function sendHokageMessage(rawText: string): void {
     return;
   }
 
-  const sent = hokageHistory.slice(-HOKAGE_MAX_HISTORY_TURNS);
+  // Drop any earlier turn(s) left `failed` by a previous send (see
+  // HokageTurn's doc comment) before taking the last 8 — this turn itself
+  // is fresh and can't be failed yet, so it's always included.
+  const sent = hokageHistory.filter((t) => !t.failed).slice(-HOKAGE_MAX_HISTORY_TURNS);
   void fetchHokage(sent).then((data) => {
     hokageBusy = false;
     if (!data) {
+      turn.failed = true;
       hokageError = true;
       renderSection("hokage");
       focusHokageInput();

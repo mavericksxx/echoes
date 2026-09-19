@@ -56,9 +56,11 @@ export const RATE_LIMIT_RULES: Record<string, RateLimitRule> = {
   // itself against usage_log's 'hokage:question' rows — this generic bucket
   // fails open on a D1 hiccup (see fetch() below), which is fine for
   // abuse-shaping but not tight enough on its own to be the real cost
-  // control for an endpoint that can burn up to 4 Gemini calls per request.
-  // A tighter window/max than the other Gemini-triggering buckets above
-  // since one question can cost several model steps, not one.
+  // control for an endpoint that can burn up to 5 Gemini calls per request
+  // (worker/gemini.ts's chatWithTools: MAX_CHAT_STEPS tool-enabled steps
+  // plus one possible forced final turn). A tighter window/max than the
+  // other Gemini-triggering buckets above since one question can cost
+  // several model steps, not one.
   hokage: { windowSeconds: 60, max: 6 },
 };
 
@@ -128,7 +130,8 @@ export async function enforceRateLimit(env: Env, ip: string, bucket: string, rul
 // (worker/weekly-brief.ts's RETRY_COOLDOWN_MS) — so it needs no sub-cap of
 // its own. "chat" (Phase 10 — worker/hokage.ts) is exempt from the per-IP
 // cap below entirely: it's a *multi-step* conversation (worker/gemini.ts's
-// chatWithTools runs up to 4 model steps per question), so one chatty
+// chatWithTools runs up to 5 Gemini calls per question — MAX_CHAT_STEPS
+// tool-enabled steps plus one possible forced final turn), so one chatty
 // visitor could otherwise burn through GEMINI_DAILY_PER_IP_CAP in a single
 // question and starve every *other* Gemini feature for that same IP for the
 // rest of the day; its own dedicated per-IP question cap
@@ -147,8 +150,9 @@ export const GEMINI_DAILY_CORE_RESERVE = 100;
 // volume tracks listening activity rather than distinct-artist/genre count.
 export const GEMINI_DAILY_CAPTIONS_CAP = 60;
 // Dedicated daily ceiling for "chat" model *steps* (not questions — a single
-// question can cost up to 4 steps, worker/gemini.ts's chatWithTools) across
-// every visitor combined, same "on top of the shared reserve" role as
+// question can cost up to 5 Gemini calls, worker/gemini.ts's chatWithTools:
+// MAX_CHAT_STEPS tool-enabled steps plus one possible forced final turn)
+// across every visitor combined, same "on top of the shared reserve" role as
 // GEMINI_DAILY_CAPTIONS_CAP above.
 export const GEMINI_DAILY_CHAT_STEPS_CAP = 80;
 

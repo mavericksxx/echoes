@@ -676,12 +676,19 @@ one always the visitor's own turn — 400ing anything else rather than best-effo
 calling (a second response shape `generateJson` can't parse — a `functionCall` part instead of
 text — so it gets its own parser, `callGeminiStep`). Function-calling support on `MODEL_ID`
 (`gemini-3.5-flash-lite`) is assumed, not independently verified the way the model id itself was.
-The loop runs at most 4 model steps; if step 4 is still a function call, one final turn with no
-`tools` forces a text answer, and if even that fails, an in-character canned line is returned — a
-question never ends without *some* answer. `chatWithTools` is the one place in `gemini.ts` that
-checks Gemini quota and logs each call itself (every other function here leaves that to its
-caller), because its own internal multi-step loop needs to gate/log *per step*, not once around a
-single outside call.
+The loop runs at most 4 tool-enabled model steps; if step 4 is still a function call, one final
+turn with no `tools` forces a text answer, and if even that fails, an in-character canned line is
+returned — a question never ends without *some* answer. That final turn is a 5th possible Gemini
+call on top of the 4 tool-enabled steps, so a single question can cost up to **5** Gemini calls
+total, not 4 — every cost-control comment/cap referencing this loop (`worker/rate-limit.ts`'s
+`hokage` bucket and `GEMINI_DAILY_CHAT_STEPS_CAP` doc comments, `worker/index.ts`'s route-bucket
+comment) is written in those terms. A step can also return *several* function-call parts at once;
+Gemini requires the turn that follows to answer all of them together, in one turn, so
+`chatWithTools` runs every call from a step concurrently (`Promise.all`) and pushes one combined
+`functionResponse` turn, recording every call (for `toolCalls`/`focusSlots`) rather than only the
+first. `chatWithTools` is the one place in `gemini.ts` that checks Gemini quota and logs each call
+itself (every other function here leaves that to its caller), because its own internal multi-step
+loop needs to gate/log *per step*, not once around a single outside call.
 
 `worker/hokage.ts` owns the fixed, in-character system prompt (names the village, forbids the
 words "Spotify"/"app"/"database", states that history begins 2026-09-18, and instructs the model to

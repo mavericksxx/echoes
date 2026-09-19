@@ -30,10 +30,12 @@ import { MOOD_IDS, type MoodId } from "../shared/mood";
 // Phase 10 only (see chatWithTools at the bottom of this file): every other
 // function here is a single classifier call whose caller checks quota/logs
 // the attempt itself (worker/weekly-brief.ts, worker/persona.ts, ...).
-// chatWithTools instead runs its own internal multi-step loop (up to 4
-// model steps per question), so the per-step quota check/log has to live
-// inside that loop rather than around one outside call — the one place in
-// this file that needs worker/rate-limit.ts at all.
+// chatWithTools instead runs its own internal multi-step loop (up to 5
+// Gemini calls per question — MAX_CHAT_STEPS tool-enabled steps, plus one
+// forced final no-tools turn if the last of those is still a function call;
+// see chatWithTools' doc comment), so the per-step quota check/log has to
+// live inside that loop rather than around one outside call — the one place
+// in this file that needs worker/rate-limit.ts at all.
 import { geminiQuotaAvailable, logGeminiCall } from "./rate-limit";
 
 const MODEL_ID = "gemini-3.5-flash-lite";
@@ -474,6 +476,9 @@ export interface ChatOutcome {
   limited: boolean;
 }
 
+// Tool-enabled steps only — the forced final no-tools turn below (when step
+// MAX_CHAT_STEPS is still a function call) is a 5th possible Gemini call on
+// top of this, not counted in it. See chatWithTools' doc comment.
 const MAX_CHAT_STEPS = 4;
 
 const CHAT_LIMITED_REPLY =
@@ -511,10 +516,14 @@ interface ChatGenerateContentResponse {
 
 interface ChatStepResult {
   text: string | null;
-  functionCall: { name: string; args: Record<string, unknown> } | null;
+  // Every functionCall part this step returned, not just the first — Gemini
+  // requires the *next* turn to answer all of them at once (see
+  // chatWithTools' single combined functionResponse turn below), so a step
+  // that drops any of them would make the following request 400.
+  functionCalls: { name: string; args: Record<string, unknown> }[];
   // The candidate's own parts, untouched — chatWithTools pushes these back
-  // verbatim as the model turn instead of reconstructing a `functionCall`
-  // part by hand, so any sibling field the API attached (Gemini 3's
+  // verbatim as the model turn instead of reconstructing functionCall parts
+  // by hand, so any sibling field the API attached (Gemini 3's
   // thoughtSignature in particular — see ChatPart) survives the round trip.
   rawParts: ChatPart[];
 }
@@ -578,26 +587,32 @@ async function callGeminiStep(
   }
 
   const parts = candidate.content?.parts ?? [];
-  // If the model returns several functionCall parts in one step, only the
-  // first is actually acted on (see chatWithTools) — but rawParts still
-  // carries every part as the API sent it, so the echoed model turn stays
-  // byte-for-byte faithful regardless.
-  const callPart = parts.find((p) => p.functionCall);
-  if (callPart?.functionCall) {
-    return { text: null, functionCall: { name: callPart.functionCall.name, args: callPart.functionCall.args ?? {} }, rawParts: parts };
+  // Every functionCall part in this step, in order — see ChatStepResult's
+  // doc comment on why chatWithTools needs all of them, not just the first.
+  const callParts = parts.filter((p): p is ChatPart & { functionCall: NonNullable<ChatPart["functionCall"]> } => Boolean(p.functionCall));
+  if (callParts.length > 0) {
+    return {
+      text: null,
+      functionCalls: callParts.map((p) => ({ name: p.functionCall.name, args: p.functionCall.args ?? {} })),
+      rawParts: parts,
+    };
   }
   const text = parts.map((p) => p.text ?? "").join("").trim();
-  return { text: text || null, functionCall: null, rawParts: parts };
+  return { text: text || null, functionCalls: [], rawParts: parts };
 }
 
 /** Runs the Hokage chat loop: sends `history` (already validated/trimmed by
  * worker/hokage.ts) plus `systemPrompt`, and — for as long as Gemini keeps
- * returning a functionCall instead of a final answer — calls `runTool` to
- * resolve it (worker/hokage.ts's D1 lookups) and feeds the result back in,
- * for at most MAX_CHAT_STEPS model steps. If step MAX_CHAT_STEPS is *still*
- * a functionCall, one last no-tools turn forces a text answer instead of
- * looping forever; if even that fails, CHAT_FALLBACK_REPLY is returned —
- * per SPEC.md's Phase 10 task, a question never ends without an answer.
+ * returning one or more functionCall parts instead of a final answer —
+ * calls `runTool` for each one and feeds all the results back in, for at
+ * most MAX_CHAT_STEPS tool-enabled model steps. If step MAX_CHAT_STEPS is
+ * *still* a functionCall, one last no-tools turn forces a text answer
+ * instead of looping forever — a 5th possible Gemini call on top of
+ * MAX_CHAT_STEPS, so a single question can cost up to 5 Gemini calls total,
+ * not 4 (see MAX_CHAT_STEPS' own doc comment, and
+ * worker/rate-limit.ts/worker/index.ts's matching cost-control comments).
+ * If even that final turn fails, CHAT_FALLBACK_REPLY is returned — per
+ * SPEC.md's Phase 10 task, a question never ends without an answer.
  *
  * Each model step is gated by geminiQuotaAvailable(env, ip, "chat") first
  * (this file's one exception to "callers check quota" — see this section's
@@ -631,30 +646,42 @@ export async function chatWithTools(
       return { reply: CHAT_FALLBACK_REPLY, toolCalls, limited: false };
     }
 
-    if (!result.functionCall) {
+    if (result.functionCalls.length === 0) {
       return { reply: result.text ?? CHAT_FALLBACK_REPLY, toolCalls, limited: false };
     }
 
-    const { name, args } = result.functionCall;
-    // Echo the candidate's parts back verbatim (not a hand-rebuilt
-    // `[{ functionCall: { name, args } }]`) — Gemini 3 models attach a
-    // `thoughtSignature` to the functionCall part and require it to be
-    // echoed back on the next turn, or the API 400s. Only `name`/`args` are
-    // actually acted on below; `rawParts` is what gets sent back to Gemini.
+    // Echo the candidate's parts back verbatim (not hand-rebuilt
+    // `functionCall` parts) — Gemini 3 models attach a `thoughtSignature` to
+    // each functionCall part and require it to be echoed back on the next
+    // turn, or the API 400s. Only `name`/`args` (below) are actually acted
+    // on; `rawParts` is what gets sent back to Gemini.
     contents.push({ role: "model", parts: result.rawParts });
-    toolCalls.push({ name, args });
 
-    let toolOutput: unknown;
-    try {
-      toolOutput = await runTool(name, args);
-    } catch (err) {
-      // A tool implementation failing (a D1 hiccup, an unrecognized name) is
-      // reported back to the model as a functionResponse, not thrown out of
-      // the loop — the model can apologize or try a different tool instead
-      // of the whole question dying on one bad call.
-      toolOutput = { error: `Tool "${name}" failed: ${(err as Error).message}` };
-    }
-    contents.push({ role: "user", parts: [{ functionResponse: { name, response: { result: toolOutput } } }] });
+    // Gemini requires the turn that follows a model turn with N functionCall
+    // parts to contain exactly N functionResponse parts, all in one turn —
+    // never fewer, and never split across multiple turns. So every call this
+    // step made has to be run and answered together: run them concurrently,
+    // then push one combined "user" turn once they've all settled.
+    const toolResults = await Promise.all(
+      result.functionCalls.map(async ({ name, args }) => {
+        try {
+          return { name, output: await runTool(name, args) };
+        } catch (err) {
+          // A tool implementation failing (a D1 hiccup, an unrecognized
+          // name) is reported back to the model as a functionResponse, not
+          // thrown out of the loop — the model can apologize or try a
+          // different tool instead of the whole question dying on one bad
+          // call.
+          return { name, output: { error: `Tool "${name}" failed: ${(err as Error).message}` } };
+        }
+      }),
+    );
+
+    toolCalls.push(...result.functionCalls);
+    contents.push({
+      role: "user",
+      parts: toolResults.map(({ name, output }) => ({ functionResponse: { name, response: { result: output } } })),
+    });
   }
 
   // Still calling tools after MAX_CHAT_STEPS — one forced final turn with no

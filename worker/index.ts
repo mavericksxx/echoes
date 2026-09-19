@@ -82,8 +82,9 @@ const ROUTE_BUCKETS: Record<string, keyof typeof RATE_LIMIT_RULES> = {
   // cron's job), so it reuses historyStats' generous limit, same as
   // /api/history/daily and /api/wrapped's common case above.
   "/api/weekly-brief": "historyStats",
-  // Phase 10: POST /api/hokage can trigger up to 4 Gemini calls per request
-  // (worker/gemini.ts's chatWithTools) — its own dedicated, tighter bucket.
+  // Phase 10: POST /api/hokage can trigger up to 5 Gemini calls per request
+  // (worker/gemini.ts's chatWithTools: MAX_CHAT_STEPS tool-enabled steps
+  // plus one possible forced final turn) — its own dedicated, tighter bucket.
   // The real daily cost ceiling is worker/hokage.ts's own per-IP question
   // cap (enforced in the handler, not here — see that file's doc comment on
   // why this generic fail-open bucket isn't enough on its own).

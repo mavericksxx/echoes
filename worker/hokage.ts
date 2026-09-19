@@ -297,6 +297,15 @@ async function toolGetWeeklyBrief(env: Env): Promise<ToolResult> {
   };
 }
 
+/** Escapes SQLite LIKE's own special characters (`%`, `_`, and the escape
+ * character itself, `\`) in a raw search term before it's wrapped in `%...%`
+ * — otherwise a visitor typing e.g. "d_" or "50%" in find_artist's `name`
+ * arg would have those chars act as LIKE wildcards instead of literal
+ * characters to match. Paired with `ESCAPE '\'` on the query below. */
+function escapeLikeTerm(term: string): string {
+  return term.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
 /** find_artist(name): fuzzy match over artist_cache. A case-insensitive
  * substring LIKE, ranked by shortest-name-first as a cheap relevance
  * heuristic — not a real fuzzy-distance/FTS search, but this app's whole
@@ -307,8 +316,10 @@ async function toolFindArtist(env: Env, args: Record<string, unknown>): Promise<
   const query = strArg(args, "name");
   if (!query) return { data: { error: "No artist name given." }, slotId: null };
 
-  const { results } = await env.DB.prepare(`SELECT artist_id, name, slot_id FROM artist_cache WHERE LOWER(name) LIKE ? ORDER BY LENGTH(name) ASC LIMIT 5`)
-    .bind(`%${query.toLowerCase()}%`)
+  const { results } = await env.DB.prepare(
+    `SELECT artist_id, name, slot_id FROM artist_cache WHERE LOWER(name) LIKE ? ESCAPE '\\' ORDER BY LENGTH(name) ASC LIMIT 5`,
+  )
+    .bind(`%${escapeLikeTerm(query.toLowerCase())}%`)
     .all<{ artist_id: string; name: string; slot_id: string | null }>();
 
   if (results.length === 0) {
