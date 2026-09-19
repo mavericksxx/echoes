@@ -99,6 +99,9 @@ initSidebar(sidebarRoot, sidebarBackdrop, {
     selectedNpc = null;
     canvas.focus();
   },
+  onFocusSlot: (slotId) => {
+    panCameraToSlot(slotId);
+  },
   onEnterDistrict: (slotId) => {
     closeSidebar();
     enterDistrict(slotId);
@@ -335,11 +338,13 @@ function applyCanvasSize(zoomValue: number): void {
 }
 
 /** Recomputes the resting zoom for the current viewport/mode and applies it.
- * Cancels any in-flight zoom animation — called on mode changes and layout
- * changes (resize, orientation, desktop/phone breakpoint), where whatever
- * the animation was easing toward is no longer meaningful. */
+ * Cancels any in-flight zoom or camera-pan animation — called on mode
+ * changes and layout changes (resize, orientation, desktop/phone
+ * breakpoint), where whatever either animation was easing toward is no
+ * longer meaningful. */
 function fitCanvas(): void {
   zoomAnim = null;
+  panAnim = null;
   const rect = stageArea.getBoundingClientRect();
   const availW = Math.max(1, Math.floor(rect.width));
   const availH = Math.max(1, Math.floor(rect.height));
@@ -473,6 +478,64 @@ function updateZoomAnim(ts: number): void {
   camY = zoomAnim.worldY - (zoomAnim.focalClientY - rect.top) / zoom;
   clampCamera();
   if (t >= 1) zoomAnim = null;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10: camera pan-to-point, reusing zoomAnim's own easing (easeOutCubic
+// over a fixed duration) for a "the Hokage points you toward a district"
+// glide — a separate in-flight animation from zoomAnim above since a focus
+// pan doesn't change zoom at all, just recenters the view.
+// ---------------------------------------------------------------------------
+interface PanAnim {
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  startTs: number;
+}
+let panAnim: PanAnim | null = null;
+// Slower than ZOOM_ANIM_MS (200ms) — a zoom glide only ever re-centers a
+// focal point a short distance, while a focus pan can cross the whole map.
+const PAN_ANIM_MS = 500;
+
+/** Glides the camera to center `worldX,worldY`, village view only (SPEC.md's
+ * Phase 10 task) — a no-op in district view, where there's no single "map"
+ * for a slot's village anchor to mean anything on. */
+function panCameraTo(worldX: number, worldY: number): void {
+  if (mode !== "village") return;
+  const targetX = clampAxis(worldX - viewW / 2, mapW, viewW);
+  const targetY = clampAxis(worldY - viewH / 2, mapH, viewH);
+  if (prefersReducedMotion()) {
+    camX = targetX;
+    camY = targetY;
+    clampCamera();
+    return;
+  }
+  panAnim = { fromX: camX, fromY: camY, toX: targetX, toY: targetY, startTs: performance.now() };
+}
+
+/** Advances the in-flight camera pan (if any), same eased-glide shape as
+ * updateZoomAnim above. Called once per rAF from frame(). */
+function updatePanAnim(ts: number): void {
+  if (!panAnim) return;
+  const t = Math.min(1, (ts - panAnim.startTs) / PAN_ANIM_MS);
+  const e = easeOutCubic(t);
+  camX = panAnim.fromX + (panAnim.toX - panAnim.fromX) * e;
+  camY = panAnim.fromY + (panAnim.toY - panAnim.fromY) * e;
+  clampCamera();
+  if (t >= 1) panAnim = null;
+}
+
+/** Pans to a slot's village anchor (data/village.json's `anchors`, keyed by
+ * character id — same anchor villageNpcs above are placed at). Used by the
+ * Hokage sidebar tab (src/sidebar.ts) after a reply names a focusSlots
+ * district — see initSidebar's onFocusSlot hook. */
+function panCameraToSlot(slotId: string): void {
+  const slot = SLOTS.find((s) => s.district.id === slotId);
+  if (!slot) return;
+  const anchor = VILLAGE.anchors[slot.character.id];
+  if (!anchor) return;
+  panCameraTo(anchor.x, anchor.y);
 }
 
 function screenToWorld(clientX: number, clientY: number): Point {
@@ -962,6 +1025,7 @@ function frame(ts: number): void {
   lastTs = ts;
 
   updateZoomAnim(ts);
+  updatePanAnim(ts);
 
   districtNpcsBySlot.forEach((npc, slotId) => {
     const { energy } = getMoodEnergy(slotId);

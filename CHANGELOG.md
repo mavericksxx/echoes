@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- **Phase 10 — Talk to the Hokage:** chat sidebar tab backed by Gemini function calling over five
+  read-only D1 tools (top artists, recent plays, one district's history, the latest weekly brief,
+  artist lookup); replies pan the camera to the district the answer was about. `POST /api/hokage`
+  (this Worker's first POST route) — 10 questions/IP/day, its own 80-steps/day Gemini sub-cap,
+  exempt from the shared per-IP Gemini cap so one conversation can't starve other AI features for
+  that IP. Never cached (the one accepted exception to "all LLM outputs cached" — it answers a
+  question a visitor just typed).
 - **Phase 9 — Weekly notice board:** the 15-min cron writes a weekly Gemini brief (once per
   Monday–Sunday week, 6h grace after week end, weeks before history began skipped); notice board on
   the village map + sidebar Notice board / This week sections. `/api/weekly-brief`, migration 0009.
