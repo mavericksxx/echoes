@@ -1,9 +1,14 @@
 // Now-playing card (Phase 5a) — a small, display-only HUD card, top-right,
 // showing the owner's live currently-playing track (cover art, title,
 // artist). No transport controls: the user explicitly asked for a view, not
-// a player (SPEC.md). Hidden entirely when nothing is playing; fades in/out
-// via .is-visible (the global prefers-reduced-motion rule in style.css
-// already collapses that transition to near-instant).
+// a player (SPEC.md). Fades in/out via .is-visible (the global
+// prefers-reduced-motion rule in style.css already collapses that
+// transition to near-instant).
+//
+// Phase 13b: hidden entirely only while the account isn't connected at all
+// (nothing to report on) — once connected, "nothing playing" (a private
+// session, a real pause, or Spotify's own 204/null item; see renderIdle's
+// doc comment) shows a clear idle state instead of just disappearing.
 //
 // Polling is adaptive, not a flat interval (SPEC.md's rate-limit decision):
 // ~10s while playing, 15s while idle, and — when the current track is
@@ -25,6 +30,7 @@
 // off the transition instead of a fixed timer.
 
 import { coverPlaceholderGradient } from "./cover-art";
+import { isVillageConnected } from "./listening-source";
 
 const PLAYING_POLL_MS = 10_000;
 const IDLE_POLL_MS = 15_000; // shorter so the "Parth is listening to" card appears soon after playback starts; Spotify load is still bounded by worker/now-playing.ts's 10s shared cache, so visitor count does not multiply Spotify calls
@@ -56,6 +62,13 @@ interface NowPlayingTrack {
 type NowPlayingResponse = { playing: boolean; track: NowPlayingTrack | null };
 
 const NOT_PLAYING: NowPlayingResponse = { playing: false, track: null };
+
+// Phase 13b: a sentinel lastTrackId value for the idle state (see renderIdle)
+// — reuses the same "skip redundant DOM churn on an unchanged render" guard
+// renderTrack already has, just keyed off a fixed string instead of a real
+// track id. Never collides with one: Spotify track ids are base62, this
+// isn't.
+const IDLE_MARKER = "__idle__";
 
 let card: HTMLElement;
 let link: HTMLAnchorElement;
@@ -137,11 +150,14 @@ function renderTrack(track: NowPlayingTrack): void {
   if (track.id === lastTrackId) return;
   lastTrackId = track.id;
 
+  card.classList.remove("now-playing-card--idle");
   link.href = track.spotifyUrl;
+  labelEl.textContent = "Parth is listening to";
   titleEl.textContent = track.title;
   artistEl.textContent = track.artist;
 
   coverEl.innerHTML = "";
+  coverEl.style.background = "";
   if (track.coverUrl) {
     // Cover art unmodified — no crop/filter/overlay, hotlinked straight from
     // i.scdn.co, never re-hosted (SPEC.md's Spotify attribution rules; same
@@ -155,6 +171,27 @@ function renderTrack(track: NowPlayingTrack): void {
   } else {
     coverEl.style.background = coverPlaceholderGradient(`${track.title}|${track.artist}`);
   }
+}
+
+/** Phase 13b edge-state polish: a private session, nothing playing, and
+ * Spotify's own 204/null-item responses are all indistinguishable once they
+ * reach the frontend (worker/now-playing.ts degrades every one of them to
+ * `{playing:false, track:null}` on purpose — see its doc comment). Rather
+ * than just hiding the card (reads as "broken" more than "nothing to see"),
+ * a connected account gets a clear idle state instead; see poll()'s
+ * isVillageConnected() branch for why a *disconnected* visitor still gets
+ * the plain hidden card (there's no account to report on at all). */
+function renderIdle(): void {
+  if (lastTrackId === IDLE_MARKER) return; // already showing it — skip the churn
+  lastTrackId = IDLE_MARKER;
+
+  card.classList.add("now-playing-card--idle");
+  link.removeAttribute("href");
+  labelEl.textContent = "Parth's Spotify";
+  titleEl.textContent = "Not playing right now";
+  artistEl.textContent = "Check back later";
+  coverEl.innerHTML = "";
+  coverEl.style.background = "";
 }
 
 function showCard(): void {
@@ -199,6 +236,12 @@ async function poll(): Promise<void> {
   updateLiveNowPlaying(data);
   if (data.playing && data.track) {
     renderTrack(data.track);
+    showCard();
+  } else if (isVillageConnected()) {
+    // Connected but nothing playing (private session, a real pause, or a
+    // 204/null item — see renderIdle's doc comment) — a clear idle state,
+    // not just an invisible card.
+    renderIdle();
     showCard();
   } else {
     hideCard();

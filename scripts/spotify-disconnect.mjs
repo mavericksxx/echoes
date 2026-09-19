@@ -4,6 +4,13 @@
 // fully disconnect — the site then shows the "not connected" state until
 // `npm run spotify:connect` runs again. See SPEC.md's storage policy
 // ("disconnect deletes every row + the refresh token").
+//
+// Phase 13b: this list is every table migrations/*.sql defines, checked
+// migration-by-migration (0001 through 0010) so a table added by a later
+// phase can't quietly survive a disconnect. agent_event is deleted before
+// agent_run since it has a real FK on agent_run.run_date (migrations/
+// 0010_village_agent.sql) — every other table here has no FK, so the rest
+// of the order is just "grouped by the migration that introduced it".
 "use strict";
 
 import { writeFile, unlink } from "node:fs/promises";
@@ -20,9 +27,16 @@ DELETE FROM spotify_token;
 DELETE FROM artist_cache;
 DELETE FROM usage_log;
 DELETE FROM genre_slot_map;
+DELETE FROM rate_limit_window;
 DELETE FROM play_event;
 DELETE FROM track_cache;
 DELETE FROM history_sync;
+DELETE FROM caption_cache;
+DELETE FROM slot_persona;
+DELETE FROM weekly_brief;
+DELETE FROM agent_event;
+DELETE FROM agent_run;
+DELETE FROM world_state;
 `;
 
 async function main() {
@@ -40,8 +54,9 @@ async function main() {
     await unlink(sqlFile).catch(() => {});
   }
   console.log(
-    "\nDisconnected: spotify_token, artist_cache, usage_log, genre_slot_map, play_event, track_cache, and " +
-      "history_sync are now empty in the remote D1 database.",
+    "\nDisconnected: spotify_token, artist_cache, usage_log, genre_slot_map, rate_limit_window, play_event, " +
+      "track_cache, history_sync, caption_cache, slot_persona, weekly_brief, agent_event, agent_run, and " +
+      "world_state are now empty in the remote D1 database.",
   );
 }
 

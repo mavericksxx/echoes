@@ -1,6 +1,24 @@
 # Changelog
 
 ## Unreleased
+- **Phase 13 (part B) — Show it off:** onboarding, edge-state polish, and a disconnect-script audit,
+  no new dependencies. **Onboarding** (`src/onboarding.ts`, new module): a 3-step first-visit
+  walkthrough (village = Parth's listening, genres as characters/districts, the Hokage/notice
+  board/Chronicle) in a centered, focus-trapped modal — dismissible, "don't show this again"
+  persisted to `localStorage` (try/catch guarded), reopenable any time from the topbar's new "?"
+  button. **Edge states:** an account with no top artists in any district gets a friendly village
+  caption instead of 17 leaders silently idling; the now-playing card shows a clear idle state
+  ("Not playing right now") for a private session, a real pause, or Spotify's own 204/null-item
+  response, instead of just disappearing (still hidden entirely when the account isn't connected at
+  all); the "Live paused" status chip gets a hover tooltip explaining what it means. Left for later
+  (BACKLOG.md): wiring `pausedPayload`'s real history-driven activity into the frontend while
+  live-paused — mixing real activity with sample-data artist rosters needs its own design pass.
+  **Fetch-failure audit:** every sidebar tab with its own fetch (History, Wrapped, Playlists, Notice
+  board/This week, Chronicle) now distinguishes a failed fetch from a genuinely empty result, with a
+  manual Retry action on the failure state — previously both looked like the same blank message.
+  **`scripts/spotify-disconnect.mjs`** now deletes every table migrations 0001–0010 define (added
+  `rate_limit_window`, `caption_cache`, `slot_persona`, `weekly_brief`, `agent_run`, `agent_event`,
+  `world_state` to the existing list), `agent_event` before `agent_run` for its FK.
 - **Phase 13 (part A) — Show it off:** three new controls in the stage chrome, no new dependencies.
   **Snapshot** (`src/capture.ts`) flattens the game canvas and its caption overlay into one PNG
   (`echoes-YYYY-MM-DD.png`), stamped with "Parth is listening to …" when something's live. **Record**
