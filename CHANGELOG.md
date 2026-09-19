@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- **Phase 8.6 (first cut) — Playlists:** sidebar Playlists tab listing the owner's public playlists;
+  opening one shows its cast by genre character. `/api/playlists` + `/api/playlists/{id}` (id must be
+  in the owner's list). Needs a Spotify reconnect for the new playlist scopes.
 - **Phase 7 — Moods and personalities:** Gemini mood/energy per artist tints districts and scales NPC
   walk speed/performing; per-slot personality + dialogue (info card + sidebar Character tab); AI
   captions per song. Moods/personas/captions back off to keep 100/day of the Gemini cap for genre
