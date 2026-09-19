@@ -52,7 +52,7 @@ import {
   isVillageLive,
   refreshVillage,
 } from "./listening-source";
-import { getFestivals, getTimeOfDay, getVisitors, getWeather, initWorldState } from "./world-state";
+import { fetchWorldResponse, getFestivals, getTimeOfDay, getVisitors, getWeather, initWorldState } from "./world-state";
 import { drawFestivalDecor, drawNightGlows, drawTimeOfDayTint, drawWeather } from "./world-render";
 import { onEraChange } from "./era";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
@@ -815,9 +815,14 @@ function villageDrawOrder(): Npc[] {
 /** The tappable/keyboard-selectable NPCs for the current mode, front-to-back
  * (reverse draw order) — a tap or Enter/Space on an overlap should hit
  * whichever sprite is visually on top, not whichever happens first in
- * villageNpcs's underlying array order. */
+ * villageNpcs's underlying array order. Village mode also includes Phase
+ * 11's visitorNpcs, y-sorted together with villageNpcs the same way
+ * renderVillage() draws them, so tapping a visitor opens the sidebar on
+ * their district (openSidebarForNpc falls back to a plain district-open
+ * when a tapped npc has no resident artist of its own, which a visitor npc
+ * never does — see residentArtistByNpc). */
 function interactionPool(): Npc[] {
-  if (mode === "village") return [...villageDrawOrder()].reverse();
+  if (mode === "village") return [...villageDrawOrder(), ...visitorNpcs].sort((a, b) => a.y - b.y).reverse();
   if (currentDistrictId) {
     const leader = districtNpcsBySlot.get(currentDistrictId)!;
     const residents = (residentsBySlot.get(currentDistrictId) ?? []).map((r) => r.npc);
@@ -1189,14 +1194,22 @@ onEraChange(() => {
   })();
 });
 
+// Started here rather than awaited inside the .then() below: GET /api/world
+// doesn't need to know whether the village is connected to be requested
+// (only whether its result gets *used* does — see initWorldState), so
+// there's no reason to wait for loadImages/initListeningSource to finish
+// before kicking it off. world-state.ts's fetchWorldResponse() never throws.
+const worldFetch = fetchWorldResponse();
+
 Promise.all([loadImages(urlsByKey), initListeningSource()]).then(async ([loaded]) => {
   images = loaded;
   setSidebarImages(images);
   bakeRecolors();
   // Phase 11: world state needs isVillageConnected(), only known once
   // initListeningSource() above has resolved — see world-state.ts's doc
-  // comment on why `connected` is passed in rather than read there.
-  await initWorldState(isVillageConnected());
+  // comment on why `connected` is passed in rather than read there. Reuses
+  // the already-in-flight worldFetch above instead of starting a second one.
+  await initWorldState(isVillageConnected(), worldFetch);
   rebuildResidentsAndCrowd();
   rebuildVisitors();
   applyVillageScene();

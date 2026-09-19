@@ -104,13 +104,29 @@ export interface WorldResponse {
   ownerTz: string; // wrangler.jsonc's OWNER_TZ, so the frontend can label times
 }
 
+// timeOfDayFor is called every render frame on the client (src/world-state.ts's
+// getTimeOfDay, read once per frame by src/main.ts's world-effects drawing) —
+// caching one Intl.DateTimeFormat per tz instead of constructing a fresh one
+// on every call avoids needless per-frame allocation. In practice there's
+// only ever one tz in play (wrangler.jsonc's OWNER_TZ), so this map never
+// grows past a single entry.
+const HOUR_FORMATTERS = new Map<string, Intl.DateTimeFormat>();
+
+function hourFormatterFor(tz: string): Intl.DateTimeFormat {
+  let fmt = HOUR_FORMATTERS.get(tz);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hourCycle: "h23" });
+    HOUR_FORMATTERS.set(tz, fmt);
+  }
+  return fmt;
+}
+
 /** Real-clock dawn/day/dusk/night for `tz` at `nowMs`, before any
  * WorldState.timeOfDay override is layered on (see moodFor-style helpers
  * below). Boundaries: dawn 5-7, day 7-17, dusk 17-20, night otherwise —
  * same Intl-in-OWNER_TZ technique as worker/weekly-brief.ts's hourFmt. */
 export function timeOfDayFor(nowMs: number, tz: string): TimeOfDayId {
-  const hourFmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hourCycle: "h23" });
-  const hour = Number(hourFmt.format(new Date(nowMs)));
+  const hour = Number(hourFormatterFor(tz).format(new Date(nowMs)));
   if (hour >= 5 && hour < 7) return "dawn";
   if (hour >= 7 && hour < 17) return "day";
   if (hour >= 17 && hour < 20) return "dusk";

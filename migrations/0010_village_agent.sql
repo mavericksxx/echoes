@@ -32,12 +32,11 @@ CREATE TABLE agent_run (
   summary TEXT NOT NULL -- short in-character line describing what changed, "" if nothing did
 );
 
--- Every tool call the agent made on a given run, accepted or not — Phase
--- 12's chronicle replays a day by walking these in id order. `before`/
--- `after` are the narrow slice of WorldState that one call touched (e.g.
--- just that slot's Timed<ActivityLevel>), not the whole state, so a replay
--- can show a single step's diff without re-deriving it from state_before/
--- state_after.
+-- Every accepted tool call the agent made on a given run — Phase 12's
+-- chronicle replays a day by walking these in id order. `before`/`after` are
+-- the narrow slice of WorldState that one call touched (e.g. just that
+-- slot's Timed<ActivityLevel>), not the whole state, so a replay can show a
+-- single step's diff without re-deriving it from state_before/state_after.
 CREATE TABLE agent_event (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   run_date TEXT NOT NULL REFERENCES agent_run(run_date),
@@ -45,7 +44,7 @@ CREATE TABLE agent_event (
   args TEXT NOT NULL, -- JSON, the tool call's raw arguments as Gemini sent them
   reasoning TEXT NOT NULL, -- short in-character explanation, shown in the chronicle
   before TEXT NOT NULL, -- JSON, the touched slice of WorldState pre-call ("null" if new)
-  after TEXT NOT NULL, -- JSON, the touched slice of WorldState post-call ("null" if rejected)
+  after TEXT NOT NULL, -- JSON, the touched slice of WorldState post-call
   created_at TEXT NOT NULL -- ISO timestamp
 );
 

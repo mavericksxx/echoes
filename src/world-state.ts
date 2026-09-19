@@ -27,17 +27,20 @@ let visitorNames: Record<string, string> = {};
 // getTimeOfDay() can be called before initWorldState() resolves.
 let ownerTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-async function fetchWorld(): Promise<void> {
+/** Starts GET /api/world immediately — src/main.ts kicks this off in
+ * parallel with src/listening-source.ts's initListeningSource() rather than
+ * awaiting it serially after, since this fetch doesn't need to know whether
+ * the village is actually connected (only whether to *use* the result does
+ * — see initWorldState below). Never throws: resolves `null` on any
+ * failure, same silent-degrade-to-no-effects convention this used to have
+ * inline (SPEC.md Phase 11). */
+export async function fetchWorldResponse(): Promise<WorldResponse | null> {
   try {
     const res = await fetch("/api/world");
-    if (!res.ok) return;
-    const payload = (await res.json()) as WorldResponse;
-    rawState = payload.state;
-    visitorNames = payload.visitorNames;
-    ownerTz = payload.ownerTz;
+    if (!res.ok) return null;
+    return (await res.json()) as WorldResponse;
   } catch {
-    // Degrade silently to no effects (SPEC.md Phase 11) — rawState stays
-    // whatever it already was (EMPTY_WORLD on first load).
+    return null;
   }
 }
 
@@ -45,15 +48,21 @@ async function fetchWorld(): Promise<void> {
  * connected, else SAMPLE_WORLD. Call alongside src/listening-source.ts's
  * initListeningSource, passing isVillageConnected() once that's resolved
  * (see this file's doc comment for why `connected` is an argument rather
- * than read here). */
-export async function initWorldState(connected: boolean): Promise<void> {
+ * than read here). `pending`, when given, is a fetchWorldResponse() call
+ * already started earlier (see its own doc comment) — reused here instead
+ * of starting a second, redundant request. */
+export async function initWorldState(connected: boolean, pending?: Promise<WorldResponse | null>): Promise<void> {
   if (!connected) {
     rawState = SAMPLE_WORLD.state;
     visitorNames = SAMPLE_WORLD.visitorNames;
     ownerTz = SAMPLE_WORLD.ownerTz;
     return;
   }
-  await fetchWorld();
+  const payload = await (pending ?? fetchWorldResponse());
+  if (!payload) return; // degrade silently — rawState stays whatever it already was (EMPTY_WORLD on first load)
+  rawState = payload.state;
+  visitorNames = payload.visitorNames;
+  ownerTz = payload.ownerTz;
 }
 
 /** The live-right-now world: effectiveWorld() run again on the client (see

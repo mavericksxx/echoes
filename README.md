@@ -97,9 +97,12 @@ waiting for the next cron tick, e.g. while testing):
 npx wrangler secret put AGENT_TRIGGER_TOKEN
 ```
 
-With it set, `POST /api/world/run` (header `X-Agent-Token: <that value>`,
-optionally `?force=1` to bypass the once-a-day gate) runs the agent inline
-and returns its result. Without it, that route always 404s.
+With it set, `POST /api/world/run` (header `X-Agent-Token: <that value>`)
+runs the agent inline and returns its result. Without it, that route always
+404s. `?force=1` bypasses the once-a-day hour/cooldown gate, but a day
+that's already `ready` still refuses unless `?again=1` is *also* given (so a
+stray or repeated trigger can't accidentally re-run — and re-roll — a day
+that's already done). Neither flag bypasses the Gemini quota itself.
 
 **2. Apply the D1 schema to the remote database** (only needed once, or
 after a new migration is added):

@@ -173,7 +173,12 @@ function periodLines(period: Period): string {
   return `Districts:\n${slotLines}\nTop artists:\n${artistLines}`;
 }
 
-function currentStateLines(effective: EffectiveWorld): string {
+/** `visitorNames` resolves an active visitor's artistId to a display name
+ * (see resolveArtistNames below) — the model should never see a bare
+ * Spotify-style id, same "derived/display fields only" posture as the rest
+ * of this prompt. Falls back to the bare id in the unexpected case a name
+ * didn't resolve (an artist_cache row that's since been pruned/changed). */
+function currentStateLines(effective: EffectiveWorld, visitorNames: Record<string, string>): string {
   const lines: string[] = [];
   lines.push(effective.weather ? `Weather: ${effective.weather.value} (until ${effective.weather.expiresOn})` : "Weather: no override (cycles normally)");
   lines.push(
@@ -188,7 +193,7 @@ function currentStateLines(effective: EffectiveWorld): string {
   );
   lines.push(
     effective.visitors.length > 0
-      ? `Active visitors: ${effective.visitors.map((v) => `${v.value.artistId} in ${v.value.slotId} (until ${v.expiresOn})`).join("; ")}`
+      ? `Active visitors: ${effective.visitors.map((v) => `${visitorNames[v.value.artistId] ?? v.value.artistId} in ${v.value.slotId} (until ${v.expiresOn})`).join("; ")}`
       : "Active visitors: none",
   );
   const activityEntries = Object.entries(effective.activity);
@@ -206,7 +211,7 @@ function currentStateLines(effective: EffectiveWorld): string {
   return lines.join("\n");
 }
 
-function buildPrompt(listening: ListeningSummary, effective: EffectiveWorld, runDate: string): string {
+function buildPrompt(listening: ListeningSummary, effective: EffectiveWorld, visitorNames: Record<string, string>, runDate: string): string {
   return [
     `Today's owner-local date: ${runDate}.`,
     "",
@@ -217,8 +222,23 @@ function buildPrompt(listening: ListeningSummary, effective: EffectiveWorld, run
     periodLines(listening.week),
     "",
     "The village's current state:",
-    currentStateLines(effective),
+    currentStateLines(effective, visitorNames),
   ].join("\n");
+}
+
+/** Resolves artist ids to display names off artist_cache — shared by
+ * buildPrompt's currentStateLines above and GET /api/world's visitorNames
+ * (handleGetWorld below), which both need the exact same join. */
+async function resolveArtistNames(env: Env, artistIds: string[]): Promise<Record<string, string>> {
+  const unique = Array.from(new Set(artistIds));
+  if (unique.length === 0) return {};
+  const placeholders = unique.map(() => "?").join(",");
+  const { results } = await env.DB.prepare(`SELECT artist_id, name FROM artist_cache WHERE artist_id IN (${placeholders})`)
+    .bind(...unique)
+    .all<{ artist_id: string; name: string }>();
+  const out: Record<string, string> = {};
+  for (const r of results) out[r.artist_id] = r.name;
+  return out;
 }
 
 const SYSTEM_PROMPT = [
@@ -241,6 +261,16 @@ const SYSTEM_PROMPT = [
 const REASON_MAX_CHARS = 200;
 const FESTIVAL_NAME_MAX_CHARS = 60;
 
+/** One accepted tool call, buffered rather than written to D1 immediately —
+ * see AgentCtx.events' doc comment for why. */
+interface AgentEventRecord {
+  tool: string;
+  args: Record<string, unknown>;
+  reasoning: string;
+  before: unknown;
+  after: unknown;
+}
+
 interface AgentCtx {
   env: Env;
   runDate: string;
@@ -250,6 +280,13 @@ interface AgentCtx {
   listening: ListeningSummary;
   accepted: number;
   rejected: number;
+  /** Accepted calls this attempt, in order — buffered here instead of
+   * INSERTed as each one happens: agent_event.run_date REFERENCES
+   * agent_run(run_date), so writing one before the agent_run row for today
+   * exists (a fresh day's first accepted call) would violate that foreign
+   * key. runVillageAgentInner flushes these in one env.DB.batch() alongside
+   * the agent_run upsert, ordered so the parent row lands first. */
+  events: AgentEventRecord[];
 }
 
 interface ToolAccept {
@@ -507,30 +544,14 @@ const TOOL_DEFS: ChatToolDef[] = [
   },
 ];
 
-async function writeAgentEvent(
-  env: Env,
-  runDate: string,
-  tool: string,
-  args: Record<string, unknown>,
-  reasoning: string,
-  before: unknown,
-  after: unknown,
-  nowIso: string,
-): Promise<void> {
-  await env.DB.prepare(
-    `INSERT INTO agent_event (run_date, tool, args, reasoning, before, after, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(runDate, tool, JSON.stringify(args), reasoning, JSON.stringify(before), JSON.stringify(after), nowIso)
-    .run();
-}
-
 /** Runs one validated tool call against `ctx.state`, in order — never thrown
  * out to worker/gemini.ts's chatWithTools (every path returns a plain object
  * it forwards to Gemini as the functionResponse). Rejected calls (bad
  * enum/slot, over MAX_ACCEPTED_CALLS_PER_RUN, over MAX_FESTIVALS, an
  * artist_name outside today's summary, ...) are never applied to `ctx.state`
- * and never written to agent_event — only what actually lands in the world
- * gets logged. */
+ * and never buffered into ctx.events — only what actually lands in the world
+ * gets logged. No D1 write happens here — see ctx.events' doc comment; the
+ * actual INSERTs happen once, batched, at the end of the run. */
 async function runTool(ctx: AgentCtx, name: string, args: Record<string, unknown>): Promise<unknown> {
   if (ctx.accepted >= MAX_ACCEPTED_CALLS_PER_RUN) {
     ctx.rejected++;
@@ -549,7 +570,7 @@ async function runTool(ctx: AgentCtx, name: string, args: Record<string, unknown
   }
 
   ctx.accepted++;
-  await writeAgentEvent(ctx.env, ctx.runDate, name, args, result.reason, result.before, result.after, ctx.nowIso);
+  ctx.events.push({ tool: name, args, reasoning: result.reason, before: result.before, after: result.after });
   return { ok: true, message: result.message };
 }
 
@@ -593,13 +614,13 @@ async function loadRawWorldState(env: Env): Promise<WorldState> {
   return row ? parseWorldState(row.state) : structuredClone(EMPTY_WORLD);
 }
 
-async function writeWorldState(env: Env, state: EffectiveWorld, nowIso: string): Promise<void> {
-  await env.DB.prepare(
+/** Builds (doesn't run) the world_state upsert — batched with the writes
+ * below rather than run standalone. */
+function worldStateUpsertStatement(env: Env, state: EffectiveWorld, nowIso: string): D1PreparedStatement {
+  return env.DB.prepare(
     `INSERT INTO world_state (id, state, updated_at) VALUES (1, ?, ?)
      ON CONFLICT(id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`,
-  )
-    .bind(JSON.stringify(state), nowIso)
-    .run();
+  ).bind(JSON.stringify(state), nowIso);
 }
 
 interface AgentRunRow {
@@ -612,13 +633,18 @@ async function readAgentRun(env: Env, runDate: string): Promise<AgentRunRow | nu
   return env.DB.prepare("SELECT status, last_attempt_at, summary FROM agent_run WHERE run_date = ?").bind(runDate).first<AgentRunRow>();
 }
 
-async function upsertAgentRun(
+/** Builds (doesn't run) the agent_run upsert — must be the *first* statement
+ * in the batch below, since agent_event.run_date REFERENCES agent_run
+ * (run_date): the parent row has to exist (or already exist, on a retry)
+ * before any child agent_event row referencing it is inserted in the same
+ * transaction. */
+function agentRunUpsertStatement(
   env: Env,
   runDate: string,
   data: { status: "ready" | "pending"; stateBefore: WorldState; stateAfter: WorldState; summary: string },
   nowIso: string,
-): Promise<void> {
-  await env.DB.prepare(
+): D1PreparedStatement {
+  return env.DB.prepare(
     `INSERT INTO agent_run (run_date, status, last_attempt_at, state_before, state_after, summary)
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(run_date) DO UPDATE SET
@@ -627,9 +653,52 @@ async function upsertAgentRun(
        state_before = excluded.state_before,
        state_after = excluded.state_after,
        summary = excluded.summary`,
-  )
-    .bind(runDate, data.status, nowIso, JSON.stringify(data.stateBefore), JSON.stringify(data.stateAfter), data.summary)
-    .run();
+  ).bind(runDate, data.status, nowIso, JSON.stringify(data.stateBefore), JSON.stringify(data.stateAfter), data.summary);
+}
+
+/** Clears every agent_event row from a *previous* attempt at this same
+ * run_date, so a retry (or a force run) leaves exactly the last attempt's
+ * rows behind rather than accumulating a stale attempt's rows alongside the
+ * new one. Always included in the batch, even when this attempt accepted
+ * zero calls — a previous attempt may still have left rows behind. */
+function agentEventDeleteStatement(env: Env, runDate: string): D1PreparedStatement {
+  return env.DB.prepare("DELETE FROM agent_event WHERE run_date = ?").bind(runDate);
+}
+
+function agentEventInsertStatement(env: Env, runDate: string, event: AgentEventRecord, nowIso: string): D1PreparedStatement {
+  return env.DB.prepare(
+    `INSERT INTO agent_event (run_date, tool, args, reasoning, before, after, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(runDate, event.tool, JSON.stringify(event.args), event.reasoning, JSON.stringify(event.before), JSON.stringify(event.after), nowIso);
+}
+
+/** Flushes one attempt's writes in a single `env.DB.batch()` — a real SQL
+ * transaction, run in array order, so the agent_run upsert lands before any
+ * agent_event row that references it (fixing a foreign-key violation a
+ * fresh day's first accepted call would otherwise hit: agent_event.run_date
+ * REFERENCES agent_run(run_date), and these used to be written as separate,
+ * unordered-with-respect-to-each-other statements). world_state is only
+ * included when `status` is 'ready' — see runVillageAgentInner's own
+ * comment on why a 'pending' run's accepted calls stay logged in
+ * agent_event without yet becoming the live world. Events are flushed
+ * regardless of status (both 'ready' and 'pending' attempts may have
+ * accepted calls worth keeping). */
+async function flushRun(
+  env: Env,
+  runDate: string,
+  status: "ready" | "pending",
+  data: { stateBefore: WorldState; stateAfter: WorldState; summary: string },
+  events: AgentEventRecord[],
+  nowIso: string,
+): Promise<void> {
+  const statements: D1PreparedStatement[] = [
+    agentRunUpsertStatement(env, runDate, { status, ...data }, nowIso),
+    agentEventDeleteStatement(env, runDate),
+    ...events.map((e) => agentEventInsertStatement(env, runDate, e, nowIso)),
+  ];
+  if (status === "ready") {
+    statements.push(worldStateUpsertStatement(env, effectiveWorld(data.stateAfter, Date.parse(nowIso)), nowIso));
+  }
+  await env.DB.batch(statements);
 }
 
 export interface VillageAgentResult {
@@ -648,7 +717,7 @@ function skipResult(runDate: string, status: "skipped" | "ready" | "pending", su
   return { ran: false, runDate, status, summary, acceptedCalls: 0, rejectedCalls: 0 };
 }
 
-async function runVillageAgentInner(env: Env, opts: { force?: boolean }): Promise<VillageAgentResult> {
+async function runVillageAgentInner(env: Env, opts: { force?: boolean; again?: boolean }): Promise<VillageAgentResult> {
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
   const dayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: env.OWNER_TZ, year: "numeric", month: "2-digit", day: "2-digit" });
@@ -659,19 +728,32 @@ async function runVillageAgentInner(env: Env, opts: { force?: boolean }): Promis
     if (Number(hourFmt.format(new Date(nowMs))) < RUN_HOUR_OWNER_LOCAL) {
       return skipResult(runDate, "skipped");
     }
+    // Scoped to *today's* runDate only — a 'pending' row from a previous day
+    // is never looked at again here (no cross-day backfill); its retry
+    // window simply lapsed once the owner-local date rolled over.
     const existing = await readAgentRun(env, runDate);
     if (existing) {
       if (existing.status === "ready") return skipResult(runDate, "ready", existing.summary);
       if (nowMs - Date.parse(existing.last_attempt_at) < RETRY_COOLDOWN_MS) return skipResult(runDate, "pending");
+    }
+  } else {
+    // `force` bypasses the hour/cooldown gates above, but not a day that's
+    // already 'ready' — that still needs `again` too, so `?force=1` alone
+    // (e.g. testing right after a real cron run already landed) can't
+    // accidentally clobber a day that's already done.
+    const existing = await readAgentRun(env, runDate);
+    if (existing?.status === "ready" && !opts.again) {
+      return skipResult(runDate, "ready", existing.summary);
     }
   }
 
   const stateBefore = await loadRawWorldState(env);
   const listening = await buildListeningSummary(env, nowMs);
   const effective = effectiveWorld(stateBefore, nowMs);
+  const visitorNames = await resolveArtistNames(env, effective.visitors.map((v) => v.value.artistId));
 
-  const ctx: AgentCtx = { env, runDate, nowMs, nowIso, state: structuredClone(stateBefore), listening, accepted: 0, rejected: 0 };
-  const history: ChatMessage[] = [{ role: "user", text: buildPrompt(listening, effective, runDate) }];
+  const ctx: AgentCtx = { env, runDate, nowMs, nowIso, state: structuredClone(stateBefore), listening, accepted: 0, rejected: 0, events: [] };
+  const history: ChatMessage[] = [{ role: "user", text: buildPrompt(listening, effective, visitorNames, runDate) }];
 
   const outcome = await chatWithTools(env, "cron", SYSTEM_PROMPT, history, TOOL_DEFS, (name, args) => runTool(ctx, name, args), {
     kind: "agent",
@@ -684,14 +766,10 @@ async function runVillageAgentInner(env: Env, opts: { force?: boolean }): Promis
   const status: "ready" | "pending" = outcome.limited || outcome.failed ? "pending" : "ready";
   const summary = status === "ready" ? sanitizeLabel(outcome.reply, MAX_SUMMARY_CHARS) : "";
 
-  await upsertAgentRun(env, runDate, { status, stateBefore, stateAfter: ctx.state, summary }, nowIso);
-  // Only a 'ready' run's state actually becomes the live world — see this
-  // file's task doc comment / migrations/0010's world_state comment: a
-  // 'pending' run's already-accepted calls are still logged in agent_event
-  // above, just not yet reflected in what GET /api/world serves.
-  if (status === "ready") {
-    await writeWorldState(env, effectiveWorld(ctx.state, nowMs), nowIso);
-  }
+  // One batched transaction — see flushRun's doc comment for why this can't
+  // be separate statements (the agent_event FK bug this fixes) and why
+  // world_state is only included for a 'ready' status.
+  await flushRun(env, runDate, status, { stateBefore, stateAfter: ctx.state, summary }, ctx.events, nowIso);
 
   return { ran: true, runDate, status, summary: status === "ready" ? summary : null, acceptedCalls: ctx.accepted, rejectedCalls: ctx.rejected };
 }
@@ -706,16 +784,18 @@ async function runVillageAgentInner(env: Env, opts: { force?: boolean }): Promis
  *  - Row exists with status 'ready' -> nothing to do, today is done.
  *  - Row exists with status 'pending' -> retried only once RETRY_COOLDOWN_MS
  *    has passed since last_attempt_at.
- *  - `force: true` (POST /api/world/run's `?force=1`) bypasses every gate
- *    above and always attempts a fresh run — but never the Gemini quota
- *    itself (worker/rate-limit.ts's "agent" sub-cap), which chatWithTools
- *    still checks per step regardless.
+ *  - `force: true` (POST /api/world/run's `?force=1`) bypasses the hour and
+ *    cooldown gates above and always attempts a fresh run — but a day
+ *    that's already 'ready' still refuses unless `again: true`
+ *    (`?again=1`) is *also* given, and neither ever bypasses the Gemini
+ *    quota itself (worker/rate-limit.ts's "agent" sub-cap), which
+ *    chatWithTools still checks per step regardless.
  *
  * Never throws — every exit path either returns a result or has already
  * logged, matching worker/weekly-brief.ts's runWeeklyBrief (this rides the
  * same scheduled() tick, right after it — see worker/index.ts).
  */
-export async function runVillageAgent(env: Env, opts: { force?: boolean } = {}): Promise<VillageAgentResult> {
+export async function runVillageAgent(env: Env, opts: { force?: boolean; again?: boolean } = {}): Promise<VillageAgentResult> {
   try {
     return await runVillageAgentInner(env, opts);
   } catch (err) {
@@ -737,16 +817,7 @@ export async function handleGetWorld(env: Env): Promise<Response> {
 
   const raw = stateRow ? parseWorldState(stateRow.state) : structuredClone(EMPTY_WORLD);
   const effective = effectiveWorld(raw, nowMs);
-
-  const artistIds = Array.from(new Set(effective.visitors.map((v) => v.value.artistId)));
-  const visitorNames: Record<string, string> = {};
-  if (artistIds.length > 0) {
-    const placeholders = artistIds.map(() => "?").join(",");
-    const { results } = await env.DB.prepare(`SELECT artist_id, name FROM artist_cache WHERE artist_id IN (${placeholders})`)
-      .bind(...artistIds)
-      .all<{ artist_id: string; name: string }>();
-    for (const r of results) visitorNames[r.artist_id] = r.name;
-  }
+  const visitorNames = await resolveArtistNames(env, effective.visitors.map((v) => v.value.artistId));
 
   const payload: WorldResponse = {
     state: effective,
@@ -778,6 +849,11 @@ export async function handleRunWorld(request: Request, env: Env): Promise<Respon
 
   const url = new URL(request.url);
   const force = url.searchParams.get("force") === "1";
-  const result = await runVillageAgent(env, { force });
+  // `?force=1` alone still refuses a day that's already 'ready' — `?again=1`
+  // has to be given too, so a stray/repeated trigger can't accidentally
+  // re-run (and re-roll) a day that's already done. See runVillageAgent's
+  // doc comment.
+  const again = url.searchParams.get("again") === "1";
+  const result = await runVillageAgent(env, { force, again });
   return Response.json(result);
 }
