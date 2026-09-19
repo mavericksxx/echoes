@@ -34,6 +34,17 @@
             </div>
             <div class="topbar-actions">
               <span class="status-chip" id="statusChip">Not connected</span>
+              <!-- Village-wide panel shortcuts (not gated on connection status,
+                   unlike #topArtistsBtn below) — collapse into #villageBtn
+                   below 1100px (see style.css's .topbar-village-btns rule). -->
+              <div class="topbar-village-btns" id="villageBtnGroup">
+                <button type="button" class="topbar-btn" id="wrappedBtn">Wrapped</button>
+                <button type="button" class="topbar-btn" id="playlistsBtn">Playlists</button>
+                <button type="button" class="topbar-btn" id="noticeBoardBtn">Notice board</button>
+                <button type="button" class="topbar-btn" id="chronicleBtn">Chronicle</button>
+                <button type="button" class="topbar-btn" id="hokageBtn">Hokage</button>
+              </div>
+              <button type="button" class="topbar-btn topbar-btn--village" id="villageBtn">Village</button>
               <button type="button" class="topbar-btn" id="topArtistsBtn" aria-expanded="false" aria-controls="topArtistsPanel" hidden>
                 Top artists
               </button>

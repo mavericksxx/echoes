@@ -72,6 +72,10 @@ interface SidebarHooks {
    * caller (main.ts) owns the camera and decides whether/how to pan (it's a
    * no-op outside village view; see main.ts's panCameraTo). */
   onFocusSlot: (slotId: string) => void;
+  /** Called whenever the active section changes (tab click, open, or
+   * keyboard nav) — the caller uses this to keep its own topbar village
+   * buttons' aria-current in sync with whichever village section is open. */
+  onSectionChange: (sectionId: string) => void;
 }
 
 /** Extra options for openSidebar beyond "which slot" — used when opening from
@@ -102,8 +106,20 @@ let panelHost: HTMLElement;
 let closeBtn: HTMLButtonElement;
 let enterBtn: HTMLButtonElement;
 let villageTodayEl: HTMLElement;
+let villageHeadingEl: HTMLElement;
+let headerTextEl: HTMLElement;
 
-let currentSlot: Slot | null = null;
+/** Which panel is open, if any — a single character's slot (the original
+ * per-district tabs: Overview, Songs, Artists, Character, History, This
+ * week) or the village-wide panel (Wrapped, Playlists, Notice board,
+ * Hokage, Chronicle), opened from the topbar instead of a map character.
+ * Replaces the old `currentSlot: Slot | null` as the "is a panel open at
+ * all" proxy throughout this file — every async re-render guard below now
+ * checks `panel !== null` (with a slot check only where a section actually
+ * needs one), since a village-mode fetch resolving after the panel closed
+ * should no-op just like a slot-mode one always did. */
+export type PanelMode = { kind: "slot"; slot: Slot } | { kind: "village" };
+let panel: PanelMode | null = null;
 let activeSectionId = "overview";
 
 // Songs tab filter/sort state, reset each time a different character opens.
@@ -672,7 +688,7 @@ function loadHistoryDaily(): void {
     historyDaily = data;
     // If the visitor is already looking at the History tab when this
     // resolves, refresh it in place instead of leaving it on "loading".
-    if (currentSlot && activeSectionId === "history") renderSection("history");
+    if (panel && activeSectionId === "history") renderSection("history");
   });
 }
 
@@ -757,7 +773,7 @@ type WrappedRange = "week" | "month" | "year" | "all";
 
 const WRAPPED_RANGES: WrappedRange[] = ["week", "month", "year", "all"];
 const WRAPPED_RANGE_LABELS: Record<WrappedRange, string> = {
-  week: "This week",
+  week: "Week",
   month: "Month",
   year: "Year",
   all: "All time",
@@ -839,7 +855,7 @@ function loadWrapped(range: WrappedRange): void {
     // If the visitor is still on the Wrapped tab looking at this same range
     // when the fetch resolves, refresh it in place instead of leaving it on
     // "loading" (same pattern as loadHistoryDaily above).
-    if (currentSlot && activeSectionId === "wrapped" && wrappedRange === range) renderSection("wrapped");
+    if (panel && activeSectionId === "wrapped" && wrappedRange === range) renderSection("wrapped");
   });
 }
 
@@ -1141,7 +1157,7 @@ function loadPlaylists(): void {
   void fetchPlaylists().then((data) => {
     playlistsInFlight = false;
     playlistsCache = data ?? "error";
-    if (currentSlot && activeSectionId === "playlists") renderSection("playlists");
+    if (panel && activeSectionId === "playlists") renderSection("playlists");
   });
 }
 
@@ -1161,7 +1177,7 @@ function loadPlaylistDetail(id: string): void {
   void fetchPlaylistDetail(id).then((data) => {
     playlistDetailInFlight.delete(id);
     playlistDetailCache.set(id, data ?? "error");
-    if (currentSlot && activeSectionId === "playlists" && selectedPlaylist?.id === id) renderSection("playlists");
+    if (panel && activeSectionId === "playlists" && selectedPlaylist?.id === id) renderSection("playlists");
   });
 }
 
@@ -1458,7 +1474,7 @@ function loadWeeklyBrief(): void {
     // If the visitor is still on one of the two brief-fed tabs when this
     // resolves, refresh it in place instead of leaving it on "loading" (same
     // pattern as loadHistoryDaily/loadWrapped above).
-    if (currentSlot && (activeSectionId === "notice-board" || activeSectionId === "this-week")) renderSection(activeSectionId);
+    if (panel && (activeSectionId === "notice-board" || activeSectionId === "this-week")) renderSection(activeSectionId);
   });
 }
 
@@ -1598,6 +1614,23 @@ function renderNoticeBoard(container: HTMLElement): void {
   renderBriefContent(container, cached.brief);
 }
 
+/** A link back to the village-wide Notice board (SPEC.md's Phase 9) — this
+ * panel only ever shows the current district's own slice of that same
+ * brief, so it's one tap away from the full thing. */
+function appendNoticeBoardLink(container: HTMLElement): void {
+  const line = document.createElement("p");
+  line.className = "history-caption";
+  line.textContent = "From this week's notice board";
+  container.appendChild(line);
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "sidebar-retry-btn";
+  btn.textContent = "Open notice board";
+  btn.addEventListener("click", () => openVillagePanel("notice-board"));
+  container.appendChild(btn);
+}
+
 function renderThisWeek(container: HTMLElement, ctx: SectionContext): void {
   if (!isVillageConnected()) {
     const note = SAMPLE_BRIEF.slotNotes[ctx.slot.district.id];
@@ -1606,12 +1639,14 @@ function renderThisWeek(container: HTMLElement, ctx: SectionContext): void {
       empty.className = "sidebar-empty";
       empty.textContent = "Nothing on the notice board for this district this week.";
       container.appendChild(empty);
+      appendNoticeBoardLink(container);
       return;
     }
     const p = document.createElement("p");
     p.className = "character-personality";
     p.textContent = note;
     container.appendChild(p);
+    appendNoticeBoardLink(container);
     return;
   }
 
@@ -1646,12 +1681,14 @@ function renderThisWeek(container: HTMLElement, ctx: SectionContext): void {
     empty.className = "sidebar-empty";
     empty.textContent = "Nothing on the notice board for this district this week.";
     container.appendChild(empty);
+    appendNoticeBoardLink(container);
     return;
   }
   const p = document.createElement("p");
   p.className = "character-personality";
   p.textContent = note;
   container.appendChild(p);
+  appendNoticeBoardLink(container);
 }
 
 // ---------------------------------------------------------------------------
@@ -1891,7 +1928,7 @@ function loadChronicle(): void {
   void fetchChronicle().then((data) => {
     chronicleInFlight = false;
     chronicleCache = data ?? "error";
-    if (currentSlot && activeSectionId === "chronicle") renderSection("chronicle");
+    if (panel && activeSectionId === "chronicle") renderSection("chronicle");
   });
 }
 
@@ -1969,7 +2006,7 @@ function stopChronicleReplay(): void {
   if (chronicleReplay.timer !== null) clearTimeout(chronicleReplay.timer);
   chronicleReplay = null;
   setReplayState(null, 0);
-  if (currentSlot && activeSectionId === "chronicle") rerenderChronicleKeepingScrollAndFocus(runDate);
+  if (panel && activeSectionId === "chronicle") rerenderChronicleKeepingScrollAndFocus(runDate);
 }
 
 /** Mutates the active day's already-rendered event rows/button in place for
@@ -2003,7 +2040,7 @@ function scheduleChronicleReplayStep(): void {
     }
     replay.stepIndex++;
     setReplayState(replay.states[replay.stepIndex]!, replay.nowMs, replay.visitorNames);
-    if (currentSlot && activeSectionId === "chronicle") updateChronicleReplayDom(replay);
+    if (panel && activeSectionId === "chronicle") updateChronicleReplayDom(replay);
     scheduleChronicleReplayStep();
   }, REPLAY_STEP_MS);
 }
@@ -2157,7 +2194,9 @@ function renderChronicle(container: HTMLElement): void {
   cached.runs.forEach((run) => container.appendChild(buildChronicleDay(run)));
 }
 
-const SECTIONS: Section[] = [
+// Per-character tabs — need a Slot (SectionContext) to render, and only ever
+// show while a district's sidebar (not the village panel) is open.
+const SLOT_SECTIONS: Section[] = [
   { id: "overview", label: "Overview", render: renderOverview },
   { id: "songs", label: "Songs", render: renderSongs },
   { id: "artists", label: "Artists", render: renderArtists },
@@ -2165,21 +2204,32 @@ const SECTIONS: Section[] = [
   { id: "history", label: "History", render: renderHistory },
   // Per-slot, like Character/History above (SPEC.md's Phase 9).
   { id: "this-week", label: "This week", render: renderThisWeek },
-  // Global — deliberately ignores `ctx.slot` (SPEC.md's Phase 8.5: this is
-  // the listener's whole Wrapped, not filtered to whichever character's
-  // sidebar happens to be open).
-  { id: "wrapped", label: "Wrapped", render: (container) => renderWrapped(container) },
-  // Global, same reason as Wrapped above (SPEC.md's Phase 8.6).
-  { id: "playlists", label: "Playlists", render: (container) => renderPlaylists(container) },
-  // Global, same reason as Wrapped/Playlists above (SPEC.md's Phase 9) — the
-  // village's notice board marker (src/main.ts) opens straight to this tab.
-  { id: "notice-board", label: "Notice board", render: (container) => renderNoticeBoard(container) },
-  // Global, same reason as Wrapped/Playlists/Notice board above (SPEC.md's
-  // Phase 10) — a visitor's question isn't scoped to one character either.
-  { id: "hokage", label: "Hokage", render: (container) => renderHokage(container) },
-  // Global, same reason as the tabs above (SPEC.md's Phase 12) — the
-  // village agent's daily decisions aren't scoped to one character either.
-  { id: "chronicle", label: "Chronicle", render: (container) => renderChronicle(container) },
+];
+
+/** Village-wide tabs — opened from the topbar (openVillagePanel), not from a
+ * map character, and rendered with no slot context at all (SPEC.md: none of
+ * these are scoped to one character's district). `heading`, when given,
+ * overrides `label` for the village-mode header (renderChrome below) —
+ * Hokage's tab reads "Hokage" but its header reads "Ask the Hokage". */
+interface VillageSectionDef {
+  id: string;
+  label: string;
+  heading?: string;
+  render: (container: HTMLElement) => void;
+}
+const VILLAGE_SECTIONS: VillageSectionDef[] = [
+  // Deliberately ignores a slot (SPEC.md's Phase 8.5: this is the listener's
+  // whole Wrapped, not filtered to whichever character's sidebar happens to
+  // be open).
+  { id: "wrapped", label: "Wrapped", render: renderWrapped },
+  // Same reason as Wrapped above (SPEC.md's Phase 8.6).
+  { id: "playlists", label: "Playlists", render: renderPlaylists },
+  // Same reason as Wrapped/Playlists above (SPEC.md's Phase 9).
+  { id: "notice-board", label: "Notice board", render: renderNoticeBoard },
+  // Same reason as Wrapped/Playlists/Notice board above (SPEC.md's Phase 10).
+  { id: "hokage", label: "Hokage", heading: "Ask the Hokage", render: renderHokage },
+  // Same reason as the tabs above (SPEC.md's Phase 12).
+  { id: "chronicle", label: "Chronicle", render: renderChronicle },
 ];
 
 // ---------------------------------------------------------------------------
@@ -2191,9 +2241,17 @@ const SECTIONS: Section[] = [
 // on the inactive tabs to reference ids that don't currently exist.
 const PANEL_ID = "sidebar-panel";
 
+/** The tablist's current source of tabs — SLOT_SECTIONS in slot mode,
+ * VILLAGE_SECTIONS in village mode. Only `id`/`label` are used here, so the
+ * differing `render` signatures between the two arrays don't matter. */
+function activeTabDefs(): { id: string; label: string }[] {
+  return panel?.kind === "village" ? VILLAGE_SECTIONS : SLOT_SECTIONS;
+}
+
 function renderTablist(): void {
   tablistEl.innerHTML = "";
-  SECTIONS.forEach((section) => {
+  tablistEl.setAttribute("aria-label", panel?.kind === "village" ? "Village" : "District details");
+  activeTabDefs().forEach((section) => {
     const tab = document.createElement("button");
     tab.type = "button";
     tab.className = "sidebar-tab";
@@ -2217,7 +2275,7 @@ function renderTablist(): void {
 function focusTab(index: number): void {
   const tabs = Array.from(tablistEl.querySelectorAll<HTMLButtonElement>(".sidebar-tab"));
   const clamped = (index + tabs.length) % tabs.length;
-  const section = SECTIONS[clamped];
+  const section = activeTabDefs()[clamped];
   if (!section) return;
   // renderSection() rebuilds the tablist's buttons, so `tabs[clamped]` would
   // be a detached node by the time we could focus it — re-query afterward.
@@ -2228,14 +2286,24 @@ function focusTab(index: number): void {
 
 function renderSection(sectionId: string): void {
   activeSectionId = sectionId;
-  if (!currentSlot) return;
+  if (!panel) return;
+  hooks.onSectionChange(sectionId);
   renderTablist();
   panelHost.innerHTML = "";
   panelHost.id = PANEL_ID;
   panelHost.setAttribute("aria-labelledby", `tab-${sectionId}`);
-  const section = SECTIONS.find((s) => s.id === sectionId) ?? SECTIONS[0]!;
+
+  if (panel.kind === "village") {
+    const section = VILLAGE_SECTIONS.find((s) => s.id === sectionId) ?? VILLAGE_SECTIONS[0]!;
+    villageHeadingEl.textContent = section.heading ?? section.label;
+    section.render(panelHost);
+    return;
+  }
+
+  const slot = panel.slot;
+  const section = SLOT_SECTIONS.find((s) => s.id === sectionId) ?? SLOT_SECTIONS[0]!;
   section.render(panelHost, {
-    slot: currentSlot,
+    slot,
     switchToSongs: (artist) => {
       songsArtistFilter = artist ?? "";
       songsSearch = "";
@@ -2302,6 +2370,7 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
   portraitCanvas.height = 64;
   const headerText = document.createElement("div");
   headerText.className = "sidebar__header-text";
+  headerTextEl = headerText;
   nameEl = document.createElement("h2");
   nameEl.className = "sidebar__name";
   const meta = document.createElement("div");
@@ -2320,10 +2389,18 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
   enterBtn.className = "sidebar__enter";
   enterBtn.textContent = "Enter district";
   enterBtn.addEventListener("click", () => {
-    if (currentSlot) hooks.onEnterDistrict(currentSlot.district.id);
+    if (panel?.kind === "slot") hooks.onEnterDistrict(panel.slot.district.id);
   });
 
-  header.append(portraitCanvas, headerText, enterBtn);
+  // Village mode's header: portrait/name/meta/dialogue/Enter-district above
+  // are all character-scoped and hidden as a group (openVillagePanel), and
+  // this heading — the open village section's name — takes their place.
+  // Same `.sidebar__name` class as `nameEl` so it reads at the same size.
+  villageHeadingEl = document.createElement("h2");
+  villageHeadingEl.className = "sidebar__name";
+  villageHeadingEl.hidden = true;
+
+  header.append(portraitCanvas, headerText, enterBtn, villageHeadingEl);
 
   // Phase 11: "Village today" — see renderVillageToday's doc comment.
   villageTodayEl = document.createElement("div");
@@ -2386,12 +2463,17 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
 
 export function openSidebar(slot: Slot, opts: OpenSidebarOptions = {}): void {
   const isFirstOpen = !root.classList.contains("is-open");
-  const districtChanged = isFirstOpen || currentSlot?.district.id !== slot.district.id;
-  currentSlot = slot;
-  // A fresh open resets everything, including landing back on Overview.
-  // Switching to a different character while the panel stays open resets the
-  // Songs search/filters (they were scoped to the old district) but leaves
-  // whichever tab the user was on alone.
+  const wasVillage = panel?.kind === "village";
+  // A district change — including a fresh open or coming from the village
+  // panel — resets everything, including landing back on Overview. Switching
+  // to a different character while a character's own panel stays open resets
+  // the Songs search/filters (they were scoped to the old district) but
+  // leaves whichever tab the user was on alone.
+  const districtChanged = isFirstOpen || panel?.kind !== "slot" || panel.slot.district.id !== slot.district.id;
+  // Village -> slot: stop any Chronicle replay in progress so the map isn't
+  // left stuck showing a past day once the village panel is gone.
+  if (wasVillage) stopChronicleReplay();
+  panel = { kind: "slot", slot };
   if (districtChanged) {
     songsSearch = "";
     songsArtistFilter = "";
@@ -2403,10 +2485,53 @@ export function openSidebar(slot: Slot, opts: OpenSidebarOptions = {}): void {
     songsSearch = "";
     songsAlbumFilter = "";
   }
-  if (isFirstOpen) activeSectionId = "overview";
+  if (isFirstOpen || wasVillage) activeSectionId = "overview";
   if (opts.section) activeSectionId = opts.section;
   enterBtn.hidden = !opts.showEnter;
+  portraitCanvas.hidden = false;
+  headerTextEl.hidden = false;
+  villageHeadingEl.hidden = true;
   renderHeader(slot);
+  renderVillageToday();
+  renderSection(activeSectionId);
+
+  root.hidden = false;
+  backdrop.hidden = false;
+  requestAnimationFrame(() => {
+    root.classList.add("is-open");
+    backdrop.classList.add("is-open");
+  });
+  root.setAttribute("aria-hidden", "false");
+
+  if (isFirstOpen) {
+    const activeTab = tablistEl.querySelector<HTMLButtonElement>('[aria-selected="true"]');
+    (activeTab ?? closeBtn).focus();
+  }
+}
+
+/** Opens the village-wide panel (Wrapped/Playlists/Notice board/Hokage/
+ * Chronicle) from the topbar — see PanelMode's doc comment. `section`
+ * defaults to "wrapped", same as openSidebar defaulting a first open to
+ * Overview. */
+export function openVillagePanel(section = "wrapped"): void {
+  const isFirstOpen = !root.classList.contains("is-open");
+  const kindChanged = isFirstOpen || panel?.kind !== "village";
+  panel = { kind: "village" };
+  // Same district-change reset as openSidebar's, whenever the panel's kind
+  // actually changes (a slot's Songs filters mean nothing here, but the
+  // reset is cheap and keeps the two entry points symmetric).
+  if (kindChanged) {
+    songsSearch = "";
+    songsArtistFilter = "";
+    songsAlbumFilter = "";
+    songsSort = "plays";
+    activeSectionId = "wrapped";
+  }
+  activeSectionId = section;
+  portraitCanvas.hidden = true;
+  headerTextEl.hidden = true;
+  enterBtn.hidden = true;
+  villageHeadingEl.hidden = false;
   renderVillageToday();
   renderSection(activeSectionId);
 
@@ -2434,7 +2559,7 @@ export function close(): void {
   root.classList.remove("is-open");
   backdrop.classList.remove("is-open");
   root.setAttribute("aria-hidden", "true");
-  currentSlot = null;
+  panel = null;
   window.setTimeout(() => {
     if (!root.classList.contains("is-open")) {
       root.hidden = true;
@@ -2449,7 +2574,7 @@ export function isSidebarOpen(): boolean {
 }
 
 export function sidebarSlotId(): string | null {
-  return currentSlot?.district.id ?? null;
+  return panel?.kind === "slot" ? panel.slot.district.id : null;
 }
 
 /** Re-renders whichever section is currently showing, if the sidebar is
@@ -2458,15 +2583,16 @@ export function sidebarSlotId(): string | null {
  * src/listening-source.ts's village data has already moved on. A no-op if
  * the sidebar is closed (nothing to refresh). */
 export function refreshSidebarContent(): void {
-  if (!currentSlot) return;
+  if (!panel) return;
   // Phase 8b: an era change can fetch an entirely different artist roster —
   // if the Songs tab's artist filter (an id, set from a resident/artist row
   // tap — see renderSongs's synthetic-option comment above) no longer
   // exists in the new era, drop it. Left alone, the control would silently
   // reset its *displayed* value to "All artists" while songsArtistFilter
   // stayed pointed at the vanished id, filtering the list down to nothing
-  // with no visible way to clear it.
-  if (songsArtistFilter && !getArtists(currentSlot.district.id).some((a) => a.id === songsArtistFilter)) {
+  // with no visible way to clear it. Village mode has no district to check
+  // against, so this only applies in slot mode.
+  if (panel.kind === "slot" && songsArtistFilter && !getArtists(panel.slot.district.id).some((a) => a.id === songsArtistFilter)) {
     songsArtistFilter = "";
   }
   renderSection(activeSectionId);
