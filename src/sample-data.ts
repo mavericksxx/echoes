@@ -483,6 +483,30 @@ export const SAMPLE_BRIEF: SampleBrief = {
   ],
 };
 
+// ---------------------------------------------------------------------------
+// Hokage (Phase 10) — the offline/not-connected fallback for the chat tab.
+// Unlike every other sample-data section above, this isn't real content the
+// real UI renders verbatim (a chat reply is written for a specific question,
+// which sample mode has none of) — it's one fixed scripted reply shown for
+// whatever a visitor types, same "sample mode keeps working, but with
+// necessarily fake content" convention SAMPLE_BRIEF/SAMPLE_PLAYLISTS follow,
+// just collapsed to a single line since there's no real question/answer
+// pairing to fake. No network call is made for it (src/sidebar.ts).
+// ---------------------------------------------------------------------------
+export interface SampleHokageReply {
+  reply: string;
+  /** Always naruto — a genuinely arbitrary "closest thing" pick, same as
+   * openNoticeBoard's SLOTS[0] fallback in src/main.ts, since sample mode
+   * has no real tool call to derive one from. */
+  focusSlot: string;
+}
+
+export const SAMPLE_HOKAGE_REPLY: SampleHokageReply = {
+  reply:
+    "Ah, a visitor. In this quiet hour I can only speak in generalities — but connect your Spotify and I'll read the real leaves of your listening. For now: the Naruto district has always carried this village's loudest days.",
+  focusSlot: "naruto",
+};
+
 /**
  * Picks a slot id at random, weighted by playShare. Falls back to a uniform
  * pick across all slots if every share is 0. Used to drive which character

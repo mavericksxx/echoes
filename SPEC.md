@@ -666,6 +666,70 @@ handwritten brief exercising every field, same convention as Phase 8.6's `SAMPLE
 
 **You'll see:** ask a question about your listening → a real data-backed answer.
 
+**Built (2026-09-19).** `worker/hokage.ts` handles `POST /api/hokage` — this Worker's first POST
+route. Every other route stays GET-only; this one 405s any other method, caps the raw body at ~8KB
+before it's ever handed to `JSON.parse`, and validates the shape server-side —
+`{messages: [{role: "user"|"model", text}]}`, at most 8 messages, each text ≤500 chars, the last
+one always the visitor's own turn — 400ing anything else rather than best-effort coercing it.
+
+`worker/gemini.ts` gains `chatWithTools`, its own request/response loop for Gemini's function
+calling (a second response shape `generateJson` can't parse — a `functionCall` part instead of
+text — so it gets its own parser, `callGeminiStep`). Function-calling support on `MODEL_ID`
+(`gemini-3.5-flash-lite`) is assumed, not independently verified the way the model id itself was.
+The loop runs at most 4 model steps; if step 4 is still a function call, one final turn with no
+`tools` forces a text answer, and if even that fails, an in-character canned line is returned — a
+question never ends without *some* answer. `chatWithTools` is the one place in `gemini.ts` that
+checks Gemini quota and logs each call itself (every other function here leaves that to its
+caller), because its own internal multi-step loop needs to gate/log *per step*, not once around a
+single outside call.
+
+`worker/hokage.ts` owns the fixed, in-character system prompt (names the village, forbids the
+words "Spotify"/"app"/"database", states that history begins 2026-09-18, and instructs the model to
+never invent a fact a tool hasn't actually returned) and five read-only D1 tools, none of which
+ever touch Spotify live: `get_top_artists(days)` (a `play_event` × `artist_cache` GROUP BY, same
+shape as `worker/history-query.ts`, but a plain lookback window rather than a Spotify-style range
+enum), `get_recent_plays(limit ≤ 20)`, `get_slot_history(slot, days)` (reuses
+`worker/history-daily.ts`'s owner-local day-bucketing technique for one slot instead of all 17),
+`get_weekly_brief()` (reuses `worker/weekly-brief.ts`'s own `loadLatestReadyBrief`, now exported,
+instead of duplicating its names-joined-at-read-time logic), and `find_artist(name)` (a
+case-insensitive `LIKE` scan over `artist_cache` — a real fuzzy-match/FTS setup is more than this
+one personal account's table needs). Every tool returns only trimmed, derived fields to Gemini, plus
+(separately, never sent to Gemini) which district it's most "about" — the handler collects these
+into the response's `focusSlots`, deduplicated, in call order.
+
+Cost control (SPEC.md's "AI cost control"): a new non-core `GeminiCallKind` `"chat"`
+(`worker/rate-limit.ts`) backs off from the shared reserve like brief/persona, gets its own global
+80-steps/day sub-cap, and — unlike every other kind — is exempt from the shared per-IP Gemini cap,
+because one multi-step conversation could otherwise burn through it in a single question and starve
+every *other* Gemini feature for that same IP for the rest of the day. Separately, and enforced in
+the handler itself rather than through the generic per-minute `RATE_LIMIT_RULES` bucket (which
+deliberately fails open on a D1 hiccup — the wrong direction for a cost-control cap), each IP gets
+10 questions/day, counted as its own `usage_log` endpoint (`'hokage:question'`) rather than folded
+into the `'gemini:%'` rows the Gemini caps already scan. A `'hokage'` `RATE_LIMIT_RULES` entry still
+adds ordinary per-minute burst protection on top. Over *any* cap — the question cap or a Gemini quota
+mid-conversation — the response is still HTTP 200 with an in-character canned line and
+`limited: true`, never an error status.
+
+Response `{reply, focusSlots, remaining, limited?}` is never cached — the one accepted exception to
+"all LLM outputs cached" (documented in `worker/hokage.ts`'s header): it answers a question a
+visitor just typed, never something loaded with the page, and there's nothing sane to key a cache
+on besides the whole conversation.
+
+Frontend: a new global **Hokage** sidebar tab (`src/sidebar.ts`, pushed onto `SECTIONS` the same way
+Notice board/Wrapped are) with a chat log (mission-scroll bubbles — ink-filled for the visitor,
+paper for the Hokage), a text input + Send button in a `<form>` (Enter submits for free, no extra
+keydown wiring — and typing in it never reaches `main.ts`'s canvas/arrow-key handlers, which already
+guard on `isFormField`), 4 suggested-question chips (hidden once the conversation starts), a
+"N questions left today" line, and explicit loading ("the Hokage is thinking…"), error, and limited
+states. Conversation history lives in a module-level array in `src/sidebar.ts` — kept across
+sidebar opens/tab switches, only the last 8 turns are ever sent. A reply's `focusSlots[0]`, if any,
+pans the camera to that slot's village anchor via a new `panCameraTo`/`panCameraToSlot` pair in
+`src/main.ts` (reuses `updateZoomAnim`'s `easeOutCubic` glide shape as its own independent
+animation — a focus pan doesn't touch zoom), wired through a new `onFocusSlot` `SidebarHooks`
+callback; a no-op outside village view. Sample-data mode (`!isVillageConnected()`) shows one fixed
+scripted reply (`src/sample-data.ts`'s `SAMPLE_HOKAGE_REPLY`) for whatever's typed and makes no
+network call, same convention as `SAMPLE_BRIEF`.
+
 ### Phase 11 — The village evolves itself (agent #2)
 - Daily cron agent with tools `set_district_activity`, `set_weather`, `start_festival`, `set_time_of_day`, `send_visitor`, `set_character_mood`; validated diffs stored in `agent_event`.
 - Weather/festival/time-of-day rendering needed for those tools.

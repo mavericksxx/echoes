@@ -1529,6 +1529,154 @@ select {
   margin: 0 0 var(--space-1);
 }
 
+/* ---- Hokage chat (Phase 10) ---- */
+/* Unlike every other sidebar tab, this one owns its tab's full height as a
+   flex column (message log scrolls internally, chips/remaining/input stay
+   put) rather than letting .sidebar-panel's own scroll handle overflow —
+   see src/sidebar.ts's renderHokage doc comment. */
+.hokage-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.hokage-log {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.hokage-bubble {
+  max-width: 85%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* Visitor's own turn — ink-filled, right-aligned, same "filled = the active
+   thing" language as .sidebar-tab[aria-selected="true"]/.sidebar__enter. */
+.hokage-bubble--user {
+  align-self: flex-end;
+  background: var(--ink);
+  color: var(--paper);
+  border-bottom-right-radius: var(--radius-sm);
+}
+
+/* The Hokage's own turn — paper-2, left-aligned. */
+.hokage-bubble--model {
+  align-self: flex-start;
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+.hokage-bubble--thinking {
+  color: var(--color-text-faint);
+  font-style: italic;
+}
+
+.hokage-note {
+  font-size: var(--text-xs);
+  margin: var(--space-1) 0 0;
+}
+.hokage-note--error {
+  color: var(--seal-deep);
+}
+.hokage-note--limited {
+  color: var(--color-text-faint);
+}
+
+.hokage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: var(--space-2) 0;
+  flex: none;
+}
+
+/* Outlined ink, same "range button" language as .ta-range-btn — but never
+   filled/"active": these are one-shot prompts, not a toggled selection. */
+.hokage-chip {
+  appearance: none;
+  border: 1.5px solid var(--color-border-strong);
+  background: none;
+  color: var(--color-text);
+  font-family: var(--font-body);
+  border-radius: var(--radius-pill);
+  padding: 6px var(--space-3);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  min-height: 32px;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+.hokage-chip:hover {
+  border-color: var(--ink);
+}
+
+.hokage-remaining {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  margin: 0 0 var(--space-2);
+}
+
+.hokage-inputrow {
+  flex: none;
+  display: flex;
+  gap: var(--space-2);
+  padding-bottom: var(--space-1);
+}
+
+.hokage-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+}
+.hokage-input::placeholder {
+  color: var(--color-text-faint);
+}
+.hokage-input:disabled {
+  opacity: 0.6;
+}
+
+.hokage-send {
+  flex: none;
+  appearance: none;
+  min-height: 40px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  border: none;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+.hokage-send:hover:not(:disabled) {
+  background: var(--wood-dark);
+}
+.hokage-send:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* ==========================================================================
    Desktop: the sidebar becomes a floating glass panel inset over the map
    (position: absolute, 16px inset, 400px wide) instead of a full-screen

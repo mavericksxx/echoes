@@ -508,8 +508,10 @@ function safeParseJson<T>(text: string, fallback: T): T {
 /** The most recent 'ready' brief, or null before the first one exists.
  * Deliberately not "the latest complete week's row regardless of status" —
  * a 'pending' week (still retrying) falls through to the last real brief
- * instead of the notice board going blank while a retry is outstanding. */
-async function loadLatestReadyBrief(env: Env): Promise<WeeklyBriefOut | null> {
+ * instead of the notice board going blank while a retry is outstanding.
+ * Exported (Phase 10) so worker/hokage.ts's get_weekly_brief tool can reuse
+ * this exact read + artist-name-join instead of duplicating it. */
+export async function loadLatestReadyBrief(env: Env): Promise<WeeklyBriefOut | null> {
   const row = await env.DB.prepare(
     "SELECT week_start, headline, notes, slot_notes, stats, generated_at FROM weekly_brief WHERE status = 'ready' ORDER BY week_start DESC LIMIT 1",
   ).first<BriefRow>();

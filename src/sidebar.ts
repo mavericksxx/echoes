@@ -10,6 +10,7 @@ import { SLOTS, type Slot } from "../data/loader";
 import { drawPortrait, type ImageMap } from "./render";
 import {
   SAMPLE_BRIEF,
+  SAMPLE_HOKAGE_REPLY,
   SAMPLE_NOW,
   SAMPLE_PLAYLISTS,
   getSamplePlaylist,
@@ -55,6 +56,10 @@ interface SidebarHooks {
   /** Called when "Enter district" is clicked — the caller (main.ts) owns the
    * village⇄district scene transition. */
   onEnterDistrict: (slotId: string) => void;
+  /** Phase 10: called after a Hokage reply names a focusSlots district — the
+   * caller (main.ts) owns the camera and decides whether/how to pan (it's a
+   * no-op outside village view; see main.ts's panCameraTo). */
+  onFocusSlot: (slotId: string) => void;
 }
 
 /** Extra options for openSidebar beyond "which slot" — used when opening from
@@ -1531,6 +1536,202 @@ function renderThisWeek(container: HTMLElement, ctx: SectionContext): void {
   container.appendChild(p);
 }
 
+// ---------------------------------------------------------------------------
+// Hokage (Phase 10 — SPEC.md's "Talk to the Hokage"). Global, same
+// deliberately-ignores-ctx.slot convention as Wrapped/Playlists/Notice board
+// above — a visitor's question isn't scoped to whichever character's header
+// happens to be showing. Conversation state lives at module scope (not
+// reset on sidebar close/reopen, unlike the Songs filters) so switching tabs
+// or characters mid-conversation doesn't lose it — only a full page reload
+// does, same "in memory on the client" rule SPEC.md's task calls for.
+// ---------------------------------------------------------------------------
+interface HokageTurn {
+  role: "user" | "model";
+  text: string;
+}
+interface HokageResponse {
+  reply: string;
+  focusSlots: string[];
+  remaining: number;
+  limited?: boolean;
+}
+
+// Mirrors worker/hokage.ts's own MAX_MESSAGES/QUESTION_DAILY_CAP — kept in
+// sync by hand (small, stable constants on both sides) rather than shared
+// across the fetch boundary.
+const HOKAGE_MAX_HISTORY_TURNS = 8;
+const HOKAGE_DAILY_QUESTION_CAP = 10;
+
+const HOKAGE_SUGGESTIONS = [
+  "What have I been listening to this week?",
+  "Who's my most-played artist lately?",
+  "Any brand-new artists I've picked up recently?",
+  "Tell me about the Emo/Alt district.",
+];
+
+let hokageHistory: HokageTurn[] = [];
+// null until the first real response tells us the true count — the input
+// row shows HOKAGE_DAILY_QUESTION_CAP itself until then (see renderHokage).
+let hokageRemaining: number | null = null;
+let hokageBusy = false;
+let hokageError = false;
+let hokageLimited = false;
+
+async function fetchHokage(messages: HokageTurn[]): Promise<HokageResponse | null> {
+  try {
+    const res = await fetch("/api/hokage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as HokageResponse;
+  } catch {
+    return null;
+  }
+}
+
+/** Refocuses the chat input after a state change re-renders the tab (the
+ * whole panel's DOM is rebuilt each time — see renderSection) — mirrors
+ * why renderSongs' controls need rerenderPreservingFocus, but simpler:
+ * nothing here re-renders mid-keystroke (typing itself never triggers a
+ * render), only on send/receive, and the field is always empty right after
+ * one of those, so there's no caret position worth restoring. A no-op while
+ * the input is disabled (busy/out of questions) — focus() on a disabled
+ * field is silently ignored by the browser anyway. */
+function focusHokageInput(): void {
+  panelHost.querySelector<HTMLInputElement>(".hokage-input")?.focus();
+}
+
+function sendHokageMessage(rawText: string): void {
+  const text = rawText.trim();
+  if (!text || hokageBusy) return;
+
+  hokageHistory.push({ role: "user", text });
+  hokageBusy = true;
+  hokageError = false;
+  hokageLimited = false;
+  renderSection("hokage");
+  focusHokageInput();
+
+  if (!isVillageConnected()) {
+    // Sample mode: one scripted reply, no network call (SAMPLE_BRIEF's
+    // convention) — see src/sample-data.ts's SAMPLE_HOKAGE_REPLY doc comment.
+    hokageHistory.push({ role: "model", text: SAMPLE_HOKAGE_REPLY.reply });
+    hokageBusy = false;
+    renderSection("hokage");
+    focusHokageInput();
+    hooks.onFocusSlot(SAMPLE_HOKAGE_REPLY.focusSlot);
+    return;
+  }
+
+  const sent = hokageHistory.slice(-HOKAGE_MAX_HISTORY_TURNS);
+  void fetchHokage(sent).then((data) => {
+    hokageBusy = false;
+    if (!data) {
+      hokageError = true;
+      renderSection("hokage");
+      focusHokageInput();
+      return;
+    }
+    hokageHistory.push({ role: "model", text: data.reply });
+    hokageRemaining = data.remaining;
+    hokageLimited = Boolean(data.limited);
+    renderSection("hokage");
+    focusHokageInput();
+    if (data.focusSlots.length > 0) hooks.onFocusSlot(data.focusSlots[0]!);
+  });
+}
+
+function buildHokageBubble(turn: HokageTurn): HTMLElement {
+  const bubble = document.createElement("div");
+  bubble.className = `hokage-bubble hokage-bubble--${turn.role}`;
+  bubble.textContent = turn.text;
+  return bubble;
+}
+
+function renderHokage(container: HTMLElement): void {
+  container.classList.add("hokage-panel");
+
+  const log = document.createElement("div");
+  log.className = "hokage-log";
+  if (hokageHistory.length === 0) {
+    const intro = document.createElement("p");
+    intro.className = "sidebar-empty";
+    intro.textContent = "Ask the Hokage anything about your listening.";
+    log.appendChild(intro);
+  } else {
+    hokageHistory.forEach((turn) => log.appendChild(buildHokageBubble(turn)));
+  }
+  if (hokageBusy) {
+    const thinking = document.createElement("div");
+    thinking.className = "hokage-bubble hokage-bubble--model hokage-bubble--thinking";
+    thinking.textContent = "The Hokage is thinking…";
+    log.appendChild(thinking);
+  }
+  if (hokageError) {
+    const err = document.createElement("p");
+    err.className = "hokage-note hokage-note--error";
+    err.textContent = "Couldn't reach the Hokage just now — try again in a moment.";
+    log.appendChild(err);
+  }
+  container.appendChild(log);
+
+  if (hokageHistory.length === 0) {
+    const chips = document.createElement("div");
+    chips.className = "hokage-chips";
+    HOKAGE_SUGGESTIONS.forEach((q) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "hokage-chip";
+      chip.textContent = q;
+      chip.addEventListener("click", () => sendHokageMessage(q));
+      chips.appendChild(chip);
+    });
+    container.appendChild(chips);
+  }
+
+  if (hokageLimited) {
+    const limited = document.createElement("p");
+    limited.className = "hokage-note hokage-note--limited";
+    limited.textContent = "The Hokage needs to rest — full answers will return soon.";
+    container.appendChild(limited);
+  }
+
+  const remainingValue = hokageRemaining ?? HOKAGE_DAILY_QUESTION_CAP;
+  const remainingLine = document.createElement("p");
+  remainingLine.className = "hokage-remaining";
+  remainingLine.textContent = `${remainingValue} question${remainingValue === 1 ? "" : "s"} left today`;
+  container.appendChild(remainingLine);
+
+  const disabled = hokageBusy || remainingValue <= 0;
+  const form = document.createElement("form");
+  form.className = "hokage-inputrow";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "hokage-input";
+  input.placeholder = remainingValue <= 0 ? "Come back tomorrow…" : "Ask the Hokage…";
+  input.maxLength = 500;
+  input.disabled = disabled;
+  input.setAttribute("aria-label", "Ask the Hokage a question");
+
+  const send = document.createElement("button");
+  send.type = "submit";
+  send.className = "hokage-send";
+  send.textContent = "Send";
+  send.disabled = disabled;
+
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    sendHokageMessage(input.value);
+  });
+
+  form.append(input, send);
+  container.appendChild(form);
+
+  log.scrollTop = log.scrollHeight;
+}
+
 const SECTIONS: Section[] = [
   { id: "overview", label: "Overview", render: renderOverview },
   { id: "songs", label: "Songs", render: renderSongs },
@@ -1548,6 +1749,9 @@ const SECTIONS: Section[] = [
   // Global, same reason as Wrapped/Playlists above (SPEC.md's Phase 9) — the
   // village's notice board marker (src/main.ts) opens straight to this tab.
   { id: "notice-board", label: "Notice board", render: (container) => renderNoticeBoard(container) },
+  // Global, same reason as Wrapped/Playlists/Notice board above (SPEC.md's
+  // Phase 10) — a visitor's question isn't scoped to one character either.
+  { id: "hokage", label: "Hokage", render: (container) => renderHokage(container) },
 ];
 
 // ---------------------------------------------------------------------------

@@ -51,6 +51,15 @@ export const RATE_LIMIT_RULES: Record<string, RateLimitRule> = {
   // only — worker/genre-resolution.ts), same reasoning as `village` above,
   // so it gets the same stricter limit.
   playlistDetail: { windowSeconds: 60, max: 20 },
+  // Phase 10: burst protection for POST /api/hokage, on top of (not instead
+  // of) the harder per-IP-per-day question cap worker/hokage.ts enforces
+  // itself against usage_log's 'hokage:question' rows — this generic bucket
+  // fails open on a D1 hiccup (see fetch() below), which is fine for
+  // abuse-shaping but not tight enough on its own to be the real cost
+  // control for an endpoint that can burn up to 4 Gemini calls per request.
+  // A tighter window/max than the other Gemini-triggering buckets above
+  // since one question can cost several model steps, not one.
+  hokage: { windowSeconds: 60, max: 6 },
 };
 
 function bucketKey(ip: string, bucket: string, windowStart: number): string {
@@ -107,33 +116,55 @@ export async function enforceRateLimit(env: Env, ip: string, bucket: string, rul
 // are the core slot-resolution pipeline everything else in the village
 // depends on (worker/genre-resolution.ts, worker/history.ts's cron) — they
 // always get the full global/per-IP caps below. "moods"/"persona"/
-// "captions"/"brief" are all additive features layered on top, and unlike
-// slot resolution, captions in particular scale with *listening volume*
-// (one call per newly-seen track, not per artist) rather than with how many
-// distinct artists/genres exist — a busy listening day could otherwise burn
-// through the shared global cap and starve slot resolution for everyone.
-// So those kinds back off from a reserved slice instead of the raw cap, and
-// captions additionally gets its own tighter sub-cap (below) on top of that
-// shared backoff. "brief" (Phase 9) is inherently rare — at most once per
-// week, plus the occasional retry (worker/weekly-brief.ts's
-// RETRY_COOLDOWN_MS) — so it needs no sub-cap of its own.
+// "captions"/"brief"/"chat" are all additive features layered on top, and
+// unlike slot resolution, captions in particular scale with *listening
+// volume* (one call per newly-seen track, not per artist) rather than with
+// how many distinct artists/genres exist — a busy listening day could
+// otherwise burn through the shared global cap and starve slot resolution
+// for everyone. So those kinds back off from a reserved slice instead of the
+// raw cap, and captions/chat additionally get their own tighter sub-cap
+// (below) on top of that shared backoff. "brief" (Phase 9) is inherently
+// rare — at most once per week, plus the occasional retry
+// (worker/weekly-brief.ts's RETRY_COOLDOWN_MS) — so it needs no sub-cap of
+// its own. "chat" (Phase 10 — worker/hokage.ts) is exempt from the per-IP
+// cap below entirely: it's a *multi-step* conversation (worker/gemini.ts's
+// chatWithTools runs up to 4 model steps per question), so one chatty
+// visitor could otherwise burn through GEMINI_DAILY_PER_IP_CAP in a single
+// question and starve every *other* Gemini feature for that same IP for the
+// rest of the day; its own dedicated per-IP question cap
+// (worker/hokage.ts's QUESTION_DAILY_CAP, enforced against usage_log's
+// 'hokage:question' rows, not this file's 'gemini:%' ones) is what actually
+// bounds one visitor's chat cost.
 // ---------------------------------------------------------------------------
 export const GEMINI_DAILY_GLOBAL_CAP = 300;
 export const GEMINI_DAILY_PER_IP_CAP = 40;
 // Headroom reserved for "genres"/"artists" (slot resolution) — non-core
-// kinds ("moods"/"persona"/"captions") may only use the global cap down to
-// GEMINI_DAILY_GLOBAL_CAP - GEMINI_DAILY_CORE_RESERVE, never past it.
+// kinds ("moods"/"persona"/"captions"/"chat") may only use the global cap
+// down to GEMINI_DAILY_GLOBAL_CAP - GEMINI_DAILY_CORE_RESERVE, never past it.
 export const GEMINI_DAILY_CORE_RESERVE = 100;
 // Dedicated daily ceiling for "captions" specifically, on top of (not
 // instead of) the reserve-adjusted global cap above — the one kind whose
 // volume tracks listening activity rather than distinct-artist/genre count.
 export const GEMINI_DAILY_CAPTIONS_CAP = 60;
+// Dedicated daily ceiling for "chat" model *steps* (not questions — a single
+// question can cost up to 4 steps, worker/gemini.ts's chatWithTools) across
+// every visitor combined, same "on top of the shared reserve" role as
+// GEMINI_DAILY_CAPTIONS_CAP above.
+export const GEMINI_DAILY_CHAT_STEPS_CAP = 80;
 
-export type GeminiCallKind = "genres" | "artists" | "moods" | "persona" | "captions" | "brief";
+export type GeminiCallKind = "genres" | "artists" | "moods" | "persona" | "captions" | "brief" | "chat";
 
 const CORE_KINDS: ReadonlySet<GeminiCallKind> = new Set(["genres", "artists"]);
 
-function startOfUtcDayIso(): string {
+/** Kinds exempt from GEMINI_DAILY_PER_IP_CAP below — see "chat"'s doc
+ * comment in this file's header block for why. */
+const PER_IP_CAP_EXEMPT_KINDS: ReadonlySet<GeminiCallKind> = new Set(["chat"]);
+
+// Exported so worker/hokage.ts's own per-IP daily question cap (a separate
+// usage_log endpoint, 'hokage:question' — not one of this file's 'gemini:%'
+// rows) can use the exact same UTC-day boundary every cap in this file
+// already uses, rather than inventing a second day-boundary convention.
+export function startOfUtcDayIso(): string {
   const d = new Date();
   d.setUTCHours(0, 0, 0, 0);
   return d.toISOString();
@@ -158,12 +189,14 @@ export async function geminiQuotaAvailable(env: Env, ip: string, kind: GeminiCal
   const globalCap = CORE_KINDS.has(kind) ? GEMINI_DAILY_GLOBAL_CAP : GEMINI_DAILY_GLOBAL_CAP - GEMINI_DAILY_CORE_RESERVE;
   if ((globalRow?.n ?? 0) >= globalCap) return false;
 
-  const ipRow = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM usage_log WHERE endpoint LIKE 'gemini:%' AND ip = ? AND created_at >= ?",
-  )
-    .bind(ip, since)
-    .first<{ n: number }>();
-  if ((ipRow?.n ?? 0) >= GEMINI_DAILY_PER_IP_CAP) return false;
+  if (!PER_IP_CAP_EXEMPT_KINDS.has(kind)) {
+    const ipRow = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM usage_log WHERE endpoint LIKE 'gemini:%' AND ip = ? AND created_at >= ?",
+    )
+      .bind(ip, since)
+      .first<{ n: number }>();
+    if ((ipRow?.n ?? 0) >= GEMINI_DAILY_PER_IP_CAP) return false;
+  }
 
   if (kind === "captions") {
     const captionsRow = await env.DB.prepare(
@@ -174,13 +207,24 @@ export async function geminiQuotaAvailable(env: Env, ip: string, kind: GeminiCal
     if ((captionsRow?.n ?? 0) >= GEMINI_DAILY_CAPTIONS_CAP) return false;
   }
 
+  if (kind === "chat") {
+    const chatRow = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM usage_log WHERE endpoint = 'gemini:chat' AND created_at >= ?",
+    )
+      .bind(since)
+      .first<{ n: number }>();
+    if ((chatRow?.n ?? 0) >= GEMINI_DAILY_CHAT_STEPS_CAP) return false;
+  }
+
   return true;
 }
 
 /** Records one Gemini API call (one batched classify-genres, classify-artists,
  * Phase 7a classify-moods, Phase 7b persona-generation, Phase 7c
- * caption-generation, or Phase 9 weekly-brief request, regardless of how
- * many items were in it) against both the global and per-IP daily caps. */
+ * caption-generation, Phase 9 weekly-brief request, or one Phase 10 chat
+ * model step, regardless of how many items were in it) against the global
+ * daily cap and, for every kind except "chat" (see its exemption above),
+ * the per-IP one too. */
 export async function logGeminiCall(env: Env, ip: string, kind: GeminiCallKind): Promise<void> {
   try {
     await env.DB.prepare(
