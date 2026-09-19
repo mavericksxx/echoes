@@ -44,6 +44,7 @@ import {
 } from "../shared/world";
 import { coverPlaceholderGradient } from "./cover-art";
 import { getLiveNowPlaying } from "./now-playing-card";
+import { playClick } from "./sound";
 
 let images: ImageMap = {};
 export function setSidebarImages(loaded: ImageMap): void {
@@ -2155,7 +2156,13 @@ function renderTablist(): void {
     tab.setAttribute("aria-selected", String(section.id === activeSectionId));
     tab.tabIndex = section.id === activeSectionId ? 0 : -1;
     tab.textContent = section.label;
-    tab.addEventListener("click", () => renderSection(section.id));
+    // Phase 13a: soft UI click on sidebar/tab actions (src/sound.ts) — muted
+    // by default, throttling isn't needed here since a real tap can't
+    // outrun the click's own ~50ms decay.
+    tab.addEventListener("click", () => {
+      playClick();
+      renderSection(section.id);
+    });
     tablistEl.appendChild(tab);
   });
 }
@@ -2235,7 +2242,10 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
   closeBtn.className = "sidebar__close";
   closeBtn.setAttribute("aria-label", "Close");
   closeBtn.textContent = "×";
-  closeBtn.addEventListener("click", () => close());
+  closeBtn.addEventListener("click", () => {
+    playClick();
+    close();
+  });
 
   const header = document.createElement("div");
   header.className = "sidebar__header";

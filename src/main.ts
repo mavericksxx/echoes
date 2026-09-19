@@ -56,6 +56,8 @@ import { fetchWorldResponse, getFestivals, getTimeOfDay, getVisitors, getWeather
 import { drawFestivalDecor, drawNightGlows, drawTimeOfDayTint, drawWeather } from "./world-render";
 import { onEraChange } from "./era";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
+import { downloadRecording, isRecordingSupported, startRecording, takeSnapshot, type Recording } from "./capture";
+import { initSoundToggle, playFootstep, updateWeatherAmbience } from "./sound";
 
 const NOW_PLAYING_INTERVAL_MS = 8000;
 const VILLAGE_EVENT_INTERVAL_MS = 5000;
@@ -101,6 +103,10 @@ const districtGenre = el<HTMLSpanElement>("districtGenre");
 const districtName = el<HTMLSpanElement>("districtName");
 const zoomInBtn = el<HTMLButtonElement>("zoomInBtn");
 const zoomOutBtn = el<HTMLButtonElement>("zoomOutBtn");
+const snapshotBtn = el<HTMLButtonElement>("snapshotBtn");
+const recordBtn = el<HTMLButtonElement>("recordBtn");
+const soundBtn = el<HTMLButtonElement>("soundBtn");
+const recordIndicator = el<HTMLSpanElement>("recordIndicator");
 
 const sidebarRoot = el<HTMLElement>("sidebar");
 const sidebarBackdrop = el<HTMLDivElement>("sidebarBackdrop");
@@ -1038,6 +1044,10 @@ function applyKeyPan(dt: number): void {
   if (heldPanKeys.has("ArrowUp")) camY -= step;
   if (heldPanKeys.has("ArrowDown")) camY += step;
   clampCamera();
+  // Phase 13a: arrow-key panning is the closest thing this village sim has
+  // to "the player walking" — src/sound.ts throttles this internally, so
+  // calling it every held-key frame is fine.
+  playFootstep();
 }
 
 // ---------------------------------------------------------------------------
@@ -1046,6 +1056,56 @@ function applyKeyPan(dt: number): void {
 backBtn.addEventListener("click", () => exitToVillage());
 zoomInBtn.addEventListener("click", () => stepZoom(1));
 zoomOutBtn.addEventListener("click", () => stepZoom(-1));
+
+// ---------------------------------------------------------------------------
+// Phase 13a: Snapshot / Record / Sound — see src/capture.ts, src/sound.ts.
+// ---------------------------------------------------------------------------
+initSoundToggle(soundBtn);
+
+snapshotBtn.addEventListener("click", () => {
+  const live = getLiveNowPlaying();
+  const caption = live ? `Parth is listening to ${live.song} — ${live.artist}` : null;
+  takeSnapshot(canvas, captionCanvas, caption);
+});
+
+let activeRecording: Recording | null = null;
+
+function formatCountdown(remainingMs: number): string {
+  return `REC 0:${String(Math.ceil(remainingMs / 1000)).padStart(2, "0")}`;
+}
+
+function endRecordingUi(): void {
+  activeRecording = null;
+  recordBtn.textContent = "Record";
+  recordBtn.setAttribute("aria-pressed", "false");
+  recordIndicator.hidden = true;
+}
+
+if (!isRecordingSupported()) {
+  // Older iOS Safari has neither captureStream nor MediaRecorder — hide the
+  // control entirely rather than offer a button that can't do anything.
+  recordBtn.hidden = true;
+} else {
+  recordBtn.addEventListener("click", () => {
+    if (activeRecording) {
+      activeRecording.stop();
+      return;
+    }
+    const recording = startRecording(
+      canvas,
+      (remainingMs) => (recordIndicator.textContent = formatCountdown(remainingMs)),
+      (blob, mimeType) => {
+        endRecordingUi();
+        downloadRecording(blob, mimeType);
+      },
+    );
+    if (!recording) return; // no accepted mime type after all — isRecordingSupported() was optimistic
+    activeRecording = recording;
+    recordBtn.textContent = "Stop";
+    recordBtn.setAttribute("aria-pressed", "true");
+    recordIndicator.hidden = false;
+  });
+}
 
 // Village caption: a one-time hint, not persistent chrome — fades out (the
 // CSS transition; see .village-caption.is-dismissed) on a timeout or the
@@ -1097,6 +1157,10 @@ function frame(ts: number): void {
     lastWorldVersion = worldVersion;
     rebuildVisitors();
   }
+
+  // Phase 13a: weather ambience is global (not per-view, same as getWeather()
+  // itself), so one call per frame regardless of village/district mode.
+  updateWeatherAmbience(getWeather());
 
   districtNpcsBySlot.forEach((npc, slotId) => {
     const { energy } = getMoodEnergy(slotId);
