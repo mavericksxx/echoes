@@ -10,7 +10,7 @@ History strip — 2026-09-18), **Phase 8.5** (Wrapped on demand — `/api/wrappe
 captions — deployed 2026-09-19).
 
 Phase 8.6 first cut (sidebar playlists) deployed 2026-09-19 after the playlist-scope reconnect.
-Next: playlist *buildings* on the map (8.6 follow-on).
+Parked (2026-09-19): playlist *buildings* on the map (8.6 follow-on). No active next phase.
 
 Notes on the finished grid work: two rooms are tight enough to watch — `shopFlower` collapses the 5
 resident/crowd spawn offsets onto 2 distinct cells and `shopWeapons` onto 4 (the others keep all 5),
