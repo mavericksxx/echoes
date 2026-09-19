@@ -42,6 +42,15 @@ export const RATE_LIMIT_RULES: Record<string, RateLimitRule> = {
   // handleHistoryStats) — no Spotify call it could ever burn, so the same
   // generous limit as topArtists/health.
   historyStats: { windowSeconds: 60, max: 60 },
+  // Phase 8.6: GET /me + GET /me/playlists, both cached in caches.default —
+  // same generous limit as topArtists (a cache hit costs no Spotify call at
+  // all; this is just abuse protection on top, same role as every other
+  // bucket here).
+  playlists: { windowSeconds: 60, max: 60 },
+  // Phase 8.6: /api/playlists/{id} can trigger a Gemini call (new artists
+  // only — worker/genre-resolution.ts), same reasoning as `village` above,
+  // so it gets the same stricter limit.
+  playlistDetail: { windowSeconds: 60, max: 20 },
 };
 
 function bucketKey(ip: string, bucket: string, windowStart: number): string {

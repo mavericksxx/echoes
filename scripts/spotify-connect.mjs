@@ -38,7 +38,16 @@ import { encryptToken } from "./spotify-crypto.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 const REDIRECT_URI = "http://127.0.0.1:8888/callback";
-const SCOPES = ["user-top-read", "user-read-recently-played", "user-read-currently-playing"].join(" ");
+// Phase 8.6 adds the two playlist scopes (SPEC.md's "Playlists are places") —
+// GET /me/playlists and GET /playlists/{id}/items both 401/403 without them.
+// An existing connection needs to rerun this script once to pick them up.
+const SCOPES = [
+  "user-top-read",
+  "user-read-recently-played",
+  "user-read-currently-playing",
+  "playlist-read-private",
+  "playlist-read-collaborative",
+].join(" ");
 const PKCE_STATE_FILE = path.join(os.tmpdir(), "echoes-spotify-pkce.json");
 const PKCE_STATE_MAX_AGE_MS = 15 * 60 * 1000;
 
