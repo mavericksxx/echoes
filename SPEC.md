@@ -320,6 +320,14 @@ only file allowed to call Gemini). Respects the existing Gemini daily cap
 (`geminiQuotaAvailable`); quota exhausted, a Gemini failure, or no cache row yet all degrade to
 `caption: null`, never a 500 — the frontend (`src/npc.ts`, `src/main.ts`) falls back to its
 existing template caption exactly as before whenever that's null, live or sample-data alike.
+Checked/logged under the fixed pseudo-IP `"now-playing"` (same convention as the history cron's
+`"cron"`), not the polling visitor's real IP — the shared ~10s cache means whichever visitor's
+poll happens to miss it triggers this for everyone. **Quota fix (2026-09-19):** captions scale
+with listening volume, not distinct-artist count, so `geminiQuotaAvailable` now takes a `kind` —
+`"genres"`/`"artists"` (slot resolution) keep the full 300 global / 40 per-IP caps, while
+`"moods"`/`"persona"`/`"captions"` back off from a 100-call reserve (`GEMINI_DAILY_CORE_RESERVE`),
+and `"captions"` alone also has its own 60/day sub-cap — so a busy listening day can no longer
+starve the slot-resolution pipeline the whole village depends on.
 
 **You'll see:** districts feel different by mood; characters talk about your music.
 
