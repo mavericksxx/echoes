@@ -25,15 +25,11 @@ interface Step {
 const STEPS: Step[] = [
   {
     title: "Welcome to Echoes",
-    body: "This village is Parth's Spotify listening, alive as a Naruto-DS town — every genre lives here as its own character, in its own district.",
-  },
-  {
-    title: "Look around",
-    body: "Drag (or use the arrow keys) to look around, and tap any character or district — in the village or the sidebar — to open their profile: top artists, songs, and mood.",
+    body: "This village is Parth's Spotify listening, alive as a Naruto-DS town — every genre lives here as its own character, in its own district. Drag (or use the arrow keys) to look around, and tap any character to open their profile.",
   },
   {
     title: "More to find",
-    body: "Ask the Hokage about the listening, check the notice board for the week's recap, and open the Chronicle to replay what the village agent changed overnight.",
+    body: "Wrapped, the notice board, the Chronicle and the Hokage live in the village buttons in the top bar (the Village button on a phone).",
   },
 ];
 

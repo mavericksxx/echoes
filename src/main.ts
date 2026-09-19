@@ -36,6 +36,8 @@ import {
   initSidebar,
   isSidebarOpen,
   openSidebar,
+  activeVillageSectionId,
+  openVillagePanel,
   refreshSidebarContent,
   setSidebarImages,
   sidebarSlotId,
@@ -113,12 +115,70 @@ const helpBtn = el<HTMLButtonElement>("helpBtn");
 const onboardingBackdrop = el<HTMLDivElement>("onboardingBackdrop");
 const onboardingModal = el<HTMLDivElement>("onboardingModal");
 
+// Village panel topbar shortcuts — one .topbar-btn per village section, plus
+// a single "Village" button that replaces them below 1100px (style.css's
+// .topbar-village-btns rule; its own tablist handles picking a section).
+const wrappedBtn = el<HTMLButtonElement>("wrappedBtn");
+const playlistsBtn = el<HTMLButtonElement>("playlistsBtn");
+const noticeBoardBtn = el<HTMLButtonElement>("noticeBoardBtn");
+const chronicleBtn = el<HTMLButtonElement>("chronicleBtn");
+const hokageBtn = el<HTMLButtonElement>("hokageBtn");
+const villageBtn = el<HTMLButtonElement>("villageBtn");
+const villageSectionBtns: HTMLButtonElement[] = [wrappedBtn, playlistsBtn, noticeBoardBtn, chronicleBtn, hokageBtn];
+
 const sidebarRoot = el<HTMLElement>("sidebar");
 const sidebarBackdrop = el<HTMLDivElement>("sidebarBackdrop");
+
+// Focus return (Phase 14 village panel): whichever element had focus right
+// before the village/character panel opened — restored on close only if it
+// was one of the topbar buttons above; every other opener (a map tap) keeps
+// the existing "focus goes back to the canvas" behavior.
+let panelOpener: HTMLElement | null = null;
+
+/** Reflects the currently open village section (if any) onto the matching
+ * topbar button's aria-current — called on every tab switch, open, and
+ * close (src/sidebar.ts's onSectionChange hook), so a slot-mode section id
+ * (which matches none of these) simply clears every button. */
+function updateVillageBtnAriaCurrent(sectionId: string | null): void {
+  // Belt-and-suspenders on top of sidebar.ts's own open/close bookkeeping:
+  // aria-current must never reflect a section while the panel itself is
+  // actually closed, whatever called this.
+  const activeId = isSidebarOpen() ? sectionId : null;
+  villageSectionBtns.forEach((btn) => {
+    if (btn.dataset.section === activeId) btn.setAttribute("aria-current", "true");
+    else btn.removeAttribute("aria-current");
+  });
+}
+
+/** Opens the village-wide panel from a topbar button, recording that button
+ * so focus can return to it on close (see panelOpener above). */
+function openVillagePanelTracked(section?: string): void {
+  selectedNpc = null;
+  panelOpener = document.activeElement as HTMLElement | null;
+  openVillagePanel(section);
+}
+
+wrappedBtn.dataset.section = "wrapped";
+playlistsBtn.dataset.section = "playlists";
+noticeBoardBtn.dataset.section = "notice-board";
+chronicleBtn.dataset.section = "chronicle";
+hokageBtn.dataset.section = "hokage";
+villageSectionBtns.forEach((btn) => {
+  btn.addEventListener("click", () => openVillagePanelTracked(btn.dataset.section));
+});
+villageBtn.addEventListener("click", () => openVillagePanelTracked(activeVillageSectionId() ?? undefined));
+
 initSidebar(sidebarRoot, sidebarBackdrop, {
   onClose: () => {
     selectedNpc = null;
-    canvas.focus();
+    updateVillageBtnAriaCurrent(null);
+    const opener = panelOpener;
+    panelOpener = null;
+    if (opener && opener.classList.contains("topbar-btn") && document.body.contains(opener)) {
+      opener.focus();
+    } else {
+      canvas.focus();
+    }
   },
   onFocusSlot: (slotId) => {
     panCameraToSlot(slotId);
@@ -126,6 +186,15 @@ initSidebar(sidebarRoot, sidebarBackdrop, {
   onEnterDistrict: (slotId) => {
     closeSidebar();
     enterDistrict(slotId);
+  },
+  onSectionChange: (sectionId) => {
+    updateVillageBtnAriaCurrent(sectionId);
+    // A village section can be reached without going through
+    // openVillagePanelTracked (e.g. This week's "From this week's notice
+    // board" link calls openVillagePanel directly) — clear selectedNpc
+    // whenever the panel is actually in village mode, so a character's ring
+    // highlight doesn't linger once its sidebar isn't what's showing.
+    if (sidebarSlotId() === null) selectedNpc = null;
   },
 });
 initTopArtists();
@@ -799,6 +868,10 @@ function villageCaptionLabels(): CaptionLabel[] {
 // "Enter district" makes sense (only from the village).
 // ---------------------------------------------------------------------------
 function openSidebarForNpc(npc: Npc): void {
+  // Not a topbar-opened panel — the close-focus-return logic (onClose above)
+  // should fall back to canvas.focus(), not a stale button from whichever
+  // village section was open before this character tap.
+  panelOpener = null;
   selectedNpc = npc;
   const slot = getSlot(npc.district.id);
   const artist = residentArtistByNpc.get(npc);
@@ -853,17 +926,10 @@ function interactionPool(): Npc[] {
   return [];
 }
 
-/** Phase 9: opens the sidebar straight to the global Notice board section
- * (same "ignores whichever character's header is showing" convention as the
- * Wrapped/Playlists tabs — see src/sidebar.ts's SECTIONS). Keeps whatever
- * character's sidebar is already open (if any) rather than forcing one, so
- * tapping the board mid-conversation doesn't change whose portrait is
- * showing; falls back to the roster's first slot when nothing's open yet, a
- * slot chosen only because *something* has to own the header chrome. */
+/** Phase 9: opens the village-wide panel straight to the Notice board
+ * section (tapping the map's notice board marker — see handleTap below). */
 function openNoticeBoard(): void {
-  const slotId = sidebarSlotId();
-  const slot = slotId ? getSlot(slotId) : SLOTS[0]!;
-  openSidebar(slot, { section: "notice-board", showEnter: false });
+  openVillagePanelTracked("notice-board");
 }
 
 function handleTap(clientX: number, clientY: number): void {

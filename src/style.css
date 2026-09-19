@@ -352,6 +352,32 @@ select {
 .topbar-btn[aria-expanded="true"] {
   background: var(--wood-dark);
 }
+.topbar-btn[aria-current="true"] {
+  background: var(--wood-dark);
+}
+
+/* Village panel shortcuts (Wrapped/Playlists/Notice board/Chronicle/Hokage)
+   — a row of .topbar-btns wide enough to need collapsing on anything
+   narrower than desktop; #villageBtn (opens the same panel, defaulting to
+   Wrapped, with the in-panel tablist for the rest) takes their place below
+   1100px. See the 899px .topbar-actions rule below for the phone-width
+   squeeze these already have to survive alongside. */
+.topbar-village-btns {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.topbar-btn--village {
+  display: none;
+}
+@media (max-width: 1099px) {
+  .topbar-village-btns {
+    display: none;
+  }
+  .topbar-btn--village {
+    display: inline-flex;
+  }
+}
 
 /* ---- "Your top artists" panel (Phase 2) — a small floating card, not the
    full genre sidebar (different data: the account's overall top artists,
@@ -982,11 +1008,9 @@ select {
 .sidebar__name {
   font-family: var(--font-display);
   font-size: var(--text-lg);
-  line-height: 1;
+  line-height: 1.1;
   color: var(--color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .sidebar__meta {
@@ -1107,19 +1131,19 @@ select {
 }
 
 /* ---- tablist ---- */
+/* Wraps onto multiple lines rather than scrolling sideways — at desktop
+   width, both the character panel's six tabs and the village panel's five
+   (see src/sidebar.ts's SLOT_SECTIONS/VILLAGE_SECTIONS) are wider than the
+   sidebar itself, and a horizontal scroll here would hide tabs with no
+   visual hint they exist. */
 .sidebar-tablist {
   flex: none;
   display: flex;
-  gap: var(--space-2);
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
   margin-top: var(--space-3);
   padding-bottom: 4px;
-  overflow-x: auto;
-  scrollbar-width: none;
   border-bottom: 2px solid var(--ink);
-}
-
-.sidebar-tablist::-webkit-scrollbar {
-  display: none;
 }
 
 .sidebar-tab {
@@ -1135,7 +1159,6 @@ select {
   font-size: var(--text-sm);
   font-weight: 700;
   padding: 4px 8px;
-  margin: var(--space-1) 0;
   min-height: 44px;
   display: inline-flex;
   align-items: center;
