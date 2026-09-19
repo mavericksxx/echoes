@@ -10,7 +10,8 @@ History strip — 2026-09-18), **Phase 8.5** (Wrapped on demand — `/api/wrappe
 captions — deployed 2026-09-19).
 
 Phase 8.6 first cut (sidebar playlists) deployed 2026-09-19 after the playlist-scope reconnect.
-Parked (2026-09-19): playlist *buildings* on the map (8.6 follow-on). No active next phase.
+Parked (2026-09-19): playlist *buildings* on the map (8.6 follow-on). Remaining SPEC phases not started: 9 (weekly notice board), 10 (Hokage chat agent),
+11 (self-evolving village agent), 12 (chronicle), 13 (show it off).
 
 Notes on the finished grid work: two rooms are tight enough to watch — `shopFlower` collapses the 5
 resident/crowd spawn offsets onto 2 distinct cells and `shopWeapons` onto 4 (the others keep all 5),
@@ -19,15 +20,14 @@ and `scripts/walkability-draft-interiors.json` are kept as historical record; 4 
 (houseGarden, houseDining, ramenInterior, forest) ended up hand-authored rather than derived.
 
 ## Asked for, slotted later
-- **Now-playing widget** (Phase 5a) — display-only card top-right, no controls. Asked 2026-09-18.
-- **Camera fixes** (Phase 4.5) — eased zoom animation + fractional fit-to-screen so phones can
-  actually zoom out. Blocked on Phase 4 merging; both touch src/main.ts. Asked 2026-09-18.
+- ~~Now-playing widget~~ done (Phase 5a).
+- ~~Camera fixes~~ done (Phase 4.5).
 - ~~Daily rollups + history-driven world~~ done (Phase 8b, 2026-09-18) — see SPEC.md's Phase 8b
   deviations for what shipped differently than planned (no `daily_snapshot`; live joins instead).
 - ~~Wrapped on demand~~ done (Phase 8.5, 2026-09-19) — see SPEC.md's Phase 8.5 section for what
   shipped and how it falls back to Spotify's own top lists on a thin range.
-- **Playlists as places** (Phase 8.6) — playlists become enterable buildings, distinct from genre
-  districts. Verify the playlist endpoints survived Feb 2026 before scoping.
+- **Playlists as places** (Phase 8.6) — sidebar first cut done 2026-09-19 (public playlists only);
+  map buildings parked.
 - **Frontend could show paused-but-real activity** (Phase 8b follow-on) — `worker/village.ts`'s
   `pausedPayload` already computes real history-driven activity/share while live-paused (see its doc
   comment), but `src/listening-source.ts`'s `getActivity()`/`getArtists()` only read a village
