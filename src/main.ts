@@ -36,9 +36,11 @@ import {
   initSidebar,
   isSidebarOpen,
   openSidebar,
+  activeVillageSectionId,
   openVillagePanel,
   refreshSidebarContent,
   setSidebarImages,
+  sidebarSlotId,
 } from "./sidebar";
 import { initTopArtists } from "./top-artists";
 import { getLiveNowPlaying, initNowPlayingCard, subscribeNowPlaying } from "./now-playing-card";
@@ -164,7 +166,7 @@ hokageBtn.dataset.section = "hokage";
 villageSectionBtns.forEach((btn) => {
   btn.addEventListener("click", () => openVillagePanelTracked(btn.dataset.section));
 });
-villageBtn.addEventListener("click", () => openVillagePanelTracked());
+villageBtn.addEventListener("click", () => openVillagePanelTracked(activeVillageSectionId() ?? undefined));
 
 initSidebar(sidebarRoot, sidebarBackdrop, {
   onClose: () => {
@@ -187,6 +189,12 @@ initSidebar(sidebarRoot, sidebarBackdrop, {
   },
   onSectionChange: (sectionId) => {
     updateVillageBtnAriaCurrent(sectionId);
+    // A village section can be reached without going through
+    // openVillagePanelTracked (e.g. This week's "From this week's notice
+    // board" link calls openVillagePanel directly) — clear selectedNpc
+    // whenever the panel is actually in village mode, so a character's ring
+    // highlight doesn't linger once its sidebar isn't what's showing.
+    if (sidebarSlotId() === null) selectedNpc = null;
   },
 });
 initTopArtists();
@@ -860,6 +868,10 @@ function villageCaptionLabels(): CaptionLabel[] {
 // "Enter district" makes sense (only from the village).
 // ---------------------------------------------------------------------------
 function openSidebarForNpc(npc: Npc): void {
+  // Not a topbar-opened panel — the close-focus-return logic (onClose above)
+  // should fall back to canvas.focus(), not a stale button from whichever
+  // village section was open before this character tap.
+  panelOpener = null;
   selectedNpc = npc;
   const slot = getSlot(npc.district.id);
   const artist = residentArtistByNpc.get(npc);

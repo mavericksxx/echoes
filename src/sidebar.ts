@@ -1799,15 +1799,22 @@ function sendHokageMessage(rawText: string): void {
     if (!data) {
       turn.failed = true;
       hokageError = true;
-      renderSection("hokage");
-      focusHokageInput();
+      // Only re-render if the visitor is still actually looking at Hokage —
+      // by the time this resolves they may have tapped a character, which
+      // would otherwise force "hokage" back into slot mode underneath them.
+      if (panel?.kind === "village" && activeSectionId === "hokage") {
+        renderSection("hokage");
+        focusHokageInput();
+      }
       return;
     }
     hokageHistory.push({ role: "model", text: data.reply });
     hokageRemaining = data.remaining;
     hokageLimited = Boolean(data.limited);
-    renderSection("hokage");
-    focusHokageInput();
+    if (panel?.kind === "village" && activeSectionId === "hokage") {
+      renderSection("hokage");
+      focusHokageInput();
+    }
     if (data.focusSlots.length > 0) hooks.onFocusSlot(data.focusSlots[0]!);
   });
 }
@@ -2285,16 +2292,20 @@ function focusTab(index: number): void {
 }
 
 function renderSection(sectionId: string): void {
-  activeSectionId = sectionId;
   if (!panel) return;
-  hooks.onSectionChange(sectionId);
-  renderTablist();
-  panelHost.innerHTML = "";
-  panelHost.id = PANEL_ID;
-  panelHost.setAttribute("aria-labelledby", `tab-${sectionId}`);
 
   if (panel.kind === "village") {
+    // Resolve the fallback (an unknown id — e.g. a stale slot-mode section
+    // id left over from before a kind switch — lands on VILLAGE_SECTIONS[0])
+    // *before* touching activeSectionId/onSectionChange, so both always
+    // reflect what's actually about to render, not whatever was asked for.
     const section = VILLAGE_SECTIONS.find((s) => s.id === sectionId) ?? VILLAGE_SECTIONS[0]!;
+    activeSectionId = section.id;
+    hooks.onSectionChange(activeSectionId);
+    renderTablist();
+    panelHost.innerHTML = "";
+    panelHost.id = PANEL_ID;
+    panelHost.setAttribute("aria-labelledby", `tab-${activeSectionId}`);
     villageHeadingEl.textContent = section.heading ?? section.label;
     section.render(panelHost);
     return;
@@ -2302,6 +2313,12 @@ function renderSection(sectionId: string): void {
 
   const slot = panel.slot;
   const section = SLOT_SECTIONS.find((s) => s.id === sectionId) ?? SLOT_SECTIONS[0]!;
+  activeSectionId = section.id;
+  hooks.onSectionChange(activeSectionId);
+  renderTablist();
+  panelHost.innerHTML = "";
+  panelHost.id = PANEL_ID;
+  panelHost.setAttribute("aria-labelledby", `tab-${activeSectionId}`);
   section.render(panelHost, {
     slot,
     switchToSongs: (artist) => {
@@ -2531,7 +2548,6 @@ export function openVillagePanel(section = "wrapped"): void {
     songsArtistFilter = "";
     songsAlbumFilter = "";
     songsSort = "plays";
-    activeSectionId = "wrapped";
   }
   activeSectionId = section;
   portraitCanvas.hidden = true;
@@ -2542,7 +2558,13 @@ export function openVillagePanel(section = "wrapped"): void {
   renderVillageToday();
   renderSection(activeSectionId);
 
-  if (isFirstOpen) {
+  // Also focus the tablist on a re-open whose opening element was destroyed
+  // by that same click (e.g. This week's "From this week's notice board"
+  // link, replaced when renderSection rebuilds the panel) — document.body
+  // is what's left focused once the clicked element is gone, so without
+  // this the tablist would otherwise only ever get focus on a true first
+  // open.
+  if (isFirstOpen || document.activeElement === document.body) {
     const activeTab = tablistEl.querySelector<HTMLButtonElement>('[aria-selected="true"]');
     (activeTab ?? closeBtn).focus();
   }
@@ -2574,6 +2596,14 @@ export function isSidebarOpen(): boolean {
 
 export function sidebarSlotId(): string | null {
   return panel?.kind === "slot" ? panel.slot.district.id : null;
+}
+
+/** The open village section's id, or null when the village panel isn't the
+ * one showing (closed, or a character's own panel is open instead) — lets
+ * the topbar's "Village" button (phone width) reopen on whichever section
+ * was already up, instead of always resetting to Wrapped. */
+export function activeVillageSectionId(): string | null {
+  return panel?.kind === "village" ? activeSectionId : null;
 }
 
 /** Re-renders whichever section is currently showing, if the sidebar is
