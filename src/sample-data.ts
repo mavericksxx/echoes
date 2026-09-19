@@ -342,6 +342,91 @@ export function nowPlayingSong(listening: SlotListening | undefined): Song | nul
   return listening.songs.find((s) => s.id === listening.nowPlayingSongId) ?? null;
 }
 
+// ---------------------------------------------------------------------------
+// Playlists (Phase 8.6, first cut) — a couple of handwritten sample
+// playlists for the offline/not-connected fallback, mirroring
+// worker/playlists.ts's PlaylistDetailPayload shape closely enough that
+// src/sidebar.ts's Playlists tab can render either without branching on
+// more than "is this a sample playlist" (see getSamplePlaylist below).
+// ---------------------------------------------------------------------------
+export interface SamplePlaylistCastArtist {
+  name: string;
+  trackCount: number;
+}
+
+export interface SamplePlaylistCastSlot {
+  slotId: string;
+  share: number;
+  topArtists: SamplePlaylistCastArtist[];
+}
+
+export interface SamplePlaylist {
+  id: string;
+  name: string;
+  trackCount: number;
+  cast: SamplePlaylistCastSlot[];
+}
+
+export const SAMPLE_PLAYLISTS: SamplePlaylist[] = [
+  {
+    id: "sample-late-night-drive",
+    name: "late night drive",
+    trackCount: 34,
+    cast: [
+      {
+        slotId: "shikamaru",
+        share: 0.44,
+        topArtists: [
+          { name: "Mac Miller", trackCount: 6 },
+          { name: "Nujabes", trackCount: 4 },
+        ],
+      },
+      {
+        slotId: "kakashi",
+        share: 0.32,
+        topArtists: [
+          { name: "ODESZA", trackCount: 5 },
+          { name: "Bonobo", trackCount: 3 },
+        ],
+      },
+      {
+        slotId: "neji",
+        share: 0.24,
+        topArtists: [{ name: "Frank Ocean", trackCount: 4 }],
+      },
+    ],
+  },
+  {
+    id: "sample-gym-pump",
+    name: "gym pump",
+    trackCount: 27,
+    cast: [
+      {
+        slotId: "naruto",
+        share: 0.56,
+        topArtists: [
+          { name: "Kendrick Lamar", trackCount: 7 },
+          { name: "Travis Scott", trackCount: 4 },
+        ],
+      },
+      {
+        slotId: "kiba",
+        share: 0.26,
+        topArtists: [{ name: "Turnstile", trackCount: 3 }],
+      },
+      {
+        slotId: "kankuro",
+        share: 0.18,
+        topArtists: [{ name: "Bring Me The Horizon", trackCount: 2 }],
+      },
+    ],
+  },
+];
+
+export function getSamplePlaylist(id: string): SamplePlaylist | undefined {
+  return SAMPLE_PLAYLISTS.find((p) => p.id === id);
+}
+
 /**
  * Picks a slot id at random, weighted by playShare. Falls back to a uniform
  * pick across all slots if every share is 0. Used to drive which character

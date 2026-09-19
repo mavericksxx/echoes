@@ -18,7 +18,9 @@
 // /api/history/daily (history-daily.ts) for the sidebar's per-district
 // 30-day strip. Phase 8.5 adds /api/wrapped (wrapped.ts) for the sidebar's
 // Wrapped tab — an on-demand read over play_event, falling back to Spotify's
-// own top lists when a range's history is too thin.
+// own top lists when a range's history is too thin. Phase 8.6 (first cut)
+// adds /api/playlists + /api/playlists/{id} (playlists.ts) for the
+// sidebar's Playlists tab — see SPEC.md's Phase 8.6 note for what's deferred.
 
 import { handleTopArtists } from "./top-artists";
 import { handleVillage } from "./village";
@@ -26,6 +28,7 @@ import { handleNowPlaying } from "./now-playing";
 import { runHistorySync, handleHistoryStats } from "./history";
 import { handleHistoryDaily } from "./history-daily";
 import { handleWrapped } from "./wrapped";
+import { handlePlaylists, handlePlaylistDetail } from "./playlists";
 import { clientIp, enforceRateLimit, RateLimitError, RATE_LIMIT_RULES } from "./rate-limit";
 
 export interface Env {
@@ -63,12 +66,22 @@ const ROUTE_BUCKETS: Record<string, keyof typeof RATE_LIMIT_RULES> = {
   // Spotify quota. This bucket is just abuse protection on top, same role
   // it plays for every other route here.
   "/api/wrapped": "historyStats",
+  // Phase 8.6: the list endpoint. /api/playlists/{id} isn't a fixed
+  // pathname (see PLAYLIST_DETAIL_RE below), so it's matched separately in
+  // fetch() rather than living in this exact-match table.
+  "/api/playlists": "playlists",
 };
+
+// Phase 8.6: GET /api/playlists/{id} — the one route in this Worker with a
+// path parameter, so it can't live in ROUTE_BUCKETS' exact-pathname lookup
+// above. Matched before ROUTE_BUCKETS in fetch() below.
+const PLAYLIST_DETAIL_RE = /^\/api\/playlists\/([^/]+)$/;
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const bucket = ROUTE_BUCKETS[url.pathname];
+    const playlistDetailMatch = url.pathname.match(PLAYLIST_DETAIL_RE);
+    const bucket = playlistDetailMatch ? "playlistDetail" : ROUTE_BUCKETS[url.pathname];
 
     if (bucket) {
       try {
@@ -113,6 +126,14 @@ export default {
 
     if (url.pathname === "/api/wrapped") {
       return handleWrapped(request, env);
+    }
+
+    if (url.pathname === "/api/playlists") {
+      return handlePlaylists(env);
+    }
+
+    if (playlistDetailMatch) {
+      return handlePlaylistDetail(request, env, decodeURIComponent(playlistDetailMatch[1]!));
     }
 
     // Reached only when a request matches neither a rate-limited /api/*

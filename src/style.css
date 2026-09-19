@@ -1467,6 +1467,56 @@ select {
   padding: 0;
 }
 
+/* ---- playlists tab (Phase 8.6, first cut) ---- */
+/* A playlist list row: same cover+title+meta layout as .song-row (reuses
+   its child classes directly), but the row itself is a <button> (selecting
+   one opens its cast), so it needs its own reset instead of .song-row's
+   div/anchor styling. */
+.playlist-row {
+  appearance: none;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  min-height: 44px;
+}
+.playlist-row:last-child {
+  border-bottom: none;
+}
+
+.playlist-back {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  padding: 0 0 var(--space-2);
+  cursor: pointer;
+}
+.playlist-back:hover {
+  color: var(--color-text);
+}
+
+/* A cast row's portrait reuses .ta-row__art's square frame (built for an
+   <img>) with a pixel-art <canvas> instead — drawPortrait already renders
+   at the frame's exact pixel size, so this only needs to fill it and keep
+   the pixels crisp when the frame scales it. */
+.ta-row__art canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+}
+
 /* ==========================================================================
    Desktop: the sidebar becomes a floating glass panel inset over the map
    (position: absolute, 16px inset, 400px wide) instead of a full-screen

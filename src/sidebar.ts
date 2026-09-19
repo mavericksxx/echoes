@@ -8,7 +8,7 @@
 
 import { SLOTS, type Slot } from "../data/loader";
 import { drawPortrait, type ImageMap } from "./render";
-import { SAMPLE_NOW, type Persona, type Song } from "./sample-data";
+import { SAMPLE_NOW, SAMPLE_PLAYLISTS, getSamplePlaylist, type Persona, type Song } from "./sample-data";
 import {
   activitySource,
   getActivity,
@@ -945,6 +945,341 @@ function renderWrapped(container: HTMLElement): void {
   renderWrappedContent(container, cached);
 }
 
+// ---------------------------------------------------------------------------
+// Playlists (Phase 8.6, first cut — sidebar only; see SPEC.md's Phase 8.6
+// note: buildings-on-the-map are deferred, and a playlist merely *followed*
+// (not owned or collaborated on) never appears — worker/playlists.ts can't
+// get its track content, so it's dropped server-side rather than shown
+// half-working). Global, same convention as Wrapped above (deliberately
+// ignores ctx.slot) — a playlist isn't scoped to one character's district.
+// ---------------------------------------------------------------------------
+interface PlaylistOut {
+  id: string;
+  name: string;
+  image: string | null;
+  trackCount: number;
+  collaborative: boolean;
+}
+type PlaylistsPayload =
+  | { connected: false }
+  | { connected: true; live: false; reason: "paused" | "needs-reconnect" }
+  | { connected: true; live: true; playlists: PlaylistOut[]; cachedAt: string };
+
+interface PlaylistCastArtist {
+  id: string;
+  name: string;
+  trackCount: number;
+}
+interface PlaylistCastSlot {
+  slotId: string;
+  share: number;
+  topArtists: PlaylistCastArtist[];
+}
+type PlaylistDetailPayload =
+  | { connected: false }
+  | { connected: true; live: false; reason: "paused" | "needs-reconnect" }
+  | {
+      connected: true;
+      live: true;
+      id: string;
+      trackCount: number;
+      tracksSeen: number;
+      truncated: boolean;
+      cast: PlaylistCastSlot[];
+      geminiLimited: boolean;
+      geminiError: string | null;
+      cachedAt: string;
+    };
+
+// Which playlist's cast the tab is currently showing, if any — cleared
+// (back to the list) whenever a different one is selected or "back" is hit.
+let selectedPlaylist: { id: string; name: string; trackCount: number } | null = null;
+
+// Fetched once and reused across opens (same never-auto-retry convention as
+// historyDaily/wrappedCache above) — the owner's playlist list doesn't
+// change often enough to justify refetching every time this tab is opened.
+let playlistsCache: PlaylistsPayload | "error" | undefined;
+let playlistsInFlight = false;
+const playlistDetailCache = new Map<string, PlaylistDetailPayload | "error">();
+const playlistDetailInFlight = new Set<string>();
+
+async function fetchPlaylists(): Promise<PlaylistsPayload | null> {
+  try {
+    const res = await fetch("/api/playlists");
+    if (!res.ok) return null;
+    return (await res.json()) as PlaylistsPayload;
+  } catch {
+    return null;
+  }
+}
+
+function loadPlaylists(): void {
+  if (playlistsCache !== undefined || playlistsInFlight) return;
+  playlistsInFlight = true;
+  void fetchPlaylists().then((data) => {
+    playlistsInFlight = false;
+    playlistsCache = data ?? "error";
+    if (currentSlot && activeSectionId === "playlists") renderSection("playlists");
+  });
+}
+
+async function fetchPlaylistDetail(id: string): Promise<PlaylistDetailPayload | null> {
+  try {
+    const res = await fetch(`/api/playlists/${encodeURIComponent(id)}`);
+    if (!res.ok) return null;
+    return (await res.json()) as PlaylistDetailPayload;
+  } catch {
+    return null;
+  }
+}
+
+function loadPlaylistDetail(id: string): void {
+  if (playlistDetailCache.has(id) || playlistDetailInFlight.has(id)) return;
+  playlistDetailInFlight.add(id);
+  void fetchPlaylistDetail(id).then((data) => {
+    playlistDetailInFlight.delete(id);
+    playlistDetailCache.set(id, data ?? "error");
+    if (currentSlot && activeSectionId === "playlists" && selectedPlaylist?.id === id) renderSection("playlists");
+  });
+}
+
+/** A minimal shape both PlaylistOut (real) and SamplePlaylist (offline)
+ * satisfy — the row only ever needs a cover/name/count to render. */
+interface PlaylistRowData {
+  id: string;
+  name: string;
+  trackCount: number;
+  image?: string | null;
+}
+
+function buildPlaylistRow(playlist: PlaylistRowData, onSelect: () => void): HTMLElement {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "playlist-row";
+
+  const cover = document.createElement("span");
+  cover.className = "song-row__cover";
+  if (playlist.image) {
+    const img = document.createElement("img");
+    img.className = "song-row__cover-img";
+    img.src = playlist.image;
+    img.alt = "";
+    img.loading = "lazy";
+    cover.appendChild(img);
+  } else {
+    cover.style.background = coverPlaceholderGradient(playlist.id);
+  }
+
+  const info = document.createElement("span");
+  info.className = "song-row__info";
+  const title = document.createElement("span");
+  title.className = "song-row__title";
+  title.textContent = playlist.name;
+  const meta = document.createElement("span");
+  meta.className = "song-row__meta";
+  meta.textContent = `${playlist.trackCount} track${playlist.trackCount === 1 ? "" : "s"}`;
+  info.append(title, meta);
+
+  row.append(cover, info);
+  row.addEventListener("click", onSelect);
+  return row;
+}
+
+/** One slot's share of a playlist, shown with the same genre-character
+ * portrait as the sidebar header (drawPortrait into a small canvas) — reuses
+ * .ta-row's layout (art + name/subtitle), same repurposing Wrapped's
+ * buildWrappedArtistRow already does for a non-artist row. */
+function buildCastRow(cast: { slotId: string; share: number; topArtists: { name: string }[] }): HTMLElement {
+  const slot = SLOTS.find((s) => s.district.id === cast.slotId);
+  const row = document.createElement("div");
+  row.className = "ta-row";
+
+  const art = document.createElement("div");
+  art.className = "ta-row__art";
+  const portrait = document.createElement("canvas");
+  portrait.width = 40;
+  portrait.height = 40;
+  const pctx = portrait.getContext("2d");
+  if (pctx && slot) drawPortrait(pctx, images, slot.character);
+  art.appendChild(portrait);
+
+  const meta = document.createElement("div");
+  meta.className = "ta-row__meta";
+  const name = document.createElement("p");
+  name.className = "ta-row__name";
+  name.textContent = slot ? slot.character.name : cast.slotId;
+  const sub = document.createElement("p");
+  sub.className = "ta-row__genres";
+  sub.textContent = cast.topArtists.length ? cast.topArtists.map((a) => a.name).join(", ") : "—";
+  meta.append(name, sub);
+
+  const share = document.createElement("span");
+  share.className = "artist-row__plays";
+  share.textContent = `${Math.round(cast.share * 100)}%`;
+
+  row.append(art, meta, share);
+  return row;
+}
+
+function renderCastList(
+  container: HTMLElement,
+  cast: { slotId: string; share: number; topArtists: { name: string }[] }[],
+  trackCount: number,
+  tracksSeen: number,
+  truncated: boolean,
+): void {
+  if (cast.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "sidebar-empty";
+    empty.textContent = "No tracks placed in a genre yet.";
+    container.appendChild(empty);
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "artist-list";
+  cast.forEach((c) => list.appendChild(buildCastRow(c)));
+  container.appendChild(list);
+
+  if (truncated) {
+    const note = document.createElement("p");
+    note.className = "activity-source-note";
+    note.textContent = `Showing the first ${tracksSeen} of ${trackCount} tracks.`;
+    container.appendChild(note);
+  }
+}
+
+function renderPlaylistBack(container: HTMLElement): void {
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "playlist-back";
+  back.textContent = "← All playlists";
+  back.addEventListener("click", () => {
+    selectedPlaylist = null;
+    renderSection("playlists");
+  });
+  container.appendChild(back);
+}
+
+function renderPlaylistDetail(container: HTMLElement, playlist: { id: string; name: string; trackCount: number }): void {
+  renderPlaylistBack(container);
+
+  const heading = document.createElement("p");
+  heading.className = "sidebar-heading";
+  heading.textContent = playlist.name;
+  container.appendChild(heading);
+
+  // Sample playlists carry their cast inline — no fetch, same "sample mode
+  // keeps working" rule as every other tab (src/listening-source.ts).
+  const sample = getSamplePlaylist(playlist.id);
+  if (sample) {
+    renderCastList(container, sample.cast, sample.trackCount, sample.trackCount, false);
+    return;
+  }
+
+  loadPlaylistDetail(playlist.id);
+  const cached = playlistDetailCache.get(playlist.id);
+
+  if (cached === undefined) {
+    const loading = document.createElement("p");
+    loading.className = "sidebar-empty";
+    loading.textContent = "Loading cast…";
+    container.appendChild(loading);
+    return;
+  }
+  if (cached === "error" || !cached.connected) {
+    const failed = document.createElement("p");
+    failed.className = "sidebar-empty";
+    failed.textContent = "Couldn't load this playlist right now.";
+    container.appendChild(failed);
+    return;
+  }
+  if (!cached.live) {
+    const msg = document.createElement("p");
+    msg.className = "sidebar-empty";
+    msg.textContent =
+      cached.reason === "needs-reconnect"
+        ? "Reconnect Spotify to see this playlist (new permissions needed)."
+        : "Live playlist data is paused right now.";
+    container.appendChild(msg);
+    return;
+  }
+
+  renderCastList(container, cached.cast, cached.trackCount, cached.tracksSeen, cached.truncated);
+
+  if (cached.geminiLimited) {
+    const note = document.createElement("p");
+    note.className = "activity-source-note";
+    note.textContent = "Some artists used a lower-confidence genre guess (today's AI limit was reached).";
+    container.appendChild(note);
+  }
+}
+
+function selectPlaylist(playlist: { id: string; name: string; trackCount: number }): void {
+  selectedPlaylist = playlist;
+  renderSection("playlists");
+}
+
+function renderPlaylists(container: HTMLElement): void {
+  if (selectedPlaylist) {
+    renderPlaylistDetail(container, selectedPlaylist);
+    return;
+  }
+
+  loadPlaylists();
+  const cached = playlistsCache;
+
+  if (cached === undefined) {
+    const loading = document.createElement("p");
+    loading.className = "sidebar-empty";
+    loading.textContent = "Loading playlists…";
+    container.appendChild(loading);
+    return;
+  }
+  if (cached === "error") {
+    const failed = document.createElement("p");
+    failed.className = "sidebar-empty";
+    failed.textContent = "Playlists aren't available right now.";
+    container.appendChild(failed);
+    return;
+  }
+
+  // Not connected at all: a couple of handwritten sample playlists (SPEC.md's
+  // Phase 8.6 first-cut note) — same "sample mode keeps working" rule as
+  // every other tab.
+  if (!cached.connected) {
+    const list = document.createElement("div");
+    list.className = "song-list";
+    SAMPLE_PLAYLISTS.forEach((p) => list.appendChild(buildPlaylistRow(p, () => selectPlaylist(p))));
+    container.appendChild(list);
+    return;
+  }
+
+  if (!cached.live) {
+    const msg = document.createElement("p");
+    msg.className = "sidebar-empty";
+    msg.textContent =
+      cached.reason === "needs-reconnect"
+        ? "Reconnect Spotify to see your playlists (new permissions needed)."
+        : "Live playlist data is paused right now.";
+    container.appendChild(msg);
+    return;
+  }
+
+  if (cached.playlists.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "sidebar-empty";
+    empty.textContent = "No playlists you own or collaborate on yet.";
+    container.appendChild(empty);
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "song-list";
+  cached.playlists.forEach((p) => list.appendChild(buildPlaylistRow(p, () => selectPlaylist(p))));
+  container.appendChild(list);
+}
+
 const SECTIONS: Section[] = [
   { id: "overview", label: "Overview", render: renderOverview },
   { id: "songs", label: "Songs", render: renderSongs },
@@ -955,6 +1290,8 @@ const SECTIONS: Section[] = [
   // the listener's whole Wrapped, not filtered to whichever character's
   // sidebar happens to be open).
   { id: "wrapped", label: "Wrapped", render: (container) => renderWrapped(container) },
+  // Global, same reason as Wrapped above (SPEC.md's Phase 8.6).
+  { id: "playlists", label: "Playlists", render: (container) => renderPlaylists(container) },
 ];
 
 // ---------------------------------------------------------------------------
