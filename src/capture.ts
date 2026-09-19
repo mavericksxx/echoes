@@ -52,20 +52,24 @@ function drawStamp(ctx: CanvasRenderingContext2D, w: number, h: number, text: st
  * frame (main.ts's rAF loop redraws every tick), so this just reads their
  * existing backing stores — no preserveDrawingBuffer dance needed, that's a
  * WebGL-only concern and this app is plain Canvas2D throughout (see
- * CHANGELOG's Phase 1 entry). */
+ * CHANGELOG's Phase 1 entry). Output is sized to captionCanvas's own
+ * device-pixel resolution, not gameCanvas's low-res backing store — the two
+ * canvases cover the same visible box (fitCaptionLayer), but gameCanvas is
+ * an integer-zoomed, deliberately small backing store, and sizing the flat
+ * output to it would downscale the caption layer's crisp text 4-6x into
+ * illegibility. */
 export function takeSnapshot(gameCanvas: HTMLCanvasElement, captionCanvas: HTMLCanvasElement, caption: string | null): void {
   const out = document.createElement("canvas");
-  out.width = gameCanvas.width;
-  out.height = gameCanvas.height;
+  out.width = captionCanvas.width;
+  out.height = captionCanvas.height;
   const ctx = out.getContext("2d");
   if (!ctx) return;
   ctx.imageSmoothingEnabled = false; // keep the pixel art crisp, matches #game's own setting
   ctx.drawImage(gameCanvas, 0, 0, out.width, out.height);
-  // captionCanvas renders at device-pixel resolution but covers exactly the
-  // same visible box as gameCanvas (see fitCaptionLayer) — smoothed on the
-  // way down onto the flat frame so its text stays legible.
+  // captionCanvas is already at this same device-pixel resolution — drawn
+  // 1:1, no scaling, so its text stays exactly as crisp as it renders live.
   ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(captionCanvas, 0, 0, out.width, out.height);
+  ctx.drawImage(captionCanvas, 0, 0);
   if (caption) drawStamp(ctx, out.width, out.height, caption);
   out.toBlob((blob) => {
     if (blob) download(blob, `echoes-${dateStamp()}.png`);
@@ -119,6 +123,12 @@ export function startRecording(
   const chunks: Blob[] = [];
   recorder.addEventListener("dataavailable", (ev) => {
     if (ev.data.size > 0) chunks.push(ev.data);
+  });
+  // A mid-recording failure (device/codec issue) still fires "stop" right
+  // after — logged here only so it isn't silently swallowed, onDone still
+  // runs and callers already guard against an empty blob.
+  recorder.addEventListener("error", (ev) => {
+    console.error("MediaRecorder error", ev);
   });
 
   const startedAt = performance.now();

@@ -715,6 +715,24 @@ select {
   .zoom-btn {
     font-size: var(--text-base);
   }
+
+  /* topbar-actions is flex: none on desktop (room enough for the status
+     chip, "Top artists", and "?" side by side) — on phone the same row also
+     has .brand + .topbar-nav competing for width, so it needs to actually
+     shrink instead of forcing an overflow. */
+  .topbar-actions {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  /* .now-playing-card is always visible once connected (idle or playing —
+     see src/now-playing-card.ts), not just while something plays, so on
+     phone it and .media-controls can no longer share the same `top` without
+     the card (z-index above it) covering the Sound/Record buttons. Pushed
+     below the card's own phone height instead. */
+  .media-controls {
+    top: calc(var(--topbar-h) + var(--safe-top) + var(--space-2) + 64px);
+  }
 }
 
 /* Phase 13a: Snapshot / Record / Sound (src/capture.ts, src/sound.ts) —
@@ -2215,16 +2233,6 @@ select {
    kept consistent with the rest of this file's "real progress = seal" idiom. */
 .onboarding-dot.is-active {
   background: var(--seal-deep);
-}
-
-.onboarding-checkbox {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  margin-bottom: var(--space-4);
-  cursor: pointer;
 }
 
 .onboarding-actions {
