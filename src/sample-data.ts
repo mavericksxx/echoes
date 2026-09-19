@@ -6,7 +6,7 @@
 
 export type { ActivityLevel } from "../shared/activity";
 export { activityLevel } from "../shared/activity";
-import type { WorldResponse } from "../shared/world";
+import type { ChronicleResponse, WorldResponse } from "../shared/world";
 
 export interface Song {
   id: string;
@@ -564,4 +564,71 @@ export const SAMPLE_WORLD: WorldResponse = {
   updatedAt: SAMPLE_WORLD_SET_ON,
   runDate: "2026-09-19",
   ownerTz: "Asia/Dubai", // matches wrangler.jsonc's real OWNER_TZ
+};
+
+// ---------------------------------------------------------------------------
+// Chronicle (Phase 12) — the offline/not-connected fallback for the sidebar's
+// Chronicle tab, shaped exactly like GET /api/chronicle's ChronicleResponse
+// (shared/world.ts) so src/sidebar.ts can render either without branching
+// beyond "is the village connected", same convention as SAMPLE_WORLD above.
+// The newest run's `stateAfter` reuses SAMPLE_WORLD.state directly (not a
+// second handwritten copy) — they're the same village described two ways
+// (final state vs. the events that produced it), so replaying this sample
+// day ends exactly where the map already sits.
+// ---------------------------------------------------------------------------
+const SAMPLE_CHRONICLE_EMPTY_STATE = { festivals: [], visitors: [], activity: {}, moods: {} };
+
+export const SAMPLE_CHRONICLE: ChronicleResponse = {
+  runs: [
+    {
+      runDate: "2026-09-19",
+      status: "ready",
+      summary:
+        "Cherry blossoms drifted over the village, Naruto's district threw a Ramen Festival, and Yaeji wandered into Shikamaru's corner.",
+      lastAttemptAt: SAMPLE_WORLD_SET_ON,
+      stateBefore: SAMPLE_CHRONICLE_EMPTY_STATE,
+      stateAfter: SAMPLE_WORLD.state,
+      events: [
+        {
+          id: 1,
+          tool: "set_weather",
+          args: { weather: "blossom", reason: "A gentle, dreamy week across Lo-fi and Ambient called for something soft overhead." },
+          reasoning: "A gentle, dreamy week across Lo-fi and Ambient called for something soft overhead.",
+          before: null,
+          after: SAMPLE_WORLD.state.weather,
+          createdAt: SAMPLE_WORLD_SET_ON,
+        },
+        {
+          id: 2,
+          tool: "start_festival",
+          args: { slot: "naruto", name: "Ramen Festival", reason: "Naruto's district has carried the whole village's loudest week." },
+          reasoning: "Naruto's district has carried the whole village's loudest week.",
+          before: null,
+          after: SAMPLE_WORLD.state.festivals[0],
+          createdAt: SAMPLE_WORLD_SET_ON,
+        },
+        {
+          id: 3,
+          tool: "send_visitor",
+          args: { slot: "shikamaru", artist_name: "Yaeji", reason: "Yaeji topped Shikamaru's district three days running." },
+          reasoning: "Yaeji topped Shikamaru's district three days running.",
+          before: null,
+          after: SAMPLE_WORLD.state.visitors[0],
+          createdAt: SAMPLE_WORLD_SET_ON,
+        },
+      ],
+    },
+    {
+      // A quiet day — SPEC.md's village-agent SYSTEM_PROMPT explicitly treats
+      // "change nothing" as a valid outcome; this exercises that empty-events
+      // state in sample mode too.
+      runDate: "2026-09-18",
+      status: "ready",
+      summary: "",
+      lastAttemptAt: "2026-09-18T06:00:00.000Z",
+      stateBefore: SAMPLE_CHRONICLE_EMPTY_STATE,
+      stateAfter: SAMPLE_CHRONICLE_EMPTY_STATE,
+      events: [],
+    },
+  ],
 };

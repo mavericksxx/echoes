@@ -1,6 +1,17 @@
 # Changelog
 
 ## Unreleased
+- **Phase 12 — Village chronicle:** `GET /api/chronicle` (D1-only, reuses `/api/world`'s rate-limit
+  bucket) returns the last ~30 days of `agent_run` rows newest-first, each with its `agent_event`
+  rows in id order and both before/after `WorldState` snapshots. Sidebar gains a global **Chronicle**
+  tab — a timeline of what the daily agent changed and why (human-readable tool labels like
+  "Weather → rain", quoted reasoning), with an empty state before the agent's first run. Per-day
+  **Replay** temporarily overrides the map's world state (`src/world-state.ts`'s new
+  `setReplayState`, read by the same `getEffectiveWorld()` every renderer already goes through — no
+  rendering fork) to that run's `stateBefore`, then steps through each event's effect
+  (`shared/world.ts`'s new `applyAgentEventSlice`) every ~1.75s, highlighting the current event,
+  before auto-restoring live state; a Stop control ends it early, and closing the sidebar always
+  stops it too so the map can never get stuck on a past day.
 - **Phase 11 — The village evolves itself:** a daily Gemini agent (first cron tick after 06:00
   owner-local) reads the last 24h/7d of listening and makes up to 4 validated, expiring changes via
   six tools (district activity, weather, festival, time-of-day override, visiting artist, character

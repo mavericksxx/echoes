@@ -65,13 +65,31 @@ export async function initWorldState(connected: boolean, pending?: Promise<World
   ownerTz = payload.ownerTz;
 }
 
+// Phase 12: Chronicle replay override (src/sidebar.ts's Chronicle tab). While
+// set, every getEffectiveWorld() call below — and everything built on it,
+// world-render.ts's draw calls via getWeather/getTimeOfDay/getFestivals/
+// getVisitors, and listening-source.ts's getActivity/getMoodEnergy alike —
+// reads `state` pruned against the fixed `nowMs` instead of the live
+// rawState/Date.now(). No rendering fork needed: this is the one function
+// every reader already goes through. `nowMs` is fixed, not the real clock,
+// because it's the moment a past day's Timed<T> entries were pruned against
+// when they were live, not "now" for real.
+let replay: { state: WorldState; nowMs: number } | null = null;
+
+/** Starts/updates (non-null) or ends (null) a Chronicle replay override. */
+export function setReplayState(state: WorldState | null, nowMs: number): void {
+  replay = state ? { state, nowMs } : null;
+}
+
 /** The live-right-now world: effectiveWorld() run again on the client (see
  * SPEC.md Phase 11) even though GET /api/world already pruned server-side —
  * a tab left open keeps its own clock moving, so an entry still live at
  * fetch time can expire before the tab is closed. Cheap to recompute per
  * call: WorldState never holds more than a handful of entries (see
- * shared/world.ts's MAX_FESTIVALS and friends). */
+ * shared/world.ts's MAX_FESTIVALS and friends). Reads through the Phase 12
+ * replay override above when one is active. */
 export function getEffectiveWorld(): EffectiveWorld {
+  if (replay) return effectiveWorld(replay.state, replay.nowMs);
   return effectiveWorld(rawState, Date.now());
 }
 

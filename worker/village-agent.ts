@@ -593,7 +593,10 @@ const MAX_SUMMARY_CHARS = 280;
 const AGENT_LIMITED_REPLY = "Today's village review ran out of attention before it could finish.";
 const AGENT_FALLBACK_REPLY = "Today's village review didn't come together.";
 
-function parseWorldState(text: string): WorldState {
+// Exported so worker/chronicle.ts can parse agent_run's own state_before/
+// state_after columns with the exact same defensive JSON parsing, rather
+// than duplicating it.
+export function parseWorldState(text: string): WorldState {
   try {
     const parsed = JSON.parse(text) as Partial<WorldState>;
     return {
