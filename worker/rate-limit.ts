@@ -107,14 +107,16 @@ export async function enforceRateLimit(env: Env, ip: string, bucket: string, rul
 // are the core slot-resolution pipeline everything else in the village
 // depends on (worker/genre-resolution.ts, worker/history.ts's cron) — they
 // always get the full global/per-IP caps below. "moods"/"persona"/
-// "captions" are all additive Phase 7 features layered on top, and unlike
+// "captions"/"brief" are all additive features layered on top, and unlike
 // slot resolution, captions in particular scale with *listening volume*
 // (one call per newly-seen track, not per artist) rather than with how many
 // distinct artists/genres exist — a busy listening day could otherwise burn
 // through the shared global cap and starve slot resolution for everyone.
-// So those three kinds back off from a reserved slice instead of the raw
-// cap, and captions additionally gets its own tighter sub-cap (below) on
-// top of that shared backoff.
+// So those kinds back off from a reserved slice instead of the raw cap, and
+// captions additionally gets its own tighter sub-cap (below) on top of that
+// shared backoff. "brief" (Phase 9) is inherently rare — at most once per
+// week, plus the occasional retry (worker/weekly-brief.ts's
+// RETRY_COOLDOWN_MS) — so it needs no sub-cap of its own.
 // ---------------------------------------------------------------------------
 export const GEMINI_DAILY_GLOBAL_CAP = 300;
 export const GEMINI_DAILY_PER_IP_CAP = 40;
@@ -127,7 +129,7 @@ export const GEMINI_DAILY_CORE_RESERVE = 100;
 // volume tracks listening activity rather than distinct-artist/genre count.
 export const GEMINI_DAILY_CAPTIONS_CAP = 60;
 
-export type GeminiCallKind = "genres" | "artists" | "moods" | "persona" | "captions";
+export type GeminiCallKind = "genres" | "artists" | "moods" | "persona" | "captions" | "brief";
 
 const CORE_KINDS: ReadonlySet<GeminiCallKind> = new Set(["genres", "artists"]);
 
@@ -176,8 +178,9 @@ export async function geminiQuotaAvailable(env: Env, ip: string, kind: GeminiCal
 }
 
 /** Records one Gemini API call (one batched classify-genres, classify-artists,
- * Phase 7a classify-moods, Phase 7b persona-generation, or Phase 7c caption-generation request, regardless of how many items were in
- * it) against both the global and per-IP daily caps. */
+ * Phase 7a classify-moods, Phase 7b persona-generation, Phase 7c
+ * caption-generation, or Phase 9 weekly-brief request, regardless of how
+ * many items were in it) against both the global and per-IP daily caps. */
 export async function logGeminiCall(env: Env, ip: string, kind: GeminiCallKind): Promise<void> {
   try {
     await env.DB.prepare(

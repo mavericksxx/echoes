@@ -8,7 +8,15 @@
 
 import { SLOTS, type Slot } from "../data/loader";
 import { drawPortrait, type ImageMap } from "./render";
-import { SAMPLE_NOW, SAMPLE_PLAYLISTS, getSamplePlaylist, type Persona, type Song } from "./sample-data";
+import {
+  SAMPLE_BRIEF,
+  SAMPLE_NOW,
+  SAMPLE_PLAYLISTS,
+  getSamplePlaylist,
+  type Persona,
+  type SampleBriefNewArtist,
+  type Song,
+} from "./sample-data";
 import {
   activitySource,
   getActivity,
@@ -17,6 +25,7 @@ import {
   getPersona,
   getSamplePlaysLogged,
   getSongs,
+  isVillageConnected,
   isVillageLive,
   villageSongsLive,
   type ArtistEntry,
@@ -1286,18 +1295,259 @@ function renderPlaylists(container: HTMLElement): void {
   container.appendChild(list);
 }
 
+// ---------------------------------------------------------------------------
+// Weekly brief (Phase 9 — SPEC.md's "Weekly notice board"). One fetch shared
+// by two sections: the global Notice board (headline/notes/movers, ignores
+// ctx.slot, same convention as Wrapped/Playlists above) and each character's
+// per-slot "This week" line (uses ctx.slot, more like Character/History).
+// ---------------------------------------------------------------------------
+interface WeeklyBriefMoverOut {
+  slotId: string;
+  playsThisWeek: number;
+  playsLastWeek: number;
+}
+interface WeeklyBriefNewArtistOut {
+  id: string;
+  name: string;
+  slotId: string | null;
+  plays: number;
+}
+interface WeeklyBriefOut {
+  weekStart: string;
+  headline: string;
+  notes: string[];
+  slotNotes: Record<string, string>;
+  movers: WeeklyBriefMoverOut[];
+  topNewArtists: WeeklyBriefNewArtistOut[];
+  generatedAt: string;
+}
+interface WeeklyBriefResponse {
+  brief: WeeklyBriefOut | null;
+}
+
+// Fetched once and reused across opens (same never-auto-retry convention as
+// historyDaily/wrappedCache above) — the brief only ever changes on a
+// once-a-week cron write, so there's nothing to gain from refetching every
+// time either tab is opened.
+let weeklyBriefCache: WeeklyBriefResponse | "error" | undefined;
+let weeklyBriefInFlight = false;
+
+async function fetchWeeklyBrief(): Promise<WeeklyBriefResponse | null> {
+  try {
+    const res = await fetch("/api/weekly-brief");
+    if (!res.ok) return null;
+    return (await res.json()) as WeeklyBriefResponse;
+  } catch {
+    return null;
+  }
+}
+
+function loadWeeklyBrief(): void {
+  if (weeklyBriefCache !== undefined || weeklyBriefInFlight) return;
+  weeklyBriefInFlight = true;
+  void fetchWeeklyBrief().then((data) => {
+    weeklyBriefInFlight = false;
+    weeklyBriefCache = data ?? "error";
+    // If the visitor is still on one of the two brief-fed tabs when this
+    // resolves, refresh it in place instead of leaving it on "loading" (same
+    // pattern as loadHistoryDaily/loadWrapped above).
+    if (currentSlot && (activeSectionId === "notice-board" || activeSectionId === "this-week")) renderSection(activeSectionId);
+  });
+}
+
+function formatWeekStart(weekStart: string): string {
+  const ms = Date.parse(`${weekStart}T00:00:00Z`);
+  return Number.isNaN(ms) ? weekStart : formatWrappedDate(ms);
+}
+
+function buildMoverRow(mover: WeeklyBriefMoverOut): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "artist-row";
+
+  const name = document.createElement("span");
+  name.className = "artist-row__name";
+  name.textContent = slotDisplayName(mover.slotId);
+
+  const delta = mover.playsThisWeek - mover.playsLastWeek;
+  const deltaText = delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : "±0";
+  const plays = document.createElement("span");
+  plays.className = "artist-row__plays";
+  plays.textContent = `${mover.playsThisWeek} (${deltaText})`;
+
+  row.append(name, plays);
+  return row;
+}
+
+function buildNewArtistRow(artist: WeeklyBriefNewArtistOut | SampleBriefNewArtist): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "artist-row";
+
+  const name = document.createElement("span");
+  name.className = "artist-row__name";
+  name.textContent = artist.slotId ? `${artist.name} · ${slotDisplayName(artist.slotId)}` : artist.name;
+
+  const plays = document.createElement("span");
+  plays.className = "artist-row__plays";
+  plays.textContent = `${artist.plays} play${artist.plays === 1 ? "" : "s"}`;
+
+  row.append(name, plays);
+  return row;
+}
+
+/** Shared by the real payload and SAMPLE_BRIEF — both already carry exactly
+ * these fields, so the render logic never has to branch beyond "which one
+ * did I get". */
+interface BriefContent {
+  weekStart: string;
+  headline: string;
+  notes: string[];
+  slotNotes: Record<string, string>;
+  movers: { slotId: string; playsThisWeek: number; playsLastWeek: number }[];
+  topNewArtists: (WeeklyBriefNewArtistOut | SampleBriefNewArtist)[];
+}
+
+function renderBriefContent(container: HTMLElement, brief: BriefContent): void {
+  const headline = document.createElement("p");
+  headline.className = "notice-board-headline";
+  headline.textContent = brief.headline;
+  container.appendChild(headline);
+
+  const posted = document.createElement("p");
+  posted.className = "history-caption";
+  posted.textContent = `Week of ${formatWeekStart(brief.weekStart)}`;
+  container.appendChild(posted);
+
+  if (brief.notes.length > 0) {
+    const list = document.createElement("ul");
+    list.className = "character-dialogue";
+    brief.notes.forEach((note) => {
+      const item = document.createElement("li");
+      item.textContent = note;
+      list.appendChild(item);
+    });
+    container.appendChild(list);
+  }
+
+  const movers = [...brief.movers].sort((a, b) => Math.abs(b.playsThisWeek - b.playsLastWeek) - Math.abs(a.playsThisWeek - a.playsLastWeek));
+  if (movers.length > 0) {
+    const heading = document.createElement("p");
+    heading.className = "sidebar-heading";
+    heading.textContent = "This week vs last";
+    container.appendChild(heading);
+    const list = document.createElement("div");
+    list.className = "artist-list";
+    movers.slice(0, 6).forEach((m) => list.appendChild(buildMoverRow(m)));
+    container.appendChild(list);
+  }
+
+  if (brief.topNewArtists.length > 0) {
+    const heading = document.createElement("p");
+    heading.className = "sidebar-heading";
+    heading.textContent = "New this week";
+    container.appendChild(heading);
+    const list = document.createElement("div");
+    list.className = "artist-list";
+    brief.topNewArtists.forEach((a) => list.appendChild(buildNewArtistRow(a)));
+    container.appendChild(list);
+  }
+}
+
+function renderNoticeBoard(container: HTMLElement): void {
+  // Sample mode is decided by *connected*, not *live* — the brief is a D1
+  // historical read, not a live Spotify poll, so "connected but paused"
+  // should still show real (if possibly stale) data, same as Wrapped.
+  if (!isVillageConnected()) {
+    renderBriefContent(container, SAMPLE_BRIEF);
+    return;
+  }
+
+  loadWeeklyBrief();
+  const cached = weeklyBriefCache;
+
+  if (cached === undefined) {
+    const loading = document.createElement("p");
+    loading.className = "sidebar-empty";
+    loading.textContent = "Loading the notice board…";
+    container.appendChild(loading);
+    return;
+  }
+  if (cached === "error" || !cached.brief) {
+    const empty = document.createElement("p");
+    empty.className = "sidebar-empty";
+    empty.textContent = "The notice board is empty — the first brief arrives after a full week of history.";
+    container.appendChild(empty);
+    return;
+  }
+
+  renderBriefContent(container, cached.brief);
+}
+
+function renderThisWeek(container: HTMLElement, ctx: SectionContext): void {
+  if (!isVillageConnected()) {
+    const note = SAMPLE_BRIEF.slotNotes[ctx.slot.district.id];
+    if (!note) {
+      const empty = document.createElement("p");
+      empty.className = "sidebar-empty";
+      empty.textContent = "Nothing on the notice board for this district this week.";
+      container.appendChild(empty);
+      return;
+    }
+    const p = document.createElement("p");
+    p.className = "character-personality";
+    p.textContent = note;
+    container.appendChild(p);
+    return;
+  }
+
+  loadWeeklyBrief();
+  const cached = weeklyBriefCache;
+
+  if (cached === undefined) {
+    const loading = document.createElement("p");
+    loading.className = "sidebar-empty";
+    loading.textContent = "Loading this week's notes…";
+    container.appendChild(loading);
+    return;
+  }
+  if (cached === "error" || !cached.brief) {
+    const empty = document.createElement("p");
+    empty.className = "sidebar-empty";
+    empty.textContent = "No weekly notes yet — the first brief arrives after a full week of history.";
+    container.appendChild(empty);
+    return;
+  }
+
+  const note = cached.brief.slotNotes[ctx.slot.district.id];
+  if (!note) {
+    const empty = document.createElement("p");
+    empty.className = "sidebar-empty";
+    empty.textContent = "Nothing on the notice board for this district this week.";
+    container.appendChild(empty);
+    return;
+  }
+  const p = document.createElement("p");
+  p.className = "character-personality";
+  p.textContent = note;
+  container.appendChild(p);
+}
+
 const SECTIONS: Section[] = [
   { id: "overview", label: "Overview", render: renderOverview },
   { id: "songs", label: "Songs", render: renderSongs },
   { id: "artists", label: "Artists", render: renderArtists },
   { id: "character", label: "Character", render: renderCharacter },
   { id: "history", label: "History", render: renderHistory },
+  // Per-slot, like Character/History above (SPEC.md's Phase 9).
+  { id: "this-week", label: "This week", render: renderThisWeek },
   // Global — deliberately ignores `ctx.slot` (SPEC.md's Phase 8.5: this is
   // the listener's whole Wrapped, not filtered to whichever character's
   // sidebar happens to be open).
   { id: "wrapped", label: "Wrapped", render: (container) => renderWrapped(container) },
   // Global, same reason as Wrapped above (SPEC.md's Phase 8.6).
   { id: "playlists", label: "Playlists", render: (container) => renderPlaylists(container) },
+  // Global, same reason as Wrapped/Playlists above (SPEC.md's Phase 9) — the
+  // village's notice board marker (src/main.ts) opens straight to this tab.
+  { id: "notice-board", label: "Notice board", render: (container) => renderNoticeBoard(container) },
 ];
 
 // ---------------------------------------------------------------------------

@@ -427,6 +427,62 @@ export function getSamplePlaylist(id: string): SamplePlaylist | undefined {
   return SAMPLE_PLAYLISTS.find((p) => p.id === id);
 }
 
+// ---------------------------------------------------------------------------
+// Weekly brief (Phase 9) — a handwritten sample notice-board post for the
+// offline/not-connected fallback, mirroring worker/weekly-brief.ts's
+// WeeklyBriefOut shape closely enough that src/sidebar.ts's Notice board and
+// This week sections can render either without branching on more than "is
+// this the sample brief" (see src/listening-source.ts's isVillageConnected).
+// ---------------------------------------------------------------------------
+export interface SampleBriefMover {
+  slotId: string;
+  playsThisWeek: number;
+  playsLastWeek: number;
+}
+
+export interface SampleBriefNewArtist {
+  name: string;
+  slotId: string;
+  plays: number;
+}
+
+export interface SampleBrief {
+  /** Display only — a plain "YYYY-MM-DD", not fetched/parsed like the real payload's. */
+  weekStart: string;
+  headline: string;
+  notes: string[];
+  slotNotes: Record<string, string>;
+  movers: SampleBriefMover[];
+  topNewArtists: SampleBriefNewArtist[];
+}
+
+export const SAMPLE_BRIEF: SampleBrief = {
+  weekStart: "2026-09-08",
+  headline: "Konoha leaned moody this week — Emo/Alt and Lo-fi both spiked while Pop went quiet.",
+  notes: [
+    "Gaara's district logged its loudest week yet.",
+    "Three brand-new artists showed up out of nowhere.",
+    "Sakura's corner has gone unusually quiet — worth a check-in.",
+  ],
+  slotNotes: {
+    gaara: "Rough week, but the music's been carrying it.",
+    shikamaru: "Slower days, slower songs. Fitting, honestly.",
+    sakura: "Haven't heard much from over here lately.",
+    naruto: "Same old favorites, on repeat as always.",
+  },
+  movers: [
+    { slotId: "gaara", playsThisWeek: 41, playsLastWeek: 19 },
+    { slotId: "shikamaru", playsThisWeek: 28, playsLastWeek: 15 },
+    { slotId: "naruto", playsThisWeek: 33, playsLastWeek: 31 },
+    { slotId: "sakura", playsThisWeek: 6, playsLastWeek: 22 },
+  ],
+  topNewArtists: [
+    { name: "Wisp", slotId: "gaara", plays: 7 },
+    { name: "Men I Trust", slotId: "shikamaru", plays: 5 },
+    { name: "beabadoobee", slotId: "ino", plays: 3 },
+  ],
+};
+
 /**
  * Picks a slot id at random, weighted by playShare. Falls back to a uniform
  * pick across all slots if every share is 0. Used to drive which character
