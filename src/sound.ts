@@ -62,6 +62,9 @@ function armGestureUnlock(): void {
   };
   window.addEventListener("pointerdown", unlock, { once: true, passive: true });
   window.addEventListener("keydown", unlock, { once: true });
+  // iOS Safari doesn't reliably fire pointerdown as a "real" user gesture for
+  // AudioContext purposes on every element — click always does.
+  window.addEventListener("click", unlock, { once: true });
 }
 armGestureUnlock();
 

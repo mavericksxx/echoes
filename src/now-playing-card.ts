@@ -30,7 +30,7 @@
 // off the transition instead of a fixed timer.
 
 import { coverPlaceholderGradient } from "./cover-art";
-import { isVillageConnected } from "./listening-source";
+import { isVillageLive } from "./listening-source";
 
 const PLAYING_POLL_MS = 10_000;
 const IDLE_POLL_MS = 15_000; // shorter so the "Parth is listening to" card appears soon after playback starts; Spotify load is still bounded by worker/now-playing.ts's 10s shared cache, so visitor count does not multiply Spotify calls
@@ -152,6 +152,7 @@ function renderTrack(track: NowPlayingTrack): void {
 
   card.classList.remove("now-playing-card--idle");
   link.href = track.spotifyUrl;
+  link.setAttribute("aria-label", "Open in Spotify");
   labelEl.textContent = "Parth is listening to";
   titleEl.textContent = track.title;
   artistEl.textContent = track.artist;
@@ -178,15 +179,17 @@ function renderTrack(track: NowPlayingTrack): void {
  * reach the frontend (worker/now-playing.ts degrades every one of them to
  * `{playing:false, track:null}` on purpose — see its doc comment). Rather
  * than just hiding the card (reads as "broken" more than "nothing to see"),
- * a connected account gets a clear idle state instead; see poll()'s
- * isVillageConnected() branch for why a *disconnected* visitor still gets
- * the plain hidden card (there's no account to report on at all). */
+ * a live account gets a clear idle state instead; see poll()'s
+ * isVillageLive() branch for why a *disconnected or non-live* (e.g. "Live
+ * paused") visitor still gets the plain hidden card instead of a misleading
+ * idle read. */
 function renderIdle(): void {
   if (lastTrackId === IDLE_MARKER) return; // already showing it — skip the churn
   lastTrackId = IDLE_MARKER;
 
   card.classList.add("now-playing-card--idle");
   link.removeAttribute("href");
+  link.removeAttribute("aria-label"); // no href — nothing for a screen reader to "open in Spotify"
   labelEl.textContent = "Parth's Spotify";
   titleEl.textContent = "Not playing right now";
   artistEl.textContent = "Check back later";
@@ -237,10 +240,12 @@ async function poll(): Promise<void> {
   if (data.playing && data.track) {
     renderTrack(data.track);
     showCard();
-  } else if (isVillageConnected()) {
-    // Connected but nothing playing (private session, a real pause, or a
-    // 204/null item — see renderIdle's doc comment) — a clear idle state,
-    // not just an invisible card.
+  } else if (isVillageLive()) {
+    // Live (not sample data) but nothing playing (private session, a real
+    // pause, or a 204/null item — see renderIdle's doc comment) — a clear
+    // idle state, not just an invisible card. isVillageLive(), not
+    // isVillageConnected(): a "Live paused" account that's mid-error/degraded
+    // shouldn't get an idle "Not playing" card mistaken for a live read.
     renderIdle();
     showCard();
   } else {

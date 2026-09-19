@@ -56,10 +56,10 @@ function writeDismissed(): void {
 let backdrop: HTMLDivElement;
 let modal: HTMLDivElement;
 let stepIndex = 0;
-let dontShowAgain = false;
 // Focus returns here on close, same "give focus back to whatever opened it"
 // convention as main.ts's own sidebar onClose hook (which refocuses #game).
 let lastFocused: HTMLElement | null = null;
+let onClose: (() => void) | undefined;
 
 function isOpen(): boolean {
   return !modal.hidden;
@@ -94,11 +94,17 @@ function trapFocus(ev: KeyboardEvent): void {
 
 function close(): void {
   if (!isOpen()) return;
-  if (dontShowAgain) writeDismissed();
+  // Persisted on every close, not just an opt-in checkbox — a walkthrough
+  // that reopens on every visit isn't "shown once"; the "?" button is
+  // already the documented way to see it again.
+  writeDismissed();
   backdrop.hidden = true;
   modal.hidden = true;
   modal.setAttribute("aria-hidden", "true");
   lastFocused?.focus();
+  const cb = onClose;
+  onClose = undefined; // one-shot — only the first, automatic open should fire it
+  cb?.();
 }
 
 function render(): void {
@@ -140,17 +146,6 @@ function render(): void {
   });
   modal.appendChild(dots);
 
-  if (isLast) {
-    const label = document.createElement("label");
-    label.className = "onboarding-checkbox";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = dontShowAgain;
-    checkbox.addEventListener("change", () => (dontShowAgain = checkbox.checked));
-    label.append(checkbox, document.createTextNode("Don't show this again"));
-    modal.appendChild(label);
-  }
-
   const actions = document.createElement("div");
   actions.className = "onboarding-actions";
   if (stepIndex > 0) {
@@ -185,7 +180,6 @@ function render(): void {
 function open(): void {
   if (isOpen()) return;
   stepIndex = 0;
-  dontShowAgain = false;
   lastFocused = document.activeElement as HTMLElement | null;
   backdrop.hidden = false;
   modal.hidden = false;
@@ -194,8 +188,17 @@ function open(): void {
 }
 
 /** Wires the "?" button (reopens any time) and the auto-open-on-first-visit
- * check. Call once at startup, same as src/main.ts's other init*() calls. */
-export function initOnboarding(backdropEl: HTMLDivElement, modalEl: HTMLDivElement, helpBtn: HTMLButtonElement): void {
+ * check. Call once at startup, same as src/main.ts's other init*() calls.
+ * `onCloseAfterAutoOpen`, if given, fires once, when the modal closes after
+ * that automatic first-visit open (not after a later "?"-triggered reopen)
+ * — src/main.ts uses it to defer the villageCaption timer so it doesn't run
+ * out from under the modal. Returns whether it auto-opened. */
+export function initOnboarding(
+  backdropEl: HTMLDivElement,
+  modalEl: HTMLDivElement,
+  helpBtn: HTMLButtonElement,
+  onCloseAfterAutoOpen?: () => void,
+): boolean {
   backdrop = backdropEl;
   modal = modalEl;
 
@@ -203,8 +206,22 @@ export function initOnboarding(backdropEl: HTMLDivElement, modalEl: HTMLDivEleme
   backdrop.addEventListener("click", close);
   modal.addEventListener("keydown", trapFocus);
   window.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && isOpen()) close();
+    if (ev.key !== "Escape" || !isOpen()) return;
+    // stopImmediatePropagation, not just close(): this listener runs before
+    // main.ts's own Escape handler (registered later, also on window), which
+    // would otherwise also close the sidebar behind this modal on the same
+    // keypress.
+    ev.stopImmediatePropagation();
+    close();
   });
 
-  if (!readDismissed()) open();
+  const autoOpened = !readDismissed();
+  if (autoOpened) {
+    // Only this first, automatic open should trigger onCloseAfterAutoOpen —
+    // a later reopen via the "?" button already had its own villageCaption
+    // timer start long ago.
+    onClose = onCloseAfterAutoOpen;
+    open();
+  }
+  return autoOpened;
 }

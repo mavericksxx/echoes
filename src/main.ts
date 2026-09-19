@@ -131,7 +131,11 @@ initSidebar(sidebarRoot, sidebarBackdrop, {
 initTopArtists();
 initNowPlayingCard();
 void initHistoryStats();
-initOnboarding(onboardingBackdrop, onboardingModal, helpBtn);
+// villageCaption's own ~6s auto-dismiss timer (armed further down this file,
+// see armVillageCaptionTimer) is deferred to start only once onboarding
+// closes, when onboarding auto-opened (first visit) — otherwise it was
+// silently running out underneath the modal.
+const onboardingAutoOpened = initOnboarding(onboardingBackdrop, onboardingModal, helpBtn, () => armVillageCaptionTimer());
 
 let images: ImageMap = {};
 let mode: Mode = "village"; // default view: the whole village, everyone present
@@ -447,6 +451,7 @@ function easeOutCubic(t: number): number {
  * retargets it from the live in-flight zoom instead of queuing — see
  * `fromZoom: zoom` below, `zoom` being whatever updateZoomAnim last drew. */
 function stepZoom(delta: number, focalClient?: { x: number; y: number }): void {
+  if (activeRecording) return; // canvas.width/height resize would corrupt the in-flight captureStream
   dismissVillageCaption();
   const beforeRect = canvas.getBoundingClientRect();
   const focal = focalClient ?? {
@@ -1102,6 +1107,7 @@ if (!isRecordingSupported()) {
       (remainingMs) => (recordIndicator.textContent = formatCountdown(remainingMs)),
       (blob, mimeType) => {
         endRecordingUi();
+        if (blob.size === 0) return; // a mid-recording failure left nothing to save
         downloadRecording(blob, mimeType);
       },
     );
@@ -1144,7 +1150,12 @@ function dismissVillageCaption(): void {
   // avoids the text visibly popping out mid-transition.
   villageCaption.addEventListener("transitionend", () => (villageCaption.hidden = true), { once: true });
 }
-window.setTimeout(dismissVillageCaption, VILLAGE_CAPTION_TIMEOUT_MS);
+function armVillageCaptionTimer(): void {
+  window.setTimeout(dismissVillageCaption, VILLAGE_CAPTION_TIMEOUT_MS);
+}
+// Deferred to onboarding's onClose callback above when it auto-opened —
+// otherwise armed right away, same as before.
+if (!onboardingAutoOpened) armVillageCaptionTimer();
 
 const resizeObserver = new ResizeObserver(() => fitCanvas());
 resizeObserver.observe(stageArea);

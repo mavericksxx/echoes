@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- **Phase 13 review fixes:** onboarding dismissal now persists unconditionally on close (no more
+  reopening every visit); phone layout keeps the now-playing card from covering the media controls;
+  the snapshot caption renders at full resolution instead of downscaled; the now-playing card's
+  "Live paused" state no longer shows an idle "Not playing" card; assorted hardening (recorder error
+  handling, zero-byte clip guard, zoom ignored mid-recording, iOS sound unlock on `click`, Escape
+  scoped to the onboarding modal).
 - **Phase 13 (part B) — Show it off:** onboarding, edge-state polish, and a disconnect-script audit,
   no new dependencies. **Onboarding** (`src/onboarding.ts`, new module): a 3-step first-visit
   walkthrough (village = Parth's listening, genres as characters/districts, the Hokage/notice

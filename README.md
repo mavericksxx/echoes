@@ -158,13 +158,16 @@ remote D1. That covers the token, caches, usage and play logs, briefs, world
 state, and the agent's run and event history. The site goes back to the **Not connected** state until
 `spotify:connect` runs again.
 
+App access can also be revoked from Spotify's own side at
+[spotify.com/account/apps](https://www.spotify.com/account/apps).
+
 ## Architecture (Phase 1–2)
 
 - **Frontend** — Vite + TypeScript (strict), plain canvas 2D (no PixiJS).
-  `src/main.ts` wires together the whole-village view (default), the
-  single-district view, and the all-characters roster on top of `src/npc.ts`
-  (wander/perform state machine), `src/render.ts` (image loading + sprite
-  drawing), and `src/recolor.ts` (pre-baked district recolors). The camera
+  `src/main.ts` wires together the whole-village view (default) and the
+  single-district view on top of `src/npc.ts` (wander/perform state
+  machine), `src/render.ts` (image loading + sprite drawing), and
+  `src/recolor.ts` (pre-baked district recolors). The camera
   (integer-zoom canvas backing store + `ctx.translate`) lives in `main.ts`
   alongside pointer drag-pan/tap and keyboard pan/navigation.
 - **Sidebar** — `src/sidebar.ts` renders the genre panel opened by tapping a
@@ -297,7 +300,9 @@ state, and the agent's run and event history. The site goes back to the **Not co
   read-only tools over the same data.
 - **Show it off** — `src/capture.ts` handles snapshots and recording
   (`canvas.captureStream` + `MediaRecorder`, max 10s). `src/sound.ts` makes
-  WebAudio cues with no asset files; sound is muted by default.
+  WebAudio cues with no asset files; sound is muted by default. `src/onboarding.ts`
+  is a short first-visit walkthrough, reopenable any time from the topbar's
+  "?" button.
 
 ## The village agent (Phases 11–12)
 
