@@ -11,7 +11,7 @@ captions — deployed 2026-09-19).
 
 Phase 8.6 first cut (sidebar playlists) deployed 2026-09-19 after the playlist-scope reconnect.
 Parked (2026-09-19): playlist *buildings* on the map (8.6 follow-on). Phase 9 (weekly notice board) deployed 2026-09-19; first real brief for the week of 2026-09-21.
-Remaining SPEC phases not started: 10 (Hokage chat agent),
+Phase 10 (Hokage chat agent) built 2026-09-19 (not yet deployed). Remaining SPEC phases not started:
 11 (self-evolving village agent), 12 (chronicle), 13 (show it off).
 
 Notes on the finished grid work: two rooms are tight enough to watch — `shopFlower` collapses the 5
