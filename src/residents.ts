@@ -74,6 +74,17 @@ function residentSheetKey(rigId: string, tintIndex: number): string {
   return tintIndex === 0 ? base : `${base}::tint${tintIndex}`;
 }
 
+/** A generic, untinted rig for a marker that isn't a real resident or crowd
+ * villager — Phase 11's visitor decor (see src/main.ts). Picked
+ * deterministically from `seed` so the same visitor always renders with the
+ * same rig across reloads, same technique as crowdRigId below. Always the
+ * base (untinted) sheet key, which is loaded unconditionally (see
+ * ensureTintedSheets), so no baking is needed for this to draw correctly. */
+export function genericCharacter(seed: string): CharacterDef {
+  const rigId = RIG_IDS[hashSeed(seed) % RIG_IDS.length]!;
+  return residentCharacter(rigId, NPC_RIGS[rigId]!.sheet);
+}
+
 /** Bakes the tinted rig-sheet variants residents need into `images` under
  * synthetic keys (see residentSheetKey), so drawNpc's plain `images[sheet]`
  * lookup works unchanged. Idempotent — bakeRecolor caches by (source,

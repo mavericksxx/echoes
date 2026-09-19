@@ -967,6 +967,39 @@ select {
   flex: none;
 }
 
+/* ---- Village today (Phase 11) — a compact status card showing the daily
+   village agent's weather/time-of-day/festival/visitor state (see
+   src/sidebar.ts's renderVillageToday). Sits between the header and the
+   tablist since it's village-wide, not scoped to whichever tab is open. ---- */
+.village-today {
+  flex: none;
+  margin-top: var(--space-2);
+  padding: 6px var(--space-3);
+  background: var(--paper-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.village-today__line {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.village-today__line--summary {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* --seal-deep, not --seal (see its :root comment) — small bold text. */
+.village-today__line--festival {
+  color: var(--seal-deep);
+  font-weight: 600;
+}
+
 /* ---- tablist ---- */
 .sidebar-tablist {
   flex: none;
@@ -1120,6 +1153,22 @@ select {
   font-size: var(--text-xs);
   color: var(--color-text-faint);
   margin: 6px 0 0;
+}
+
+/* Phase 11: a small festival chip in the Overview panel, shown only while
+   the daily village agent has an active festival for this district (see
+   src/world-state.ts's getFestivalForSlot). --seal-deep, not --seal (see
+   its :root comment) — this is small bold text, held to the 4.5:1 bar. */
+.festival-chip {
+  display: inline-block;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--seal-deep);
+  background: rgba(184, 50, 31, 0.12);
+  border: 1px solid var(--seal-deep);
+  border-radius: 3px;
+  padding: 2px var(--space-2);
 }
 
 .overview-stats {
