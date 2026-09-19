@@ -9,7 +9,7 @@ History strip — 2026-09-18), **Phase 8.5** (Wrapped on demand — `/api/wrappe
 — 2026-09-19), **Phase 6** (passive rate-limit audit, no ramp — 2026-09-19), **Phase 7** (moods, personas, AI
 captions — deployed 2026-09-19).
 
-Phase 8.6 first cut (sidebar playlists) merged 2026-09-19 — deploy after the owner reconnects Spotify.
+Phase 8.6 first cut (sidebar playlists) deployed 2026-09-19 after the playlist-scope reconnect.
 Next: playlist *buildings* on the map (8.6 follow-on).
 
 Notes on the finished grid work: two rooms are tight enough to watch — `shopFlower` collapses the 5
