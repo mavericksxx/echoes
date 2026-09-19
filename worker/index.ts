@@ -133,7 +133,12 @@ export default {
     }
 
     if (playlistDetailMatch) {
-      return handlePlaylistDetail(request, env, decodeURIComponent(playlistDetailMatch[1]!));
+      // The raw path segment, undecoded — worker/playlists.ts shape-checks
+      // it against Spotify's base62 id format before using it for anything,
+      // so decoding here would only add a URIError-on-malformed-%-escape
+      // failure mode (500, e.g. a request for /api/playlists/%zz) for no
+      // benefit.
+      return handlePlaylistDetail(request, env, playlistDetailMatch[1]!);
     }
 
     // Reached only when a request matches neither a rate-limited /api/*

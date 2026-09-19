@@ -561,17 +561,24 @@ idea above has something real to build on top of once map/building work is sched
   `playlist-read-private` + `playlist-read-collaborative`, added to `scripts/spotify-connect.mjs`'s
   `SCOPES`. The owner has to rerun `npm run spotify:connect` once to pick them up; until then,
   Spotify answers both endpoints with 401/403.
-- `worker/playlists.ts`: `GET /api/playlists` lists the owner's playlists — owned or collaborative
-  only (`GET /playlists/{id}/items` returns track content for nothing else, per this phase's
-  research), so a **followed-but-not-owned playlist is dropped, never shown half-working**. Each
-  entry is name/cover/track-count only. `GET /api/playlists/{id}` is the lazy per-playlist fetch:
-  up to 3 pages of 100 items (300 tracks; a longer playlist gets `truncated: true` rather than a
-  wider fetch, same rule `worker/tracks.ts` already follows for the Songs tab), primary-artist-only
-  bucketing (same convention as `worker/tracks.ts`/`worker/history-query.ts`), and the artist ids
-  are resolved to slots through the existing `artist_cache`/`worker/genre-resolution.ts` pipeline —
-  zero new Spotify calls for that step, and Gemini is only spent on artists genuinely never seen
-  before. Response is a per-slot `cast`: slot id, share of classified tracks, and up to 3 top
-  artists by track count.
+- `worker/playlists.ts`: `GET /api/playlists` lists the owner's playlists — **owned and public
+  only** (`INCLUDE_PRIVATE_PLAYLISTS = false`, the owner's own choice, checked against Spotify's
+  `public` field; not a Spotify content-access rule like the owned-only half of the filter is).
+  A followed-but-not-owned playlist is dropped too (`GET /playlists/{id}/items` returns track
+  content for nothing else, per this phase's research) — either way, **dropped server-side, never
+  shown half-working**. A collaborative playlist is private by construction, so it's excluded by
+  the public check with no separate case needed. Each entry is name/cover/track-count only.
+  `GET /api/playlists/{id}` is the lazy per-playlist fetch — **not an open Spotify-playlist-id
+  proxy**: the id is shape-checked (Spotify's 22-character base62 id format) and then confirmed
+  against that same owned+public list before any Spotify call is made about it; an id that fails
+  either check gets a 400 or an uncached `{ reason: "not-found" }` respectively, never a live
+  lookup of an arbitrary playlist. For an id that passes: up to 3 pages of 100 items (300 tracks; a
+  longer playlist gets `truncated: true` rather than a wider fetch, same rule `worker/tracks.ts`
+  already follows for the Songs tab), primary-artist-only bucketing (same convention as
+  `worker/tracks.ts`/`worker/history-query.ts`), and the artist ids are resolved to slots through
+  the existing `artist_cache`/`worker/genre-resolution.ts` pipeline — zero new Spotify calls for
+  that step, and Gemini is only spent on artists genuinely never seen before. Response is a
+  per-slot `cast`: slot id, share of classified tracks, and up to 3 top artists by track count.
 - **No raw playlist/track content in D1** (SPEC.md's storage policy) — neither endpoint writes a
   playlist id, track id, or track name anywhere; only artist ids/names ever reach `artist_cache`,
   the same table `/api/village` and the history cron already write to.
@@ -588,9 +595,9 @@ idea above has something real to build on top of once map/building work is sched
   `playlistDetail` (detail, capped like `village` since it can also spend Gemini quota).
 - Frontend: `src/sidebar.ts`'s Playlists tab shows the list (cover, name, count), and selecting one
   shows its cast as genre characters (the existing sidebar-header portraits, reused via
-  `drawPortrait`) with each slot's share and top artists. Loading, empty (no owned/collaborative
-  playlists), and needs-reconnect states are all explicit, never a blank tab. Not-connected
-  (sample-data) mode shows two handwritten sample playlists (`src/sample-data.ts`'s
+  `drawPortrait`) with each slot's share and top artists. Loading, empty (no owned/public
+  playlists), needs-reconnect, and not-found states are all explicit, never a blank tab.
+  Not-connected (sample-data) mode shows two handwritten sample playlists (`src/sample-data.ts`'s
   `SAMPLE_PLAYLISTS`) with the same cast shape, so the tab exercises the same UI offline.
 - **Deferred to a later pass:** playlists as map buildings/interiors, and feeding a playlist's
   genre breakdown into Phase 8.5's Wrapped view (Wrapped stays scoped to `play_event` listening

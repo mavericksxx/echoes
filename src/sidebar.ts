@@ -977,7 +977,13 @@ interface PlaylistCastSlot {
 }
 type PlaylistDetailPayload =
   | { connected: false }
-  | { connected: true; live: false; reason: "paused" | "needs-reconnect" }
+  // "not-found": worker/playlists.ts returns this when the id isn't in the
+  // owner's own filtered playlist list — treated the same as the generic
+  // couldn't-load message below (renderPlaylistDetail's `!cached.live`
+  // branch), no dedicated copy needed for a case a visitor can't otherwise
+  // reach except a stale list (a playlist made private/deleted after the
+  // list loaded).
+  | { connected: true; live: false; reason: "paused" | "needs-reconnect" | "not-found" }
   | {
       connected: true;
       live: true;
