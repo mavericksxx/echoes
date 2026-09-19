@@ -62,6 +62,17 @@ export const RATE_LIMIT_RULES: Record<string, RateLimitRule> = {
   // other Gemini-triggering buckets above since one question can cost
   // several model steps, not one.
   hokage: { windowSeconds: 60, max: 6 },
+  // Phase 11: GET /api/world — D1-only reads (world_state + a small
+  // artist_cache join), no Spotify/Gemini call this path can ever trigger
+  // (generation is the cron's job) — same generous limit as historyStats.
+  world: { windowSeconds: 60, max: 60 },
+  // Phase 11: POST /api/world/run — a token-gated manual trigger for the
+  // daily village agent (worker/village-agent.ts), which can run the full
+  // Gemini tool loop and write to D1. The token gate is the real access
+  // control; this is just burst protection on top, tighter than `hokage`
+  // since one call here can be considerably more expensive than one chat
+  // question.
+  worldRun: { windowSeconds: 60, max: 5 },
 };
 
 function bucketKey(ip: string, bucket: string, windowStart: number): string {
@@ -137,13 +148,18 @@ export async function enforceRateLimit(env: Env, ip: string, bucket: string, rul
 // rest of the day; its own dedicated per-IP question cap
 // (worker/hokage.ts's QUESTION_DAILY_CAP, enforced against usage_log's
 // 'hokage:question' rows, not this file's 'gemini:%' ones) is what actually
-// bounds one visitor's chat cost.
+// bounds one visitor's chat cost. "agent" (Phase 11 —
+// worker/village-agent.ts) is exempt for the same multi-step reason, and
+// also because it always runs under the "cron" pseudo-IP (same one
+// "brief" uses) rather than a real visitor's — exempting it stops the daily
+// village-evolution run from ever competing with a real visitor's own
+// per-IP budget, or getting starved by one.
 // ---------------------------------------------------------------------------
 export const GEMINI_DAILY_GLOBAL_CAP = 300;
 export const GEMINI_DAILY_PER_IP_CAP = 40;
 // Headroom reserved for "genres"/"artists" (slot resolution) — non-core
-// kinds ("moods"/"persona"/"captions"/"chat") may only use the global cap
-// down to GEMINI_DAILY_GLOBAL_CAP - GEMINI_DAILY_CORE_RESERVE, never past it.
+// kinds ("moods"/"persona"/"captions"/"chat"/"agent") may only use the global
+// cap down to GEMINI_DAILY_GLOBAL_CAP - GEMINI_DAILY_CORE_RESERVE, never past it.
 export const GEMINI_DAILY_CORE_RESERVE = 100;
 // Dedicated daily ceiling for "captions" specifically, on top of (not
 // instead of) the reserve-adjusted global cap above — the one kind whose
@@ -155,14 +171,19 @@ export const GEMINI_DAILY_CAPTIONS_CAP = 60;
 // across every visitor combined, same "on top of the shared reserve" role as
 // GEMINI_DAILY_CAPTIONS_CAP above.
 export const GEMINI_DAILY_CHAT_STEPS_CAP = 80;
+// Dedicated daily ceiling for "agent" model steps (Phase 11's daily village
+// cron — worker/village-agent.ts), same role as GEMINI_DAILY_CHAT_STEPS_CAP
+// above but much smaller: this runs once a day (plus the occasional retry),
+// never per-visitor, so it needs nowhere near chat's budget.
+export const GEMINI_DAILY_AGENT_STEPS_CAP = 12;
 
-export type GeminiCallKind = "genres" | "artists" | "moods" | "persona" | "captions" | "brief" | "chat";
+export type GeminiCallKind = "genres" | "artists" | "moods" | "persona" | "captions" | "brief" | "chat" | "agent";
 
 const CORE_KINDS: ReadonlySet<GeminiCallKind> = new Set(["genres", "artists"]);
 
-/** Kinds exempt from GEMINI_DAILY_PER_IP_CAP below — see "chat"'s doc
- * comment in this file's header block for why. */
-const PER_IP_CAP_EXEMPT_KINDS: ReadonlySet<GeminiCallKind> = new Set(["chat"]);
+/** Kinds exempt from GEMINI_DAILY_PER_IP_CAP below — see "chat"/"agent"'s
+ * doc comment in this file's header block for why. */
+const PER_IP_CAP_EXEMPT_KINDS: ReadonlySet<GeminiCallKind> = new Set(["chat", "agent"]);
 
 // Exported so worker/hokage.ts's own per-IP daily question cap (a separate
 // usage_log endpoint, 'hokage:question' — not one of this file's 'gemini:%'
@@ -220,15 +241,24 @@ export async function geminiQuotaAvailable(env: Env, ip: string, kind: GeminiCal
     if ((chatRow?.n ?? 0) >= GEMINI_DAILY_CHAT_STEPS_CAP) return false;
   }
 
+  if (kind === "agent") {
+    const agentRow = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM usage_log WHERE endpoint = 'gemini:agent' AND created_at >= ?",
+    )
+      .bind(since)
+      .first<{ n: number }>();
+    if ((agentRow?.n ?? 0) >= GEMINI_DAILY_AGENT_STEPS_CAP) return false;
+  }
+
   return true;
 }
 
 /** Records one Gemini API call (one batched classify-genres, classify-artists,
  * Phase 7a classify-moods, Phase 7b persona-generation, Phase 7c
- * caption-generation, Phase 9 weekly-brief request, or one Phase 10 chat
- * model step, regardless of how many items were in it) against the global
- * daily cap and, for every kind except "chat" (see its exemption above),
- * the per-IP one too. */
+ * caption-generation, Phase 9 weekly-brief request, one Phase 10 chat model
+ * step, or one Phase 11 village-agent model step, regardless of how many
+ * items were in it) against the global daily cap and, for every kind except
+ * "chat"/"agent" (see their exemption above), the per-IP one too. */
 export async function logGeminiCall(env: Env, ip: string, kind: GeminiCallKind): Promise<void> {
   try {
     await env.DB.prepare(

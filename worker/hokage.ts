@@ -390,6 +390,16 @@ const TOOL_DEFS: ChatToolDef[] = [
   },
 ];
 
+// Tool-enabled steps only — worker/gemini.ts's chatWithTools adds one more
+// possible forced final turn on top of this (see its own doc comment), so a
+// single question can cost up to 5 Gemini calls total, not 4.
+const MAX_CHAT_STEPS = 4;
+
+const CHAT_LIMITED_REPLY =
+  "The Hokage has spoken with a great many visitors today and needs rest before answering more. Come back tomorrow.";
+const CHAT_FALLBACK_REPLY =
+  "The Hokage pauses for a long moment, then admits that question needs more thought than there's time for right now. Try asking again, maybe phrased a little differently.";
+
 const TOOL_IMPLS: Record<string, (env: Env, args: Record<string, unknown>) => Promise<ToolResult>> = {
   get_top_artists: toolGetTopArtists,
   get_recent_plays: toolGetRecentPlays,
@@ -444,7 +454,12 @@ export async function handleHokage(request: Request, env: Env): Promise<Response
     return result.data;
   };
 
-  const outcome = await chatWithTools(env, ip, SYSTEM_PROMPT, messages, TOOL_DEFS, runTool);
+  const outcome = await chatWithTools(env, ip, SYSTEM_PROMPT, messages, TOOL_DEFS, runTool, {
+    kind: "chat",
+    maxSteps: MAX_CHAT_STEPS,
+    limitedReply: CHAT_LIMITED_REPLY,
+    fallbackReply: CHAT_FALLBACK_REPLY,
+  });
   await logQuestion(env, ip);
   const remaining = Math.max(0, QUESTION_DAILY_CAP - askedToday - 1);
 

@@ -89,6 +89,18 @@ control"):
 npx wrangler secret put GEMINI_API_KEY
 ```
 
+**1c. (Optional) Set an `AGENT_TRIGGER_TOKEN` Worker secret** (Phase 11 —
+lets you manually trigger the daily village-evolution agent instead of
+waiting for the next cron tick, e.g. while testing):
+
+```sh
+npx wrangler secret put AGENT_TRIGGER_TOKEN
+```
+
+With it set, `POST /api/world/run` (header `X-Agent-Token: <that value>`,
+optionally `?force=1` to bypass the once-a-day gate) runs the agent inline
+and returns its result. Without it, that route always 404s.
+
 **2. Apply the D1 schema to the remote database** (only needed once, or
 after a new migration is added):
 
