@@ -1,11 +1,17 @@
 # Echoes
 
-A pixel village driven by Spotify listening. Each music genre is one Naruto
-character living in its own district; Phase 1 renders the village with
-hard-coded sample listening data — no Spotify connection yet. The default
-view is the whole village (everyone at once); tap any character to open their
-genre sidebar. See `IDEA.md` for the concept and `SPEC.md` for the full
-phased build plan.
+A pixel village driven by one person's Spotify listening, live at
+[echoes.parthkohale.com](https://echoes.parthkohale.com). Each music genre is a
+Naruto (DS) character living in their own district. The village grows, quiets
+and celebrates as the listening changes. A Gemini agent also runs once a day
+and changes the weather, festivals, visitors and moods by itself, and a
+chronicle shows what it changed and why. See `IDEA.md` for the concept and
+`SPEC.md` for the phased build plan.
+
+What's in it: the whole-village view and per-district views; a genre sidebar
+(Overview, Songs, Artists, History, Wrapped, Playlists, Notice board, Hokage
+chat, Chronicle); a now-playing card; PNG snapshots and short recorded clips;
+and optional synthesized sound.
 
 ## Setup
 
@@ -147,9 +153,9 @@ the app, just without fresh data.
 npm run spotify:disconnect
 ```
 
-Deletes the stored refresh token and everything derived from it
-(`spotify_token`, `artist_cache`, `usage_log`, `genre_slot_map`) from the
-remote D1. The site goes back to the **Not connected** state until
+Deletes the stored refresh token and every table derived from it from the
+remote D1. That covers the token, caches, usage and play logs, briefs, world
+state, and the agent's run and event history. The site goes back to the **Not connected** state until
 `spotify:connect` runs again.
 
 ## Architecture (Phase 1–2)
@@ -273,3 +279,52 @@ remote D1. The site goes back to the **Not connected** state until
   the long_term baseline) renders faded and stands still instead of
   wandering — placement otherwise puts the highest-scoring resident closest
   to the leader and lower-scoring ones further out.
+
+## Architecture (Phases 4–13)
+
+- **Movement** — every map has a hand-checked walkability grid, and characters
+  path with A* (`src/pathfinding.ts`).
+- **Now playing** (`worker/now-playing.ts`, `src/now-playing-card.ts`) — the
+  display-only now-playing card; the district of the playing track's genre
+  reacts on the map.
+- **History** — a 15-minute cron (`worker/history.ts`) logs plays into
+  `play_event`. That log drives activity, the era toggle, the sidebar History
+  strip, and Wrapped on demand (`/api/wrapped`).
+- **Moods, personas, captions** — Gemini Flash-Lite writes these once and they
+  are cached in D1. No LLM call ever runs on page load.
+- **Weekly notice board** (`worker/weekly-brief.ts`) and **Hokage chat**
+  (`worker/hokage.ts`, `POST /api/hokage`), which answers questions through
+  read-only tools over the same data.
+- **Show it off** — `src/capture.ts` handles snapshots and recording
+  (`canvas.captureStream` + `MediaRecorder`, max 10s). `src/sound.ts` makes
+  WebAudio cues with no asset files; sound is muted by default.
+
+## The village agent (Phases 11–12)
+
+`worker/village-agent.ts` rides the same cron tick and runs **at most once per
+owner-local day**, on the first tick after 06:00 (`OWNER_TZ`). The loop works
+like this:
+
+1. **Context up front, no read tools.** One prompt carries recent listening
+   and the current `WorldState` (`shared/world.ts`). The model only gets write
+   tools: `set_district_activity`, `set_weather`, `start_festival`,
+   `set_time_of_day`, `send_visitor`, `set_character_mood`.
+2. **Validate every write.** Each call is checked server-side (known slot,
+   known enum, caps such as `MAX_FESTIVALS` and at most
+   `MAX_ACCEPTED_CALLS_PER_RUN` accepted calls). A rejected call returns an
+   error to the model and is never applied or logged.
+3. **Everything expires.** Each change is a `Timed<T>` with an expiry, so the
+   village drifts back to what the listening alone says. Both the Worker and
+   the client prune expired entries through `effectiveWorld()`.
+4. **Persist diffs, not just state.** `agent_run` stores the state before and
+   after each run plus a one-line summary. `agent_event` stores each accepted
+   call with its args, the model's reasoning, and the exact slice of state it
+   changed. A failed attempt stays `pending` and retries on a later tick; its
+   events are replaced, not appended.
+5. **Chronicle.** `GET /api/chronicle` returns the last 30 runs. The sidebar
+   tab shows each change with the reasoning quoted under it. **Replay** folds
+   the day's events over `stateBefore` (`applyAgentEventSlice`) and plays
+   each step on the map through a single override in `src/world-state.ts`,
+   so rendering has no replay-only code path.
+
+`POST /api/world/run` (token-gated) triggers a run by hand.
