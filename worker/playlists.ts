@@ -296,8 +296,10 @@ interface SpotifyPlaylistTrack {
 
 interface SpotifyPlaylistItem {
   // Can be null for a removed/unavailable track — Spotify still returns the
-  // slot in the page.
-  track: SpotifyPlaylistTrack | null;
+  // slot in the page. Feb 2026 renamed `track` to `item` (migration guide:
+  // "tracks.tracks.track" → "items.items.item"); `track` kept as a fallback.
+  item?: SpotifyPlaylistTrack | null;
+  track?: SpotifyPlaylistTrack | null;
 }
 
 interface SpotifyPlaylistItemsResponse {
@@ -339,7 +341,7 @@ async function fetchPlaylistPrimaryArtists(
     );
     total = data.total;
     for (const item of data.items) {
-      const track = item.track;
+      const track = item.item ?? item.track;
       if (!track || track.type !== "track" || track.is_local) continue;
       tracksSeen++;
       const primary = track.artists?.[0];
