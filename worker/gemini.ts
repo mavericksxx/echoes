@@ -490,6 +490,11 @@ interface ChatPart {
   text?: string;
   functionCall?: { name: string; args?: Record<string, unknown> };
   functionResponse?: { name: string; response: Record<string, unknown> };
+  // Gemini 3 models attach this to a functionCall part and require it to be
+  // echoed back verbatim on the model turn that follows (the API 400s
+  // otherwise) — never generated or inspected here, just round-tripped. See
+  // callGeminiStep's rawParts and chatWithTools' push of them below.
+  thoughtSignature?: string;
 }
 interface ChatContent {
   role: "user" | "model";
@@ -507,6 +512,11 @@ interface ChatGenerateContentResponse {
 interface ChatStepResult {
   text: string | null;
   functionCall: { name: string; args: Record<string, unknown> } | null;
+  // The candidate's own parts, untouched — chatWithTools pushes these back
+  // verbatim as the model turn instead of reconstructing a `functionCall`
+  // part by hand, so any sibling field the API attached (Gemini 3's
+  // thoughtSignature in particular — see ChatPart) survives the round trip.
+  rawParts: ChatPart[];
 }
 
 /** One generateContent call in the chat loop — unlike generateJson, no
@@ -568,12 +578,16 @@ async function callGeminiStep(
   }
 
   const parts = candidate.content?.parts ?? [];
+  // If the model returns several functionCall parts in one step, only the
+  // first is actually acted on (see chatWithTools) — but rawParts still
+  // carries every part as the API sent it, so the echoed model turn stays
+  // byte-for-byte faithful regardless.
   const callPart = parts.find((p) => p.functionCall);
   if (callPart?.functionCall) {
-    return { text: null, functionCall: { name: callPart.functionCall.name, args: callPart.functionCall.args ?? {} } };
+    return { text: null, functionCall: { name: callPart.functionCall.name, args: callPart.functionCall.args ?? {} }, rawParts: parts };
   }
   const text = parts.map((p) => p.text ?? "").join("").trim();
-  return { text: text || null, functionCall: null };
+  return { text: text || null, functionCall: null, rawParts: parts };
 }
 
 /** Runs the Hokage chat loop: sends `history` (already validated/trimmed by
@@ -622,7 +636,12 @@ export async function chatWithTools(
     }
 
     const { name, args } = result.functionCall;
-    contents.push({ role: "model", parts: [{ functionCall: { name, args } }] });
+    // Echo the candidate's parts back verbatim (not a hand-rebuilt
+    // `[{ functionCall: { name, args } }]`) — Gemini 3 models attach a
+    // `thoughtSignature` to the functionCall part and require it to be
+    // echoed back on the next turn, or the API 400s. Only `name`/`args` are
+    // actually acted on below; `rawParts` is what gets sent back to Gemini.
+    contents.push({ role: "model", parts: result.rawParts });
     toolCalls.push({ name, args });
 
     let toolOutput: unknown;
