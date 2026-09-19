@@ -181,3 +181,99 @@ export function sanitizeLabel(s: string, max: number): string {
   const stripped = s.trim().replace(/[\x00-\x1F\x7F]/g, ""); // strips C0/DEL control chars, including \n/\r
   return stripped.length > max ? stripped.slice(0, max) : stripped;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 12: "village chronicle" — GET /api/chronicle's response shape
+// (worker/chronicle.ts) and the replay helper that walks it, shared here
+// (not hand-duplicated per side, unlike e.g. WeeklyBriefOut/WrappedPayload)
+// because applyAgentEventSlice below needs the exact same types the Worker
+// writes, and src/sample-data.ts's SAMPLE_CHRONICLE needs to satisfy them
+// too — same three-way reuse WorldResponse above already gets.
+// ---------------------------------------------------------------------------
+
+/** One agent_event row (migrations/0010_village_agent.sql), as returned by
+ * GET /api/chronicle. `args` is the tool call's raw arguments; `before`/
+ * `after` are that call's own narrow WorldState slice (see the migration's
+ * doc comment) — typed `unknown` here since which slice shape applies
+ * depends on `tool`, resolved by applyAgentEventSlice below. */
+export interface ChronicleEvent {
+  id: number;
+  tool: string;
+  args: Record<string, unknown>;
+  reasoning: string;
+  before: unknown;
+  after: unknown;
+  createdAt: string; // ISO
+}
+
+/** One agent_run row plus its agent_event children, in id order. */
+export interface ChronicleRun {
+  runDate: string; // owner-local "YYYY-MM-DD"
+  status: "ready" | "pending";
+  summary: string;
+  lastAttemptAt: string; // ISO
+  stateBefore: WorldState;
+  stateAfter: WorldState;
+  events: ChronicleEvent[];
+}
+
+export interface ChronicleResponse {
+  runs: ChronicleRun[]; // newest first
+  // Every visitor artistId referenced by any run's stateBefore/stateAfter,
+  // resolved to a display name (worker/village-agent.ts's own
+  // resolveArtistNames — the same join GET /api/world uses for its live
+  // visitorNames) — replay needs this since a replayed day's visitor may not
+  // be among today's live visitors at all.
+  visitorNames: Record<string, string>;
+}
+
+/** Reconstructs the WorldState immediately after one ChronicleEvent was
+ * applied, given the state immediately before it — src/sidebar.ts's replay
+ * walks a run's `stateBefore` through every one of its `events`, in order,
+ * with this function, so it can show (and highlight) each intermediate step
+ * rather than jumping straight from `stateBefore` to `stateAfter`. Mirrors
+ * exactly what worker/village-agent.ts's TOOL_IMPLS write to their own
+ * ctx.state for each tool. `args` is only consulted for
+ * set_district_activity/set_character_mood, whose `after` slice (a bare
+ * Timed<T>) doesn't itself carry the slot id it belongs to — every other
+ * tool's `after` is self-contained. An unrecognized `tool`, or an `after`
+ * that isn't a plain object (a corrupt row — every real slice is always a
+ * Timed<T> object), is a no-op (returns a shallow copy of `state`) rather
+ * than throwing — this runs on every replay step/frame, so a single bad row
+ * should degrade quietly, not break the whole tab. Never mutates `state`. */
+export function applyAgentEventSlice(state: WorldState, tool: string, args: Record<string, unknown>, after: unknown): WorldState {
+  const next: WorldState = {
+    weather: state.weather,
+    timeOfDay: state.timeOfDay,
+    festivals: [...state.festivals],
+    visitors: [...state.visitors],
+    activity: { ...state.activity },
+    moods: { ...state.moods },
+  };
+  if (after === null || typeof after !== "object") return next;
+  // .trim() matches worker/village-agent.ts's own strArg — args.slot is the
+  // tool call's *raw* argument (agent_event.args), not the trimmed value the
+  // worker actually validated against SLOT_IDS.
+  const slotArg = typeof args.slot === "string" ? args.slot.trim() : null;
+  switch (tool) {
+    case "set_weather":
+      next.weather = after as Timed<WeatherId>;
+      break;
+    case "set_time_of_day":
+      next.timeOfDay = after as Timed<TimeOfDayId>;
+      break;
+    case "start_festival":
+      next.festivals.push(after as Timed<{ slotId: string; name: string }>);
+      break;
+    case "send_visitor":
+      next.visitors.push(after as Timed<{ slotId: string; artistId: string }>);
+      break;
+    case "set_district_activity":
+      if (slotArg) next.activity[slotArg] = after as Timed<ActivityLevel>;
+      break;
+    case "set_character_mood":
+      if (slotArg) next.moods[slotArg] = after as Timed<MoodId>;
+      break;
+  }
+  return next;
+}

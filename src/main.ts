@@ -52,7 +52,7 @@ import {
   isVillageLive,
   refreshVillage,
 } from "./listening-source";
-import { fetchWorldResponse, getFestivals, getTimeOfDay, getVisitors, getWeather, initWorldState } from "./world-state";
+import { fetchWorldResponse, getFestivals, getTimeOfDay, getVisitors, getWeather, getWorldVersion, initWorldState } from "./world-state";
 import { drawFestivalDecor, drawNightGlows, drawTimeOfDayTint, drawWeather } from "./world-render";
 import { onEraChange } from "./era";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
@@ -192,6 +192,11 @@ let allCrowd: Npc[] = [];
 // a visiting artist stands, it doesn't wander.
 let visitorNpcs: Npc[] = [];
 let visitorNameByNpc = new Map<Npc, string>();
+// Phase 12: world-state.ts's worldVersion, as of the last rebuildVisitors()
+// call — frame() below compares against getWorldVersion() every frame and
+// rebuilds when they differ, so a Chronicle replay's stepped-through visitors
+// actually redraw instead of staying frozen at whatever was live at init.
+let lastWorldVersion = getWorldVersion();
 
 // Phase 5b: once the village is live, "now playing" comes from the real
 // currently-playing poll (src/now-playing-card.ts), not the sample data —
@@ -1082,6 +1087,16 @@ function frame(ts: number): void {
 
   updateZoomAnim(ts);
   updatePanAnim(ts);
+
+  // Phase 12: a Chronicle replay step (or its start/stop) changes which
+  // visitors world-state.ts's getVisitors() reports — visitorNpcs is built
+  // once, not derived fresh per frame like everything else here, so it needs
+  // an explicit rebuild whenever that happens.
+  const worldVersion = getWorldVersion();
+  if (worldVersion !== lastWorldVersion) {
+    lastWorldVersion = worldVersion;
+    rebuildVisitors();
+  }
 
   districtNpcsBySlot.forEach((npc, slotId) => {
     const { energy } = getMoodEnergy(slotId);

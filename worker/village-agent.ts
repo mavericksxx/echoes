@@ -227,9 +227,10 @@ function buildPrompt(listening: ListeningSummary, effective: EffectiveWorld, vis
 }
 
 /** Resolves artist ids to display names off artist_cache — shared by
- * buildPrompt's currentStateLines above and GET /api/world's visitorNames
- * (handleGetWorld below), which both need the exact same join. */
-async function resolveArtistNames(env: Env, artistIds: string[]): Promise<Record<string, string>> {
+ * buildPrompt's currentStateLines above, GET /api/world's visitorNames
+ * (handleGetWorld below), and worker/chronicle.ts's own visitorNames (Phase
+ * 12), all of which need the exact same join. */
+export async function resolveArtistNames(env: Env, artistIds: string[]): Promise<Record<string, string>> {
   const unique = Array.from(new Set(artistIds));
   if (unique.length === 0) return {};
   const placeholders = unique.map(() => "?").join(",");
@@ -593,7 +594,10 @@ const MAX_SUMMARY_CHARS = 280;
 const AGENT_LIMITED_REPLY = "Today's village review ran out of attention before it could finish.";
 const AGENT_FALLBACK_REPLY = "Today's village review didn't come together.";
 
-function parseWorldState(text: string): WorldState {
+// Exported so worker/chronicle.ts can parse agent_run's own state_before/
+// state_after columns with the exact same defensive JSON parsing, rather
+// than duplicating it.
+export function parseWorldState(text: string): WorldState {
   try {
     const parsed = JSON.parse(text) as Partial<WorldState>;
     return {
