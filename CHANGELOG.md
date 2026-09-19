@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- **Village navigation:** village-wide sections (Wrapped, Playlists, Notice board, Chronicle,
+  Hokage) moved out of the character sidebar into a village panel opened from new topbar buttons
+  (a single "Village" button below 1100px). The character sidebar keeps only its six per-character
+  tabs; tab rows wrap instead of scrolling sideways; long character names wrap instead of
+  truncating. Onboarding trimmed to 2 steps and points at the topbar. Wrapped's "This week" range
+  renamed "Week"; the per-character This week tab links to the notice board.
 - **Phase 13 review fixes:** onboarding dismissal now persists unconditionally on close (no more
   reopening every visit); phone layout keeps the now-playing card from covering the media controls;
   the snapshot caption renders at full resolution instead of downscaled; the now-playing card's
