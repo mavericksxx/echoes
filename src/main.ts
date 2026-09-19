@@ -30,7 +30,7 @@ import {
   type ImageMap,
 } from "./render";
 import { bakeRecolor } from "./recolor";
-import { buildCrowd, buildResidents, drawActivityTreatment, drawMoodTint, type Resident } from "./residents";
+import { buildCrowd, buildResidents, drawActivityTreatment, drawMoodTint, genericCharacter, type Resident } from "./residents";
 import {
   close as closeSidebar,
   initSidebar,
@@ -43,7 +43,17 @@ import {
 import { initTopArtists } from "./top-artists";
 import { getLiveNowPlaying, initNowPlayingCard, subscribeNowPlaying } from "./now-playing-card";
 import { initHistoryStats } from "./history-stats";
-import { getActivity, getMoodEnergy, getNowPlaying, initListeningSource, isVillageLive, refreshVillage } from "./listening-source";
+import {
+  getActivity,
+  getMoodEnergy,
+  getNowPlaying,
+  initListeningSource,
+  isVillageConnected,
+  isVillageLive,
+  refreshVillage,
+} from "./listening-source";
+import { getFestivals, getTimeOfDay, getVisitors, getWeather, initWorldState } from "./world-state";
+import { drawFestivalDecor, drawNightGlows, drawTimeOfDayTint, drawWeather } from "./world-render";
 import { onEraChange } from "./era";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
 
@@ -174,6 +184,14 @@ let residentFadedByNpc = new Map<Npc, boolean>();
 // interactionPool(), districtCaptionLabels(), or any resident/artist map.
 let crowdBySlot = new Map<string, Npc[]>();
 let allCrowd: Npc[] = [];
+
+// Phase 11: village-view-only markers for the daily agent's visitors (see
+// world-state.ts's getVisitors) — a generic crowd sprite at the visited
+// slot's village anchor, captioned with the artist's display name. Built
+// once world state has loaded (see rebuildVisitors) and never re-ticked:
+// a visiting artist stands, it doesn't wander.
+let visitorNpcs: Npc[] = [];
+let visitorNameByNpc = new Map<Npc, string>();
 
 // Phase 5b: once the village is live, "now playing" comes from the real
 // currently-playing poll (src/now-playing-card.ts), not the sample data —
@@ -632,7 +650,7 @@ function followActiveDistrictLeader(dt: number): void {
   camY += (targetY - camY) * t;
 }
 
-function renderDistrict(): void {
+function renderDistrict(dt: number, ts: number): void {
   if (!currentDistrictId) return;
   const { district } = getSlot(currentDistrictId);
   const leader = districtNpcsBySlot.get(currentDistrictId)!;
@@ -660,6 +678,14 @@ function renderDistrict(): void {
     const opacity = residentFadedByNpc.get(npc) ? 0.4 : 1;
     drawNpc(ctx, imgs, npc, view, { opacity });
   });
+
+  // Phase 11: world effects — a lighting wash on top of everything drawn so
+  // far, then night glows cutting through it, then weather particles on top
+  // of all of it (see world-render.ts's doc comment on draw order).
+  const timeOfDay = getTimeOfDay();
+  drawTimeOfDayTint(ctx, timeOfDay, bgW, bgH);
+  if (timeOfDay === "night") drawNightGlows(ctx, [district.home]);
+  drawWeather(ctx, getWeather(), camX, camY, viewW, viewH, dt, ts, prefersReducedMotion());
   ctx.restore();
 }
 
@@ -700,25 +726,50 @@ function tickVillage(now: number, dt: number): void {
   );
 }
 
-function renderVillage(): void {
+function renderVillage(dt: number, ts: number): void {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
   ctx.translate(-camX, -camY);
   ctx.drawImage(images[VILLAGE.mapImage]!, 0, 0);
   drawNoticeBoard(ctx, NOTICE_BOARD_POS.x, NOTICE_BOARD_POS.y);
+  // Phase 11: festival decor at each active festival's district anchor —
+  // village view only (a district's own interior has no single "map" for a
+  // slot's anchor to mean anything on, same reasoning as panCameraToSlot).
+  getFestivals().forEach((festival) => {
+    const slot = SLOTS.find((s) => s.district.id === festival.slotId);
+    const anchor = slot && VILLAGE.anchors[slot.character.id];
+    if (anchor) drawFestivalDecor(ctx, anchor.x, anchor.y, festival.name);
+  });
 
   const view = { camX, camY, viewW, viewH };
-  const sorted = villageDrawOrder();
+  const sorted = [...villageDrawOrder(), ...visitorNpcs].sort((a, b) => a.y - b.y);
   sorted.forEach((npc) => {
     if (npc === selectedNpc || npc === keyboardSelectedNpc) drawSelectionRing(ctx, npc);
   });
   sorted.filter((n) => !n.caption).forEach((n) => drawNpc(ctx, images, n, view));
   sorted.filter((n) => n.caption).forEach((n) => drawNpc(ctx, images, n, view));
+
+  // Phase 11: world effects — see renderDistrict's matching block for the
+  // draw-order reasoning (tint, then night glows, then weather on top).
+  const timeOfDay = getTimeOfDay();
+  drawTimeOfDayTint(ctx, timeOfDay, mapW, mapH);
+  if (timeOfDay === "night") {
+    const glowPoints = SLOTS.map((s) => VILLAGE.anchors[s.character.id]).filter((p): p is Point => Boolean(p));
+    drawNightGlows(ctx, glowPoints);
+  }
+  drawWeather(ctx, getWeather(), camX, camY, viewW, viewH, dt, ts, prefersReducedMotion());
   ctx.restore();
 }
 
 function villageCaptionLabels(): CaptionLabel[] {
-  return villageNpcs.filter((n) => n.caption).map((npc) => ({ npc, text: npc.caption! }));
+  const labels: CaptionLabel[] = villageNpcs.filter((n) => n.caption).map((npc) => ({ npc, text: npc.caption! }));
+  // Phase 11: a visitor's name label is persistent (like a district
+  // resident's), not transient like a leader's "now playing" caption.
+  visitorNpcs.forEach((npc) => {
+    const name = visitorNameByNpc.get(npc);
+    if (name) labels.push({ npc, text: `${name} (visiting)` });
+  });
+  return labels;
 }
 
 // ---------------------------------------------------------------------------
@@ -1059,11 +1110,11 @@ function frame(ts: number): void {
   if (mode === "village") {
     applyKeyPan(dt);
     tickVillage(ts, dt);
-    renderVillage();
+    renderVillage(dt, ts);
     renderCaptions(villageCaptionLabels());
   } else {
     followActiveDistrictLeader(dt);
-    renderDistrict();
+    renderDistrict(dt, ts);
     renderCaptions(districtCaptionLabels());
   }
 
@@ -1089,6 +1140,26 @@ function rebuildResidentsAndCrowd(): void {
   residentFadedByNpc = new Map(allResidents.map((r) => [r.npc, r.faded]));
   crowdBySlot = buildCrowd();
   allCrowd = Array.from(crowdBySlot.values()).flat();
+}
+
+/** Builds Phase 11's visitor markers from world-state.ts's getVisitors() —
+ * call once world state has loaded (see initWorldState below). Unlike
+ * rebuildResidentsAndCrowd, this doesn't need `images` (genericCharacter's
+ * rig sheets are always loaded, never baked per-slot) and doesn't depend on
+ * the era, so it isn't re-run on era changes. */
+function rebuildVisitors(): void {
+  visitorNpcs = [];
+  visitorNameByNpc = new Map();
+  getVisitors().forEach((visitor) => {
+    const slot = SLOTS.find((s) => s.district.id === visitor.slotId);
+    const anchor = slot && VILLAGE.anchors[slot.character.id];
+    if (!slot || !anchor) return;
+    const character = genericCharacter(`visitor:${visitor.slotId}:${visitor.artistId}`);
+    const home = { x: anchor.x + 18, y: anchor.y - 10 };
+    const npc = makeNpc(character, slot.district, home, { mapKey: VILLAGE.mapImage, wanderRadius: 0 });
+    visitorNpcs.push(npc);
+    visitorNameByNpc.set(npc, visitor.name);
+  });
 }
 
 // initTopArtists() (below) makes the era tabs interactive before this file's
@@ -1118,11 +1189,16 @@ onEraChange(() => {
   })();
 });
 
-Promise.all([loadImages(urlsByKey), initListeningSource()]).then(([loaded]) => {
+Promise.all([loadImages(urlsByKey), initListeningSource()]).then(async ([loaded]) => {
   images = loaded;
   setSidebarImages(images);
   bakeRecolors();
+  // Phase 11: world state needs isVillageConnected(), only known once
+  // initListeningSource() above has resolved — see world-state.ts's doc
+  // comment on why `connected` is passed in rather than read there.
+  await initWorldState(isVillageConnected());
   rebuildResidentsAndCrowd();
+  rebuildVisitors();
   applyVillageScene();
   requestAnimationFrame(frame);
   initialLoadComplete = true;

@@ -31,6 +31,8 @@ import {
   villageSongsLive,
   type ArtistEntry,
 } from "./listening-source";
+import { getFestivalForSlot, getFestivals, getTimeOfDay, getVisitors, getWeather } from "./world-state";
+import type { TimeOfDayId, WeatherId } from "../shared/world";
 import { coverPlaceholderGradient } from "./cover-art";
 import { getLiveNowPlaying } from "./now-playing-card";
 
@@ -89,6 +91,7 @@ let tablistEl: HTMLElement;
 let panelHost: HTMLElement;
 let closeBtn: HTMLButtonElement;
 let enterBtn: HTMLButtonElement;
+let villageTodayEl: HTMLElement;
 
 let currentSlot: Slot | null = null;
 let activeSectionId = "overview";
@@ -235,6 +238,53 @@ function buildArtistRow(artist: ArtistEntry, onSelect: () => void): HTMLButtonEl
 }
 
 // ---------------------------------------------------------------------------
+// Village today (Phase 11) — a small always-visible card showing the daily
+// village agent's weather/time-of-day/festival/visitor state, built once in
+// initSidebar (below tablistEl's header, above every tab panel) since it's
+// village-wide, not scoped to whichever character's tab is open. Re-rendered
+// on every openSidebar() so it always reflects world-state.ts's latest fetch.
+// ---------------------------------------------------------------------------
+const WEATHER_LABEL: Record<WeatherId, string> = {
+  clear: "Clear",
+  rain: "Rain",
+  snow: "Snow",
+  fog: "Fog",
+  storm: "Storm",
+  blossom: "Blossom",
+};
+const TIME_OF_DAY_LABEL: Record<TimeOfDayId, string> = {
+  dawn: "Dawn",
+  day: "Day",
+  dusk: "Dusk",
+  night: "Night",
+};
+
+function renderVillageToday(): void {
+  villageTodayEl.textContent = "";
+  const weather = getWeather() ?? "clear";
+  const timeOfDay = getTimeOfDay();
+
+  const summary = document.createElement("p");
+  summary.className = "village-today__line village-today__line--summary";
+  summary.textContent = `Village today: ${WEATHER_LABEL[weather]} · ${TIME_OF_DAY_LABEL[timeOfDay]}`;
+  villageTodayEl.appendChild(summary);
+
+  getFestivals().forEach((festival) => {
+    const p = document.createElement("p");
+    p.className = "village-today__line village-today__line--festival";
+    p.textContent = `Festival: ${festival.name}`; // agent-authored — textContent only
+    villageTodayEl.appendChild(p);
+  });
+
+  getVisitors().forEach((visitor) => {
+    const p = document.createElement("p");
+    p.className = "village-today__line";
+    p.textContent = `Visiting: ${visitor.name}`; // resolved artist name — textContent only
+    villageTodayEl.appendChild(p);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Overview
 // ---------------------------------------------------------------------------
 const ACTIVITY_LABEL: Record<string, string> = {
@@ -253,6 +303,16 @@ function renderOverview(container: HTMLElement, ctx: SectionContext): void {
   pill.className = `activity-pill activity-pill--${level}`;
   pill.textContent = ACTIVITY_LABEL[level] ?? level;
   container.appendChild(pill);
+
+  // Phase 11: a festival chip for this district, if the daily agent has one
+  // active — see world-state.ts's getFestivalForSlot.
+  const festival = getFestivalForSlot(slotId);
+  if (festival) {
+    const chip = document.createElement("span");
+    chip.className = "festival-chip";
+    chip.textContent = `Festival: ${festival.name}`;
+    container.appendChild(chip);
+  }
 
   // Phase 8b: a subtle note on whether the activity/share above (and every
   // other district's, for consistency — worker/village.ts never mixes
@@ -1902,6 +1962,10 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
 
   header.append(portraitCanvas, headerText, enterBtn);
 
+  // Phase 11: "Village today" — see renderVillageToday's doc comment.
+  villageTodayEl = document.createElement("div");
+  villageTodayEl.className = "village-today";
+
   tablistEl = document.createElement("div");
   tablistEl.className = "sidebar-tablist";
   tablistEl.setAttribute("role", "tablist");
@@ -1951,7 +2015,7 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
   footerBadge.appendChild(footerLogo);
   footer.append(footerLabel, footerBadge);
 
-  root.append(grabber, closeBtn, header, tablistEl, panelHost, footer);
+  root.append(grabber, closeBtn, header, villageTodayEl, tablistEl, panelHost, footer);
   backdrop.addEventListener("click", () => close());
 
   loadHistoryDaily();
@@ -1980,6 +2044,7 @@ export function openSidebar(slot: Slot, opts: OpenSidebarOptions = {}): void {
   if (opts.section) activeSectionId = opts.section;
   enterBtn.hidden = !opts.showEnter;
   renderHeader(slot);
+  renderVillageToday();
   renderSection(activeSectionId);
 
   root.hidden = false;

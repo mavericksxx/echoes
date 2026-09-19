@@ -14,6 +14,8 @@
 
 import { activityLevel, type ActivityLevel } from "../shared/activity";
 import type { MoodId } from "../shared/mood";
+import { activityFor, moodFor } from "../shared/world";
+import { getEffectiveWorld } from "./world-state";
 import {
   getListening,
   getPersona as getSamplePersona,
@@ -192,13 +194,15 @@ export interface Activity {
 }
 
 export function getActivity(slotId: string): Activity {
+  const world = getEffectiveWorld();
   if (isVillageLive()) {
     const slot = villageBySlot.get(slotId);
-    return { level: slot?.activity ?? activityLevel(0), share: slot?.share ?? 0 };
+    const derived = slot?.activity ?? activityLevel(0);
+    return { level: activityFor(world, slotId, derived), share: slot?.share ?? 0 };
   }
   const listening = getListening(slotId);
   const share = listening?.playShare ?? 0;
-  return { level: activityLevel(share), share };
+  return { level: activityFor(world, slotId, activityLevel(share)), share };
 }
 
 /** Real top tracks for a slot (Phase 3.5) when connected+live, else the
@@ -285,9 +289,13 @@ const SAMPLE_MOOD: Record<string, MoodEnergy> = {
  * src/npc.ts's energy-scaled walk speed/perform frequency — both treat a
  * null mood/energy as "no change from today's behavior". */
 export function getMoodEnergy(slotId: string): MoodEnergy {
+  const world = getEffectiveWorld();
   if (isVillageLive()) {
     const slot = villageBySlot.get(slotId);
-    return { mood: slot?.mood ?? null, energy: slot?.energy ?? null };
+    const mood = moodFor(world, slotId, slot?.mood ?? undefined) ?? null;
+    return { mood, energy: slot?.energy ?? null };
   }
-  return SAMPLE_MOOD[slotId] ?? { mood: null, energy: null };
+  const sample = SAMPLE_MOOD[slotId];
+  const mood = moodFor(world, slotId, sample?.mood ?? undefined) ?? null;
+  return { mood, energy: sample?.energy ?? null };
 }

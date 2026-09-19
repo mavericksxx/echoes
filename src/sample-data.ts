@@ -6,6 +6,7 @@
 
 export type { ActivityLevel } from "../shared/activity";
 export { activityLevel } from "../shared/activity";
+import type { WorldResponse } from "../shared/world";
 
 export interface Song {
   id: string;
@@ -526,3 +527,41 @@ export function pickWeightedSlotId(rng: () => number = Math.random): string {
   }
   return SAMPLE_LISTENING[SAMPLE_LISTENING.length - 1]!.slotId;
 }
+
+// ---------------------------------------------------------------------------
+// World (Phase 11) — a handwritten sample world state for the offline/
+// not-connected fallback, shaped exactly like GET /api/world's WorldResponse
+// (shared/world.ts) so src/world-state.ts can render either without
+// branching on more than "is the village connected" (see
+// src/listening-source.ts's isVillageConnected). Every entry's expiresOn is
+// far in the future — sample mode has no daily agent re-writing/pruning it,
+// unlike the real thing, so nothing here should ever go stale mid-session.
+// ---------------------------------------------------------------------------
+const SAMPLE_WORLD_SET_ON = "2026-09-19T06:00:00.000Z";
+const SAMPLE_WORLD_EXPIRES = "2099-01-01T00:00:00.000Z";
+
+export const SAMPLE_WORLD: WorldResponse = {
+  state: {
+    weather: { value: "blossom", setOn: SAMPLE_WORLD_SET_ON, expiresOn: SAMPLE_WORLD_EXPIRES },
+    festivals: [
+      {
+        value: { slotId: "naruto", name: "Ramen Festival" },
+        setOn: SAMPLE_WORLD_SET_ON,
+        expiresOn: SAMPLE_WORLD_EXPIRES,
+      },
+    ],
+    visitors: [
+      {
+        value: { slotId: "shikamaru", artistId: "sample-visitor-yaeji" },
+        setOn: SAMPLE_WORLD_SET_ON,
+        expiresOn: SAMPLE_WORLD_EXPIRES,
+      },
+    ],
+    activity: {},
+    moods: {},
+  },
+  visitorNames: { "sample-visitor-yaeji": "Yaeji" },
+  updatedAt: SAMPLE_WORLD_SET_ON,
+  runDate: "2026-09-19",
+  ownerTz: "Asia/Dubai", // matches wrangler.jsonc's real OWNER_TZ
+};
