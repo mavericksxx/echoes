@@ -1131,19 +1131,19 @@ select {
 }
 
 /* ---- tablist ---- */
+/* Wraps onto multiple lines rather than scrolling sideways — at desktop
+   width, both the character panel's six tabs and the village panel's five
+   (see src/sidebar.ts's SLOT_SECTIONS/VILLAGE_SECTIONS) are wider than the
+   sidebar itself, and a horizontal scroll here would hide tabs with no
+   visual hint they exist. */
 .sidebar-tablist {
   flex: none;
   display: flex;
-  gap: var(--space-2);
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
   margin-top: var(--space-3);
   padding-bottom: 4px;
-  overflow-x: auto;
-  scrollbar-width: none;
   border-bottom: 2px solid var(--ink);
-}
-
-.sidebar-tablist::-webkit-scrollbar {
-  display: none;
 }
 
 .sidebar-tab {
@@ -1159,7 +1159,6 @@ select {
   font-size: var(--text-sm);
   font-weight: 700;
   padding: 4px 8px;
-  margin: var(--space-1) 0;
   min-height: 44px;
   display: inline-flex;
   align-items: center;

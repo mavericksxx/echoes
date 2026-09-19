@@ -138,8 +138,12 @@ let panelOpener: HTMLElement | null = null;
  * close (src/sidebar.ts's onSectionChange hook), so a slot-mode section id
  * (which matches none of these) simply clears every button. */
 function updateVillageBtnAriaCurrent(sectionId: string | null): void {
+  // Belt-and-suspenders on top of sidebar.ts's own open/close bookkeeping:
+  // aria-current must never reflect a section while the panel itself is
+  // actually closed, whatever called this.
+  const activeId = isSidebarOpen() ? sectionId : null;
   villageSectionBtns.forEach((btn) => {
-    if (btn.dataset.section === sectionId) btn.setAttribute("aria-current", "true");
+    if (btn.dataset.section === activeId) btn.setAttribute("aria-current", "true");
     else btn.removeAttribute("aria-current");
   });
 }
