@@ -774,8 +774,14 @@ let wrappedRange: WrappedRange = "month";
 const wrappedCache = new Map<WrappedRange, WrappedPayload | "error">();
 const wrappedInFlight = new Set<WrappedRange>();
 
-function formatWrappedDate(epochMs: number): string {
-  return new Date(epochMs).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+// `timeZone` is left undefined (the viewer's own local zone) for a real
+// instant like Wrapped's collectingSince — that's genuinely "when", so it
+// should read in whoever's looking at it own time. Callers formatting a bare
+// "YYYY-MM-DD" parsed as UTC midnight (formatWeekStart, Chronicle's day
+// header) pass "UTC" explicitly instead: without it, a viewer west of UTC
+// would see that midnight shifted back into the previous local day.
+function formatWrappedDate(epochMs: number, timeZone?: string): string {
+  return new Date(epochMs).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", timeZone });
 }
 
 /** Slot id -> the character's display name, matching renderHeader's
@@ -1431,7 +1437,9 @@ function loadWeeklyBrief(): void {
 
 function formatWeekStart(weekStart: string): string {
   const ms = Date.parse(`${weekStart}T00:00:00Z`);
-  return Number.isNaN(ms) ? weekStart : formatWrappedDate(ms);
+  // "UTC" — weekStart is an owner-local calendar day, not a real instant
+  // (see formatWrappedDate's own doc comment).
+  return Number.isNaN(ms) ? weekStart : formatWrappedDate(ms, "UTC");
 }
 
 function buildMoverRow(mover: WeeklyBriefMoverOut): HTMLElement {
@@ -1864,6 +1872,15 @@ function describeChronicleEvent(ev: ChronicleEvent): string {
   return CHRONICLE_TOOL_LABELS[ev.tool]?.(ev.args) ?? ev.tool;
 }
 
+/** worker/chronicle.ts's ChronicleResponse.visitorNames (real data) or
+ * SAMPLE_CHRONICLE.visitorNames (sample mode) — the map replay needs to
+ * resolve a replayed visitor's name, since it may not be among today's live
+ * visitors at all (see src/world-state.ts's setReplayState). */
+function currentChronicleVisitorNames(): Record<string, string> {
+  if (!isVillageConnected()) return SAMPLE_CHRONICLE.visitorNames;
+  return chronicleCache && chronicleCache !== "error" ? chronicleCache.visitorNames : {};
+}
+
 // A step every REPLAY_STEP_MS (SPEC.md's "~1.5–2s per step") — states[0] is
 // the run's stateBefore (nothing applied yet), states[i] is the result of
 // applying events[i-1] (shared/world.ts's applyAgentEventSlice), so
@@ -1875,19 +1892,63 @@ interface ChronicleReplay {
   states: WorldState[];
   stepIndex: number;
   nowMs: number;
+  visitorNames: Record<string, string>;
   timer: ReturnType<typeof setTimeout> | null;
+  // DOM refs into this day's already-rendered row/button, populated by
+  // buildChronicleDay while it's the active day — updateChronicleReplayDom
+  // mutates these in place per step instead of re-rendering the whole
+  // section (see its own doc comment for why).
+  eventRows: HTMLElement[];
+  button: HTMLButtonElement | null;
 }
 let chronicleReplay: ChronicleReplay | null = null;
+
+/** Wraps a full `renderSection("chronicle")` re-render — needed only at
+ * replay start/stop (e.g. to flip every other day's Replay button back to
+ * enabled), never on a per-step tick — so it doesn't reset the panel's
+ * scroll position or steal focus off whichever button the visitor just
+ * used; renderSection rebuilds the whole panel's DOM, which would otherwise
+ * do both. */
+function rerenderChronicleKeepingScrollAndFocus(focusRunDate: string): void {
+  const scrollTop = panelHost.scrollTop;
+  const hadFocus = panelHost.contains(document.activeElement);
+  renderSection("chronicle");
+  panelHost.scrollTop = scrollTop;
+  if (hadFocus) {
+    panelHost.querySelector<HTMLButtonElement>(`.chronicle-replay-btn[data-run-date="${focusRunDate}"]`)?.focus();
+  }
+}
 
 /** Ends the active replay (if any), restoring the live world state on the
  * map — called both by the timeline's own Stop button and by close() below,
  * so leaving the sidebar can never strand the map on a past day. */
 function stopChronicleReplay(): void {
   if (!chronicleReplay) return;
+  const runDate = chronicleReplay.runDate;
   if (chronicleReplay.timer !== null) clearTimeout(chronicleReplay.timer);
   chronicleReplay = null;
   setReplayState(null, 0);
-  if (currentSlot && activeSectionId === "chronicle") renderSection("chronicle");
+  if (currentSlot && activeSectionId === "chronicle") rerenderChronicleKeepingScrollAndFocus(runDate);
+}
+
+/** Mutates the active day's already-rendered event rows/button in place for
+ * one replay step, instead of calling renderSection("chronicle") again —
+ * that would rebuild the whole panel every ~1.75s, resetting its scroll
+ * position and stealing focus off the Stop button (see
+ * rerenderChronicleKeepingScrollAndFocus, used only at start/stop instead).
+ * Scrolls the newly active row into view. A no-op on stale refs (the visitor
+ * switched away from this tab, or to a different day) — setReplayState's map
+ * effect still applies regardless, and the next full render of this tab
+ * picks up the current step correctly (buildChronicleDay reads
+ * chronicleReplay.stepIndex fresh). */
+function updateChronicleReplayDom(replay: ChronicleReplay): void {
+  const activeIndex = replay.stepIndex - 1;
+  replay.eventRows.forEach((row, i) => {
+    const active = i === activeIndex;
+    row.classList.toggle("chronicle-event--active", active);
+    if (active) row.scrollIntoView({ block: "nearest" });
+  });
+  if (replay.button) replay.button.textContent = `Stop (${replay.stepIndex}/${replay.eventRows.length})`;
 }
 
 function scheduleChronicleReplayStep(): void {
@@ -1900,8 +1961,8 @@ function scheduleChronicleReplayStep(): void {
       return;
     }
     replay.stepIndex++;
-    setReplayState(replay.states[replay.stepIndex]!, replay.nowMs);
-    if (currentSlot && activeSectionId === "chronicle") renderSection("chronicle");
+    setReplayState(replay.states[replay.stepIndex]!, replay.nowMs, replay.visitorNames);
+    if (currentSlot && activeSectionId === "chronicle") updateChronicleReplayDom(replay);
     scheduleChronicleReplayStep();
   }, REPLAY_STEP_MS);
 }
@@ -1914,7 +1975,7 @@ function scheduleChronicleReplayStep(): void {
  * the real clock — see setReplayState's doc comment — so overrides that
  * were live that day still show as live here, regardless of today's date. */
 function startChronicleReplay(run: ChronicleRun): void {
-  stopChronicleReplay(); // only one replay at a time
+  stopChronicleReplay(); // only one replay at a time (defensive — the UI already disables every other day's Replay button while one is active)
   const states = [run.stateBefore];
   let cur = run.stateBefore;
   for (const ev of run.events) {
@@ -1922,9 +1983,18 @@ function startChronicleReplay(run: ChronicleRun): void {
     states.push(cur);
   }
   const nowMs = Date.parse(run.lastAttemptAt);
-  chronicleReplay = { runDate: run.runDate, states, stepIndex: 0, nowMs: Number.isNaN(nowMs) ? Date.now() : nowMs, timer: null };
-  setReplayState(states[0]!, chronicleReplay.nowMs);
-  renderSection("chronicle");
+  chronicleReplay = {
+    runDate: run.runDate,
+    states,
+    stepIndex: 0,
+    nowMs: Number.isNaN(nowMs) ? Date.now() : nowMs,
+    visitorNames: currentChronicleVisitorNames(),
+    timer: null,
+    eventRows: [],
+    button: null,
+  };
+  setReplayState(states[0]!, chronicleReplay.nowMs, chronicleReplay.visitorNames);
+  rerenderChronicleKeepingScrollAndFocus(run.runDate);
   scheduleChronicleReplayStep();
 }
 
@@ -1956,7 +2026,9 @@ function buildChronicleDay(run: ChronicleRun): HTMLElement {
   const date = document.createElement("p");
   date.className = "chronicle-day__date";
   const dateMs = Date.parse(`${run.runDate}T00:00:00Z`);
-  date.textContent = Number.isNaN(dateMs) ? run.runDate : formatWrappedDate(dateMs);
+  // "UTC" — run.runDate is an owner-local calendar day, not a real instant
+  // (see formatWrappedDate's own doc comment).
+  date.textContent = Number.isNaN(dateMs) ? run.runDate : formatWrappedDate(dateMs, "UTC");
   head.appendChild(date);
   if (run.status === "pending") {
     const badge = document.createElement("span");
@@ -1971,11 +2043,14 @@ function buildChronicleDay(run: ChronicleRun): HTMLElement {
   summary.textContent = run.summary || "Nothing changed today.";
   day.appendChild(summary);
 
+  const eventRows: HTMLElement[] = [];
   if (run.events.length > 0) {
     const list = document.createElement("div");
     list.className = "chronicle-events";
     run.events.forEach((ev, i) => {
-      list.appendChild(buildChronicleEventRow(ev, isActiveDay && chronicleReplay!.stepIndex - 1 === i));
+      const row = buildChronicleEventRow(ev, isActiveDay && chronicleReplay!.stepIndex - 1 === i);
+      eventRows.push(row);
+      list.appendChild(row);
     });
     day.appendChild(list);
   }
@@ -1983,6 +2058,9 @@ function buildChronicleDay(run: ChronicleRun): HTMLElement {
   const replayBtn = document.createElement("button");
   replayBtn.type = "button";
   replayBtn.className = "chronicle-replay-btn";
+  // Looked back up by rerenderChronicleKeepingScrollAndFocus after a fresh
+  // render destroys/recreates this element.
+  replayBtn.dataset.runDate = run.runDate;
   if (isActiveDay) {
     replayBtn.classList.add("chronicle-replay-btn--active");
     replayBtn.textContent = `Stop (${chronicleReplay!.stepIndex}/${run.events.length})`;
@@ -1993,6 +2071,13 @@ function buildChronicleDay(run: ChronicleRun): HTMLElement {
     replayBtn.addEventListener("click", () => startChronicleReplay(run));
   }
   day.appendChild(replayBtn);
+
+  // Keep DOM refs for this replay's per-step updates (updateChronicleReplayDom)
+  // instead of re-rendering the whole section every step.
+  if (isActiveDay && chronicleReplay) {
+    chronicleReplay.eventRows = eventRows;
+    chronicleReplay.button = replayBtn;
+  }
 
   return day;
 }

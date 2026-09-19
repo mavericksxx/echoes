@@ -227,9 +227,10 @@ function buildPrompt(listening: ListeningSummary, effective: EffectiveWorld, vis
 }
 
 /** Resolves artist ids to display names off artist_cache — shared by
- * buildPrompt's currentStateLines above and GET /api/world's visitorNames
- * (handleGetWorld below), which both need the exact same join. */
-async function resolveArtistNames(env: Env, artistIds: string[]): Promise<Record<string, string>> {
+ * buildPrompt's currentStateLines above, GET /api/world's visitorNames
+ * (handleGetWorld below), and worker/chronicle.ts's own visitorNames (Phase
+ * 12), all of which need the exact same join. */
+export async function resolveArtistNames(env: Env, artistIds: string[]): Promise<Record<string, string>> {
   const unique = Array.from(new Set(artistIds));
   if (unique.length === 0) return {};
   const placeholders = unique.map(() => "?").join(",");

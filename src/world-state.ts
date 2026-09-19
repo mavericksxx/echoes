@@ -73,12 +73,30 @@ export async function initWorldState(connected: boolean, pending?: Promise<World
 // rawState/Date.now(). No rendering fork needed: this is the one function
 // every reader already goes through. `nowMs` is fixed, not the real clock,
 // because it's the moment a past day's Timed<T> entries were pruned against
-// when they were live, not "now" for real.
-let replay: { state: WorldState; nowMs: number } | null = null;
+// when they were live, not "now" for real. `replayVisitorNames` is a
+// separate map (not a swap of `visitorNames` below) since a replayed day's
+// visitor may not be among today's live visitors at all.
+let replay: { state: WorldState; nowMs: number; visitorNames: Record<string, string> } | null = null;
 
-/** Starts/updates (non-null) or ends (null) a Chronicle replay override. */
-export function setReplayState(state: WorldState | null, nowMs: number): void {
-  replay = state ? { state, nowMs } : null;
+// Bumped on every setReplayState call (start/step/stop) — src/main.ts's
+// frame() polls this to know when to call rebuildVisitors() again.
+// visitorNpcs (unlike every other per-frame read in this file) is built once
+// and cached rather than recomputed every frame, so nothing else would
+// otherwise notice a replay stepping to a state with different visitors.
+let worldVersion = 0;
+
+export function getWorldVersion(): number {
+  return worldVersion;
+}
+
+/** Starts/updates (non-null) or ends (null) a Chronicle replay override.
+ * `visitorNames` defaults to {} — every caller providing a non-null `state`
+ * should also pass its own (worker/chronicle.ts's ChronicleResponse.
+ * visitorNames, or SAMPLE_CHRONICLE.visitorNames offline), so a replayed
+ * visitor's name resolves instead of falling back to a bare artist id. */
+export function setReplayState(state: WorldState | null, nowMs: number, visitorNames: Record<string, string> = {}): void {
+  replay = state ? { state, nowMs, visitorNames } : null;
+  worldVersion++;
 }
 
 /** The live-right-now world: effectiveWorld() run again on the client (see
@@ -131,10 +149,11 @@ export interface VisitorInfo {
 }
 
 export function getVisitors(): VisitorInfo[] {
+  const names = replay ? replay.visitorNames : visitorNames;
   return getEffectiveWorld().visitors.map((v) => ({
     slotId: v.value.slotId,
     artistId: v.value.artistId,
-    name: visitorNames[v.value.artistId] ?? v.value.artistId,
+    name: names[v.value.artistId] ?? v.value.artistId,
   }));
 }
 

@@ -631,4 +631,8 @@ export const SAMPLE_CHRONICLE: ChronicleResponse = {
       events: [],
     },
   ],
+  // Same visitor as SAMPLE_WORLD.visitorNames above — replay needs its own
+  // copy since a real ChronicleResponse's visitorNames can include artists
+  // no longer among today's live visitors at all.
+  visitorNames: { "sample-visitor-yaeji": "Yaeji" },
 };

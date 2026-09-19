@@ -8,8 +8,8 @@
 // exact order src/sidebar.ts's replay needs to walk them in.
 
 import type { Env } from "./index";
-import { parseWorldState } from "./village-agent";
-import type { ChronicleEvent, ChronicleResponse, ChronicleRun } from "../shared/world";
+import { parseWorldState, resolveArtistNames } from "./village-agent";
+import type { ChronicleEvent, ChronicleResponse, ChronicleRun, WorldState } from "../shared/world";
 
 // SPEC.md's Phase 12 task: "cap ~30 days". The agent runs at most once a
 // day (worker/village-agent.ts's RUN_HOUR_OWNER_LOCAL gate), so this is
@@ -54,7 +54,7 @@ export async function handleChronicle(env: Env): Promise<Response> {
   // Handled explicitly (not just "the loop below runs zero times") so the
   // second query never fires an `IN ()` with no placeholders.
   if (runRows.length === 0) {
-    return Response.json({ runs: [] } satisfies ChronicleResponse);
+    return Response.json({ runs: [], visitorNames: {} } satisfies ChronicleResponse);
   }
 
   const runDates = runRows.map((r) => r.run_date);
@@ -84,15 +84,33 @@ export async function handleChronicle(env: Env): Promise<Response> {
     eventsByRun.set(row.run_date, list);
   }
 
-  const runs: ChronicleRun[] = runRows.map((r) => ({
-    runDate: r.run_date,
-    status: r.status,
-    summary: r.summary,
-    lastAttemptAt: r.last_attempt_at,
-    stateBefore: parseWorldState(r.state_before),
-    stateAfter: parseWorldState(r.state_after),
-    events: eventsByRun.get(r.run_date) ?? [],
-  }));
+  const runs: ChronicleRun[] = runRows.map((r) => {
+    const stateBefore = parseWorldState(r.state_before);
+    const stateAfter = parseWorldState(r.state_after);
+    return {
+      runDate: r.run_date,
+      status: r.status,
+      summary: r.summary,
+      lastAttemptAt: r.last_attempt_at,
+      stateBefore,
+      stateAfter,
+      events: eventsByRun.get(r.run_date) ?? [],
+    };
+  });
 
-  return Response.json({ runs } satisfies ChronicleResponse);
+  // Every visitor artistId across every run's before/after state — replay
+  // (src/sidebar.ts) can land on a day whose visitor isn't among today's
+  // live ones at all, so GET /api/world's own visitorNames (scoped to the
+  // current world_state row only) isn't enough here.
+  const visitorArtistIds = new Set<string>();
+  const collectVisitorIds = (state: WorldState) => {
+    for (const v of state.visitors) visitorArtistIds.add(v.value.artistId);
+  };
+  for (const run of runs) {
+    collectVisitorIds(run.stateBefore);
+    collectVisitorIds(run.stateAfter);
+  }
+  const visitorNames = await resolveArtistNames(env, Array.from(visitorArtistIds));
+
+  return Response.json({ runs, visitorNames } satisfies ChronicleResponse);
 }

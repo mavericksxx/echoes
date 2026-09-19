@@ -219,6 +219,12 @@ export interface ChronicleRun {
 
 export interface ChronicleResponse {
   runs: ChronicleRun[]; // newest first
+  // Every visitor artistId referenced by any run's stateBefore/stateAfter,
+  // resolved to a display name (worker/village-agent.ts's own
+  // resolveArtistNames — the same join GET /api/world uses for its live
+  // visitorNames) — replay needs this since a replayed day's visitor may not
+  // be among today's live visitors at all.
+  visitorNames: Record<string, string>;
 }
 
 /** Reconstructs the WorldState immediately after one ChronicleEvent was
@@ -230,10 +236,11 @@ export interface ChronicleResponse {
  * ctx.state for each tool. `args` is only consulted for
  * set_district_activity/set_character_mood, whose `after` slice (a bare
  * Timed<T>) doesn't itself carry the slot id it belongs to — every other
- * tool's `after` is self-contained. An unrecognized `tool` is a no-op
- * (returns a shallow copy of `state`), which should never happen for a
- * chronicle built from this project's own agent_event rows. Never mutates
- * `state`. */
+ * tool's `after` is self-contained. An unrecognized `tool`, or an `after`
+ * that isn't a plain object (a corrupt row — every real slice is always a
+ * Timed<T> object), is a no-op (returns a shallow copy of `state`) rather
+ * than throwing — this runs on every replay step/frame, so a single bad row
+ * should degrade quietly, not break the whole tab. Never mutates `state`. */
 export function applyAgentEventSlice(state: WorldState, tool: string, args: Record<string, unknown>, after: unknown): WorldState {
   const next: WorldState = {
     weather: state.weather,
@@ -243,7 +250,11 @@ export function applyAgentEventSlice(state: WorldState, tool: string, args: Reco
     activity: { ...state.activity },
     moods: { ...state.moods },
   };
-  const slotArg = typeof args.slot === "string" ? args.slot : null;
+  if (after === null || typeof after !== "object") return next;
+  // .trim() matches worker/village-agent.ts's own strArg — args.slot is the
+  // tool call's *raw* argument (agent_event.args), not the trimmed value the
+  // worker actually validated against SLOT_IDS.
+  const slotArg = typeof args.slot === "string" ? args.slot.trim() : null;
   switch (tool) {
     case "set_weather":
       next.weather = after as Timed<WeatherId>;
