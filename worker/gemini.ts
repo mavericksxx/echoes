@@ -27,16 +27,20 @@
 import type { Env } from "./index";
 import { SLOTS } from "../data/loader";
 import { MOOD_IDS, type MoodId } from "../shared/mood";
-// Phase 10 only (see chatWithTools at the bottom of this file): every other
-// function here is a single classifier call whose caller checks quota/logs
-// the attempt itself (worker/weekly-brief.ts, worker/persona.ts, ...).
-// chatWithTools instead runs its own internal multi-step loop (up to 5
-// Gemini calls per question — MAX_CHAT_STEPS tool-enabled steps, plus one
-// forced final no-tools turn if the last of those is still a function call;
-// see chatWithTools' doc comment), so the per-step quota check/log has to
-// live inside that loop rather than around one outside call — the one place
-// in this file that needs worker/rate-limit.ts at all.
-import { geminiQuotaAvailable, logGeminiCall } from "./rate-limit";
+// Phase 10/11 only (see chatWithTools at the bottom of this file): every
+// other function here is a single classifier call whose caller checks
+// quota/logs the attempt itself (worker/weekly-brief.ts, worker/persona.ts,
+// ...). chatWithTools instead runs its own internal multi-step loop (up to
+// options.maxSteps + 1 Gemini calls per run — options.maxSteps tool-enabled
+// steps, plus one forced final no-tools turn if the last of those is still a
+// function call; see chatWithTools' doc comment), so the per-step quota
+// check/log has to live inside that loop rather than around one outside call
+// — the one place in this file that needs worker/rate-limit.ts at all.
+// Generalized in Phase 11 (options.kind/maxSteps/sequentialTools/
+// limitedReply/fallbackReply) so worker/village-agent.ts's daily cron agent
+// can reuse the exact same loop mechanics as worker/hokage.ts's chat, rather
+// than a second hand-rolled copy of this request/response/tool-call dance.
+import { geminiQuotaAvailable, logGeminiCall, type GeminiCallKind } from "./rate-limit";
 
 const MODEL_ID = "gemini-3.5-flash-lite";
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent`;
@@ -425,7 +429,13 @@ export async function generateCaptions(env: Env, artistName: string, trackName: 
 // owns the system prompt, the tool declarations, and the D1-backed tool
 // implementations (this file never touches D1); chatWithTools here only
 // knows how to run the request/response/tool-call loop against Gemini, same
-// division of responsibility as generateJson above vs. its callers.
+// division of responsibility as generateJson above vs. its callers. Phase 11
+// generalizes the loop (see ChatWithToolsOptions) so worker/village-agent.ts
+// can reuse it for its own, differently-tuned, write-tool loop — every
+// per-kind decision (quota kind, step budget, whether same-step tool calls
+// run concurrently or one-at-a-time, and the two canned reply strings) is
+// now an option the caller passes in, and this file stays ignorant of both
+// callers' actual tools/voice.
 //
 // Function-calling support on MODEL_ID (gemini-3.5-flash-lite) is *assumed*,
 // not independently verified the way the model id itself is (see this
@@ -471,20 +481,44 @@ export interface ChatOutcome {
   toolCalls: ChatToolCall[];
   /** True only when a Gemini quota cap cut the conversation short (see the
    * quota check at the top of each loop iteration below) — never set for
-   * the unrelated "still calling tools after MAX_CHAT_STEPS" fallback,
+   * the unrelated "still calling tools after options.maxSteps" fallback,
    * which is a correctness backstop, not a cost control. */
   limited: boolean;
+  /** True only when a real Gemini call failed (network error, bad status,
+   * unusable response — never a quota cap, that's `limited` above) and
+   * `reply` is therefore `options.fallbackReply` rather than real model
+   * text. worker/hokage.ts ignores this (a canned reply is fine either way
+   * for a chat answer); worker/village-agent.ts uses it to tell "nothing
+   * worth changing today" (a real, successful run) from "the run didn't
+   * actually complete" (worth retrying later), which `limited` alone can't
+   * distinguish. */
+  failed: boolean;
 }
 
-// Tool-enabled steps only — the forced final no-tools turn below (when step
-// MAX_CHAT_STEPS is still a function call) is a 5th possible Gemini call on
-// top of this, not counted in it. See chatWithTools' doc comment.
-const MAX_CHAT_STEPS = 4;
-
-const CHAT_LIMITED_REPLY =
-  "The Hokage has spoken with a great many visitors today and needs rest before answering more. Come back tomorrow.";
-const CHAT_FALLBACK_REPLY =
-  "The Hokage pauses for a long moment, then admits that question needs more thought than there's time for right now. Try asking again, maybe phrased a little differently.";
+/** Per-caller tuning for chatWithTools — see this section's doc comment for
+ * why this exists (Phase 11 generalization). */
+export interface ChatWithToolsOptions {
+  /** Which worker/rate-limit.ts quota/sub-cap this loop's steps draw from. */
+  kind: GeminiCallKind;
+  /** Tool-enabled steps only — the forced final no-tools turn below (when
+   * step `maxSteps` is still a function call) is one more possible Gemini
+   * call on top of this, not counted in it. See chatWithTools' doc comment. */
+  maxSteps: number;
+  /** Run one step's tool calls one at a time (await each before starting the
+   * next) instead of concurrently. Needed when a tool's own validation
+   * depends on an earlier call in the *same* step having already applied
+   * (worker/village-agent.ts's caps, e.g. "at most one festival per slot",
+   * only see a prior call's effect once it's actually run). Hokage's
+   * tools are read-only with no such ordering dependency, so they default to
+   * concurrent (omitted / false). */
+  sequentialTools?: boolean;
+  /** Returned (with `limited: true`) when a quota cap cuts the conversation
+   * short. */
+  limitedReply: string;
+  /** Returned (with `failed: true`) when a real Gemini call fails outright,
+   * or the forced final turn still doesn't produce usable text. */
+  fallbackReply: string;
+}
 
 // Gemini's Content.role is documented as accepting only "user" or "model" —
 // there is no third "function"/"tool" role at this API layer, so a tool's
@@ -601,26 +635,29 @@ async function callGeminiStep(
   return { text: text || null, functionCalls: [], rawParts: parts };
 }
 
-/** Runs the Hokage chat loop: sends `history` (already validated/trimmed by
- * worker/hokage.ts) plus `systemPrompt`, and — for as long as Gemini keeps
- * returning one or more functionCall parts instead of a final answer —
- * calls `runTool` for each one and feeds all the results back in, for at
- * most MAX_CHAT_STEPS tool-enabled model steps. If step MAX_CHAT_STEPS is
- * *still* a functionCall, one last no-tools turn forces a text answer
- * instead of looping forever — a 5th possible Gemini call on top of
- * MAX_CHAT_STEPS, so a single question can cost up to 5 Gemini calls total,
- * not 4 (see MAX_CHAT_STEPS' own doc comment, and
- * worker/rate-limit.ts/worker/index.ts's matching cost-control comments).
- * If even that final turn fails, CHAT_FALLBACK_REPLY is returned — per
- * SPEC.md's Phase 10 task, a question never ends without an answer.
+/** Runs a Gemini function-calling loop: sends `history` (already validated/
+ * trimmed by the caller — worker/hokage.ts or worker/village-agent.ts) plus
+ * `systemPrompt`, and — for as long as Gemini keeps returning one or more
+ * functionCall parts instead of a final answer — calls `runTool` for each
+ * one and feeds all the results back in, for at most `options.maxSteps`
+ * tool-enabled model steps. If step `options.maxSteps` is *still* a
+ * functionCall, one last no-tools turn forces a text answer instead of
+ * looping forever — one more possible Gemini call on top of
+ * `options.maxSteps`, so a single run can cost up to `options.maxSteps + 1`
+ * Gemini calls total (see worker/rate-limit.ts/worker/index.ts's matching
+ * cost-control comments for each caller's own numbers). If even that final
+ * turn fails, `options.fallbackReply` is returned with `failed: true` — per
+ * SPEC.md's Phase 10 task, a question (or a Phase 11 agent run) never ends
+ * without *something* to show for it.
  *
- * Each model step is gated by geminiQuotaAvailable(env, ip, "chat") first
- * (this file's one exception to "callers check quota" — see this section's
- * doc comment) and, if it's actually made, logged with logGeminiCall before
- * the request goes out — same "log the attempt, not just the success"
- * convention worker/weekly-brief.ts's runWeeklyBriefInner already uses.
- * Running out of quota mid-conversation ends the loop immediately with
- * `limited: true` and CHAT_LIMITED_REPLY, never a partial/broken answer. */
+ * Each model step is gated by geminiQuotaAvailable(env, ip, options.kind)
+ * first (this file's one exception to "callers check quota" — see this
+ * section's doc comment) and, if it's actually made, logged with
+ * logGeminiCall before the request goes out — same "log the attempt, not
+ * just the success" convention worker/weekly-brief.ts's runWeeklyBriefInner
+ * already uses. Running out of quota mid-conversation ends the loop
+ * immediately with `limited: true` and `options.limitedReply`, never a
+ * partial/broken answer. */
 export async function chatWithTools(
   env: Env,
   ip: string,
@@ -628,26 +665,29 @@ export async function chatWithTools(
   history: ChatMessage[],
   tools: ChatToolDef[],
   runTool: (name: string, args: Record<string, unknown>) => Promise<unknown>,
+  options: ChatWithToolsOptions,
 ): Promise<ChatOutcome> {
   const contents: ChatContent[] = history.map((m) => ({ role: m.role, parts: [{ text: m.text }] }));
   const toolCalls: ChatToolCall[] = [];
 
-  for (let step = 0; step < MAX_CHAT_STEPS; step++) {
-    if (!(await geminiQuotaAvailable(env, ip, "chat"))) {
-      return { reply: CHAT_LIMITED_REPLY, toolCalls, limited: true };
+  for (let step = 0; step < options.maxSteps; step++) {
+    if (!(await geminiQuotaAvailable(env, ip, options.kind))) {
+      return { reply: options.limitedReply, toolCalls, limited: true, failed: false };
     }
 
     let result: ChatStepResult;
     try {
-      await logGeminiCall(env, ip, "chat");
+      await logGeminiCall(env, ip, options.kind);
       result = await callGeminiStep(env, systemPrompt, contents, tools);
     } catch (err) {
-      console.error("[gemini] chat step failed:", (err as Error).message);
-      return { reply: CHAT_FALLBACK_REPLY, toolCalls, limited: false };
+      console.error(`[gemini] ${options.kind} step failed:`, (err as Error).message);
+      return { reply: options.fallbackReply, toolCalls, limited: false, failed: true };
     }
 
     if (result.functionCalls.length === 0) {
-      return { reply: result.text ?? CHAT_FALLBACK_REPLY, toolCalls, limited: false };
+      return result.text
+        ? { reply: result.text, toolCalls, limited: false, failed: false }
+        : { reply: options.fallbackReply, toolCalls, limited: false, failed: true };
     }
 
     // Echo the candidate's parts back verbatim (not hand-rebuilt
@@ -660,22 +700,27 @@ export async function chatWithTools(
     // Gemini requires the turn that follows a model turn with N functionCall
     // parts to contain exactly N functionResponse parts, all in one turn —
     // never fewer, and never split across multiple turns. So every call this
-    // step made has to be run and answered together: run them concurrently,
-    // then push one combined "user" turn once they've all settled.
-    const toolResults = await Promise.all(
-      result.functionCalls.map(async ({ name, args }) => {
-        try {
-          return { name, output: await runTool(name, args) };
-        } catch (err) {
-          // A tool implementation failing (a D1 hiccup, an unrecognized
-          // name) is reported back to the model as a functionResponse, not
-          // thrown out of the loop — the model can apologize or try a
-          // different tool instead of the whole question dying on one bad
-          // call.
-          return { name, output: { error: `Tool "${name}" failed: ${(err as Error).message}` } };
-        }
-      }),
-    );
+    // step made has to be run and answered together, whether run
+    // concurrently or (options.sequentialTools) one at a time, before the one
+    // combined "user" turn below is pushed.
+    const runOne = async ({ name, args }: { name: string; args: Record<string, unknown> }) => {
+      try {
+        return { name, output: await runTool(name, args) };
+      } catch (err) {
+        // A tool implementation failing (a D1 hiccup, an unrecognized name)
+        // is reported back to the model as a functionResponse, not thrown
+        // out of the loop — the model can apologize/adjust or try a
+        // different tool instead of the whole run dying on one bad call.
+        return { name, output: { error: `Tool "${name}" failed: ${(err as Error).message}` } };
+      }
+    };
+    const toolResults = options.sequentialTools
+      ? await (async () => {
+          const out: { name: string; output: unknown }[] = [];
+          for (const call of result.functionCalls) out.push(await runOne(call));
+          return out;
+        })()
+      : await Promise.all(result.functionCalls.map(runOne));
 
     toolCalls.push(...result.functionCalls);
     contents.push({
@@ -684,17 +729,17 @@ export async function chatWithTools(
     });
   }
 
-  // Still calling tools after MAX_CHAT_STEPS — one forced final turn with no
-  // `tools` at all, so Gemini has nothing left to call and must answer in
+  // Still calling tools after options.maxSteps — one forced final turn with
+  // no `tools` at all, so Gemini has nothing left to call and must answer in
   // text (see this function's doc comment).
-  if (await geminiQuotaAvailable(env, ip, "chat")) {
+  if (await geminiQuotaAvailable(env, ip, options.kind)) {
     try {
-      await logGeminiCall(env, ip, "chat");
+      await logGeminiCall(env, ip, options.kind);
       const result = await callGeminiStep(env, systemPrompt, contents, null);
-      if (result.text) return { reply: result.text, toolCalls, limited: false };
+      if (result.text) return { reply: result.text, toolCalls, limited: false, failed: false };
     } catch (err) {
-      console.error("[gemini] chat final step failed:", (err as Error).message);
+      console.error(`[gemini] ${options.kind} final step failed:`, (err as Error).message);
     }
   }
-  return { reply: CHAT_FALLBACK_REPLY, toolCalls, limited: false };
+  return { reply: options.fallbackReply, toolCalls, limited: false, failed: true };
 }
