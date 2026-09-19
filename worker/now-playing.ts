@@ -38,7 +38,6 @@ import type { Env } from "./index";
 import { getAccessToken, TokenError } from "./token";
 import { spotifyGet, SpotifyRequestError } from "./spotify-fetch";
 import { captionFor } from "./captions";
-import { clientIp } from "./rate-limit";
 
 const CACHE_TTL_SECONDS = 10;
 
@@ -87,11 +86,15 @@ export interface NowPlayingTrack {
    * itself failed — see resolveSlotId). Never widened past artist_cache. */
   slotId: string | null;
   /** One AI-generated in-world caption line for this track (Phase 7c), or
-   * null when there's no reacting district (slotId is null), none has been
-   * generated yet and one couldn't be right now (Gemini daily cap, a
-   * Gemini failure, or a D1 hiccup — see worker/captions.ts), or generation
-   * is still in flight for the very first poll of a brand-new track. The
-   * frontend falls back to its own template caption whenever this is null. */
+   * null when there's no reacting district (slotId is null), or none exists
+   * yet and one couldn't be generated right now (the Gemini daily/captions
+   * cap, a Gemini failure, or a D1 hiccup — see worker/captions.ts).
+   * Generation is awaited inline as part of this same request (not
+   * fire-and-forget): the very first poll of a brand-new track pays the
+   * full Gemini round-trip once, and every later poll — for the rest of
+   * that play, or any future replay of the same track — is a cached D1
+   * read. The frontend falls back to its own template caption whenever
+   * this is null. */
   caption: string | null;
 }
 
@@ -167,7 +170,7 @@ async function resolveSlotId(env: Env, primaryArtistId: string): Promise<string 
   }
 }
 
-export async function handleNowPlaying(request: Request, env: Env): Promise<Response> {
+export async function handleNowPlaying(env: Env): Promise<Response> {
   const key = cacheKey();
   try {
     const cached = await readCache(key);
@@ -206,9 +209,15 @@ export async function handleNowPlaying(request: Request, env: Env): Promise<Resp
     const primaryArtistId = payload.track.artistIds[0];
     payload.track.slotId = primaryArtistId ? await resolveSlotId(env, primaryArtistId) : null;
     if (payload.track.slotId && primaryArtistId) {
+      // "now-playing" is a fixed pseudo-IP for the Gemini daily-cap
+      // bookkeeping (worker/rate-limit.ts), same convention as
+      // worker/history.ts's cron ("cron") — see worker/captions.ts's doc
+      // comment for why the real polling visitor's IP wouldn't make sense
+      // here (this whole block runs at most once per shared ~10s window,
+      // not once per visitor).
       payload.track.caption = await captionFor(
         env,
-        clientIp(request),
+        "now-playing",
         payload.track.slotId,
         primaryArtistId,
         payload.track.artist,

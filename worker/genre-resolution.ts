@@ -209,7 +209,7 @@ async function resolveArtistSlotsInner(
     const uncachedGenres = allGenres.filter((g) => !cachedGenres.has(g));
 
     if (uncachedGenres.length > 0) {
-      if (await geminiQuotaAvailable(env, ip)) {
+      if (await geminiQuotaAvailable(env, ip, "genres")) {
         let guesses: Map<string, SlotGuess> | null = null;
         try {
           await logGeminiCall(env, ip, "genres");
@@ -259,7 +259,7 @@ async function resolveArtistSlotsInner(
   // ---- Path 2: artists with no genres at all — classify by name ----
   if (withoutGenres.length > 0) {
     let nameGuesses: Map<string, SlotGuess> | null = null;
-    if (await geminiQuotaAvailable(env, ip)) {
+    if (await geminiQuotaAvailable(env, ip, "artists")) {
       try {
         await logGeminiCall(env, ip, "artists");
         nameGuesses = await classifyArtistNames(
@@ -416,9 +416,10 @@ async function resolveArtistMoodsInner(env: Env, ip: string, artists: TopArtistO
   }
   if (missing.length === 0) return byArtistId;
 
-  // Same daily cap as slot resolution (worker/rate-limit.ts) — checked again
-  // here since resolveArtistSlots above may already have spent some of it.
-  if (!(await geminiQuotaAvailable(env, ip))) return byArtistId;
+  // Reserve-adjusted daily cap (worker/rate-limit.ts) — moods is not a core
+  // kind, so this backs off from GEMINI_DAILY_CORE_RESERVE below the raw
+  // global cap rather than the full one resolveArtistSlots above checked.
+  if (!(await geminiQuotaAvailable(env, ip, "moods"))) return byArtistId;
 
   let guesses: Map<string, MoodGuess> | null = null;
   try {

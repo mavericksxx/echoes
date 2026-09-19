@@ -18,9 +18,11 @@
 //
 // Every slot needing generation is batched into a single Gemini call (same
 // pattern as worker/gemini.ts's classifyGenres/classifyArtistNames), gated
-// by the same daily quota (worker/rate-limit.ts's geminiQuotaAvailable) —
-// this endpoint's overall cap on Gemini calls is shared with genre
-// resolution, not a separate budget. On any failure (quota exhausted,
+// by the same daily quota (worker/rate-limit.ts's geminiQuotaAvailable,
+// passed "persona" as its kind) — persona generation shares the overall
+// Gemini budget with genre resolution, but backs off from a reserved slice
+// of it (GEMINI_DAILY_CORE_RESERVE) rather than being able to exhaust the
+// full cap genre resolution depends on. On any failure (quota exhausted,
 // network/HTTP error, a slot missing from the response) that slot falls back
 // to its existing cached row if one exists, else null — worker/village.ts
 // treats null as "no persona yet" and the frontend renders around it (never
@@ -231,7 +233,7 @@ async function resolveSlotPersonasInner(
 
   if (needsGeneration.length === 0) return result;
 
-  if (!(await geminiQuotaAvailable(env, ip))) {
+  if (!(await geminiQuotaAvailable(env, ip, "persona"))) {
     // Quota exhausted — fall back to each slot's existing cached row (stale
     // fingerprint and all) rather than nothing, per this file's doc comment.
     for (const { input } of needsGeneration) {

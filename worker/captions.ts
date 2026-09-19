@@ -68,8 +68,13 @@ function pickLine(lines: string[]): string | null {
  * fall back to their own template caption in that case.
  *
  * `ip` is only for the shared Gemini daily-cap bookkeeping
- * (worker/rate-limit.ts) — same role it plays in genre-resolution.ts —
- * never sent to Gemini itself. */
+ * (worker/rate-limit.ts) — never sent to Gemini itself. worker/now-playing.ts
+ * (the only caller) passes the fixed pseudo-IP "now-playing", the same
+ * convention worker/history.ts's cron uses ("cron") for resolveArtistSlots:
+ * the shared ~10s now-playing cache means whichever visitor's poll happens
+ * to miss it triggers this for everyone, so bookkeeping against *that*
+ * visitor's real IP would be both meaningless and would eat into their
+ * personal per-IP cap for a call they didn't really cause. */
 export async function captionFor(
   env: Env,
   ip: string,
@@ -83,7 +88,7 @@ export async function captionFor(
     const cached = await readCache(env, artistId, trackId);
     if (cached) return pickLine(cached);
 
-    if (!(await geminiQuotaAvailable(env, ip))) return null;
+    if (!(await geminiQuotaAvailable(env, ip, "captions"))) return null;
 
     const genre = getSlot(slotId).district.genre;
     await logGeminiCall(env, ip, "captions");
