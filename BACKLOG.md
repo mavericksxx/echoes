@@ -10,7 +10,8 @@ History strip — 2026-09-18), **Phase 8.5** (Wrapped on demand — `/api/wrappe
 captions — deployed 2026-09-19).
 
 Phase 8.6 first cut (sidebar playlists) deployed 2026-09-19 after the playlist-scope reconnect.
-Parked (2026-09-19): playlist *buildings* on the map (8.6 follow-on). Remaining SPEC phases not started: 9 (weekly notice board), 10 (Hokage chat agent),
+Parked (2026-09-19): playlist *buildings* on the map (8.6 follow-on). Phase 9 (weekly notice board) deployed 2026-09-19; first real brief for the week of 2026-09-21.
+Remaining SPEC phases not started: 10 (Hokage chat agent),
 11 (self-evolving village agent), 12 (chronicle), 13 (show it off).
 
 Notes on the finished grid work: two rooms are tight enough to watch — `shopFlower` collapses the 5

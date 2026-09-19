@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- **Phase 9 — Weekly notice board:** the 15-min cron writes a weekly Gemini brief (once per
+  Monday–Sunday week, 6h grace after week end, weeks before history began skipped); notice board on
+  the village map + sidebar Notice board / This week sections. `/api/weekly-brief`, migration 0009.
 - **Phase 8.6 (first cut) — Playlists:** sidebar Playlists tab listing the owner's public playlists;
   opening one shows its cast by genre character. `/api/playlists` + `/api/playlists/{id}` (id must be
   in the owner's list). Needs a Spotify reconnect for the new playlist scopes.
