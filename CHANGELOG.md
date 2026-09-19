@@ -1,6 +1,14 @@
 # Changelog
 
 ## Unreleased
+- **Phase 11 — The village evolves itself:** a daily Gemini agent (first cron tick after 06:00
+  owner-local) reads the last 24h/7d of listening and makes up to 4 validated, expiring changes via
+  six tools (district activity, weather, festival, time-of-day override, visiting artist, character
+  mood), each with a stated reason. Runs are recorded atomically in `agent_run` + `agent_event`
+  (migration 0010) with a 4h retry cooldown and its own 12-steps/day Gemini sub-cap. `GET /api/world`
+  (D1 only, 5-min edge cache) feeds canvas weather particles, real-clock time-of-day tint, festival
+  decor, tappable visitors and a sidebar "Village today" card. `POST /api/world/run` is gated on the
+  `AGENT_TRIGGER_TOKEN` secret (`?force=1`, `?again=1`).
 - **Phase 10 — Talk to the Hokage:** chat sidebar tab backed by Gemini function calling over five
   read-only D1 tools (top artists, recent plays, one district's history, the latest weekly brief,
   artist lookup); replies pan the camera to the district the answer was about. `POST /api/hokage`
