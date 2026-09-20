@@ -76,6 +76,11 @@ interface SidebarHooks {
    * keyboard nav) — the caller uses this to keep its own topbar village
    * buttons' aria-current in sync with whichever village section is open. */
   onSectionChange: (sectionId: string) => void;
+  /** Chronicle replay: called with a short description of the current step
+   * (or null to clear) — the caller shows it on the map (main.ts's
+   * villageCaption) since a replayed change (e.g. a mood shift) otherwise
+   * only renders as a tint inside that district's own view. */
+  onReplayCaption: (text: string | null) => void;
 }
 
 /** Extra options for openSidebar beyond "which slot" — used when opening from
@@ -1208,12 +1213,16 @@ function buildPlaylistRow(playlist: PlaylistRowData, onSelect: () => void): HTML
     cover.style.background = coverPlaceholderGradient(playlist.id);
   }
 
-  const info = document.createElement("span");
+  // .song-row__info/title/meta are block elements everywhere else they're
+  // used (buildSongRow, buildArtistRow) so title/meta stack onto their own
+  // lines — these were spans, which flow inline and ran the name straight
+  // into the track count with no separation.
+  const info = document.createElement("div");
   info.className = "song-row__info";
-  const title = document.createElement("span");
+  const title = document.createElement("p");
   title.className = "song-row__title";
   title.textContent = playlist.name;
-  const meta = document.createElement("span");
+  const meta = document.createElement("p");
   meta.className = "song-row__meta";
   meta.textContent = `${playlist.trackCount} track${playlist.trackCount === 1 ? "" : "s"}`;
   info.append(title, meta);
@@ -1957,6 +1966,14 @@ function describeChronicleEvent(ev: ChronicleEvent): string {
   return CHRONICLE_TOOL_LABELS[ev.tool]?.(ev.args) ?? ev.tool;
 }
 
+/** The district an event affects, for the replay camera to pan to — every
+ * tool in CHRONICLE_TOOL_LABELS above except set_weather/set_time_of_day
+ * (village-wide, nothing to pan to) takes a `slot` arg. */
+function chronicleEventSlot(ev: ChronicleEvent): string | null {
+  const slot = ev.args.slot;
+  return typeof slot === "string" ? slot : null;
+}
+
 /** worker/chronicle.ts's ChronicleResponse.visitorNames (real data) or
  * SAMPLE_CHRONICLE.visitorNames (sample mode) — the map replay needs to
  * resolve a replayed visitor's name, since it may not be among today's live
@@ -1975,6 +1992,7 @@ const REPLAY_STEP_MS = 1750;
 interface ChronicleReplay {
   runDate: string;
   states: WorldState[];
+  events: ChronicleEvent[];
   stepIndex: number;
   nowMs: number;
   visitorNames: Record<string, string>;
@@ -2013,6 +2031,7 @@ function stopChronicleReplay(): void {
   if (chronicleReplay.timer !== null) clearTimeout(chronicleReplay.timer);
   chronicleReplay = null;
   setReplayState(null, 0);
+  hooks.onReplayCaption(null);
   if (panel && activeSectionId === "chronicle") rerenderChronicleKeepingScrollAndFocus(runDate);
 }
 
@@ -2047,6 +2066,12 @@ function scheduleChronicleReplayStep(): void {
     }
     replay.stepIndex++;
     setReplayState(replay.states[replay.stepIndex]!, replay.nowMs, replay.visitorNames);
+    const ev = replay.events[replay.stepIndex - 1];
+    if (ev) {
+      const slotId = chronicleEventSlot(ev);
+      if (slotId) hooks.onFocusSlot(slotId);
+      hooks.onReplayCaption(describeChronicleEvent(ev));
+    }
     if (panel && activeSectionId === "chronicle") updateChronicleReplayDom(replay);
     scheduleChronicleReplayStep();
   }, REPLAY_STEP_MS);
@@ -2071,6 +2096,7 @@ function startChronicleReplay(run: ChronicleRun): void {
   chronicleReplay = {
     runDate: run.runDate,
     states,
+    events: run.events,
     stepIndex: 0,
     nowMs: Number.isNaN(nowMs) ? Date.now() : nowMs,
     visitorNames: currentChronicleVisitorNames(),
@@ -2079,6 +2105,7 @@ function startChronicleReplay(run: ChronicleRun): void {
     button: null,
   };
   setReplayState(states[0]!, chronicleReplay.nowMs, chronicleReplay.visitorNames);
+  hooks.onReplayCaption(null);
   rerenderChronicleKeepingScrollAndFocus(run.runDate);
   scheduleChronicleReplayStep();
 }
@@ -2305,7 +2332,10 @@ function renderSection(sectionId: string): void {
     renderTablist();
     panelHost.innerHTML = "";
     panelHost.id = PANEL_ID;
-    panelHost.setAttribute("aria-labelledby", `tab-${activeSectionId}`);
+    // Not `tab-${activeSectionId}`: at >=1100px the tablist duplicating the
+    // topbar's village buttons is hidden (src/style.css), so that tab isn't
+    // in the accessibility tree — the heading itself names the panel instead.
+    panelHost.setAttribute("aria-labelledby", villageHeadingEl.id);
     villageHeadingEl.textContent = section.heading ?? section.label;
     section.render(panelHost);
     return;
@@ -2415,6 +2445,7 @@ export function initSidebar(rootEl: HTMLElement, backdropEl: HTMLElement, h: Sid
   // Same `.sidebar__name` class as `nameEl` so it reads at the same size.
   villageHeadingEl = document.createElement("h2");
   villageHeadingEl.className = "sidebar__name";
+  villageHeadingEl.id = "village-heading";
   villageHeadingEl.hidden = true;
 
   header.append(portraitCanvas, headerText, enterBtn, villageHeadingEl);
@@ -2521,6 +2552,7 @@ export function openSidebar(slot: Slot, opts: OpenSidebarOptions = {}): void {
   portraitCanvas.hidden = false;
   headerTextEl.hidden = false;
   villageHeadingEl.hidden = true;
+  root.classList.remove("sidebar--village");
   revealPanel();
   renderHeader(slot);
   renderVillageToday();
@@ -2554,6 +2586,7 @@ export function openVillagePanel(section = "wrapped"): void {
   headerTextEl.hidden = true;
   enterBtn.hidden = true;
   villageHeadingEl.hidden = false;
+  root.classList.add("sidebar--village");
   revealPanel();
   renderVillageToday();
   renderSection(activeSectionId);
@@ -2563,10 +2596,12 @@ export function openVillagePanel(section = "wrapped"): void {
   // link, replaced when renderSection rebuilds the panel) — document.body
   // is what's left focused once the clicked element is gone, so without
   // this the tablist would otherwise only ever get focus on a true first
-  // open.
+  // open. The tablist itself is hidden at >=1100px (src/style.css — it'd
+  // duplicate the topbar's village buttons there), so `offsetParent` is
+  // null and the tab can't actually take focus; fall back to closeBtn.
   if (isFirstOpen || document.activeElement === document.body) {
     const activeTab = tablistEl.querySelector<HTMLButtonElement>('[aria-selected="true"]');
-    (activeTab ?? closeBtn).focus();
+    (activeTab?.offsetParent ? activeTab : closeBtn).focus();
   }
 }
 

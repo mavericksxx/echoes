@@ -377,6 +377,12 @@ select {
   .topbar-btn--village {
     display: inline-flex;
   }
+  /* Below 1100px the topbar only has the single #villageBtn, so the village
+     panel's own tablist (hidden above) is back to being the only way to
+     switch sections. */
+  .sidebar--village .sidebar-tablist {
+    display: flex;
+  }
 }
 
 /* ---- "Your top artists" panel (Phase 2) — a small floating card, not the
@@ -1144,6 +1150,17 @@ select {
   margin-top: var(--space-3);
   padding-bottom: 4px;
   border-bottom: 2px solid var(--ink);
+}
+
+/* Village mode's tablist (src/sidebar.ts's VILLAGE_SECTIONS) repeats the
+   topbar's own village buttons at >=1100px (see .topbar-village-btns above)
+   — hide it there so the same five tabs don't appear twice. Below 1100px
+   the topbar collapses to the single #villageBtn, so this is the only way
+   to switch sections and stays visible (the 1099px query below reinstates
+   it). The character (slot) tablist has no `.sidebar--village` ancestor and
+   is unaffected either way. */
+.sidebar--village .sidebar-tablist {
+  display: none;
 }
 
 .sidebar-tab {
