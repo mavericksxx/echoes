@@ -34,6 +34,18 @@ interface WipeState {
 }
 
 let wipe: WipeState | null = null;
+// Bumped on every startSceneWipe call (accepted or rejected) and stamped on
+// every debug log this module prints — Chrome's console collapses repeated
+// *identical* consecutive log lines into one row with a small counter
+// badge, which would make a real re-entrant-call bug (something calling
+// startSceneWipe every frame, each time resetting startTs and keeping t
+// pinned near 0) look, at a glance, like a single harmless log. A changing
+// number defeats that: if this bug recurs, the sequence visibly climbs.
+let wipeSeq = 0;
+// Bumped every drawSceneWipe call — used only to throttle the periodic
+// phase/t trace below (see main.ts's frame()/coordinator's request for
+// visibility into whether t is advancing, frozen, or resetting).
+let drawCount = 0;
 
 const WIPE_MS = 260; // each phase (close, open) — roughly SCENE_TRANSITION_MS
 
@@ -63,10 +75,31 @@ export function getWipePhase(): WipePhase | null {
  * (fully covering the canvas in black), then `onCovered` runs — swap the
  * scene and hand back where the reveal should grow open from — then a
  * second circle grows from that point back out to nothing (fully
- * revealing). */
+ * revealing).
+ *
+ * Refuses to start a second wipe on top of an in-flight one (logs a warning
+ * and keeps the existing one running) rather than silently overwriting
+ * `wipe` — overwriting would reset `startTs` to "now" every time it
+ * happened, which is exactly what a re-entrant caller (a bug elsewhere)
+ * would look like: `t` pinned near 0 forever, no visible progress, no
+ * `onCovered`, indistinguishable from the wipe simply never having started.
+ * main.ts's own state (pendingDistrictEnter cleared before this is called,
+ * sceneTransitionActive as a re-entrancy guard) should already prevent that
+ * caller from existing, but this module shouldn't depend on getting that
+ * right elsewhere for its own internal invariant (never two wipes at once)
+ * to hold. */
 export function startSceneWipe(closeCenter: WipeCenter, onCovered: () => WipeCenter): void {
+  wipeSeq++;
+  if (wipe) {
+    console.warn("[scene-wipe]", wipeSeq, "startSceneWipe called while already wiping — ignoring", {
+      inFlightPhase: wipe.phase,
+      inFlightStartTs: wipe.startTs,
+    });
+    return;
+  }
   wipe = { phase: "closing", startTs: performance.now(), center: closeCenter, onCovered };
-  console.debug("[scene-wipe] closing", closeCenter);
+  drawCount = 0;
+  console.debug("[scene-wipe]", wipeSeq, "closing", closeCenter);
 }
 
 /** Forcibly abandons any in-flight wipe without running `onCovered` — an
@@ -75,7 +108,7 @@ export function startSceneWipe(closeCenter: WipeCenter, onCovered: () => WipeCen
  * it leaves the visible scene in a slightly odd spot. Never called in the
  * normal (working) path. */
 export function cancelSceneWipe(): void {
-  if (wipe) console.debug("[scene-wipe] cancelled from phase", wipe.phase);
+  if (wipe) console.debug("[scene-wipe]", wipeSeq, "cancelled from phase", wipe.phase);
   wipe = null;
 }
 
@@ -114,6 +147,16 @@ export function drawSceneWipe(ctx: CanvasRenderingContext2D, w: number, h: numbe
   const now = performance.now();
   const t = Math.max(0, Math.min(1, (now - wipe.startTs) / WIPE_MS));
 
+  // Roughly every 10 frames while a wipe is active — shows directly whether
+  // t is climbing toward 1 (working), frozen at some value (stuck: this
+  // drawSceneWipe call isn't the one advancing time, or startTs is wrong),
+  // or repeatedly resetting near 0 (something is re-entering startSceneWipe
+  // — see its own guard/warning above).
+  drawCount++;
+  if (drawCount % 10 === 1) {
+    console.debug("[scene-wipe]", wipeSeq, "tick", { phase: wipe.phase, t: t.toFixed(3), now, startTs: wipe.startTs });
+  }
+
   if (wipe.phase === "closing") {
     const r = maxR * (1 - easeInCubic(t));
     drawIris(ctx, cx, cy, Math.max(0, r), w, h);
@@ -121,7 +164,8 @@ export function drawSceneWipe(ctx: CanvasRenderingContext2D, w: number, h: numbe
       const onCovered = wipe.onCovered!;
       const openCenter = onCovered();
       wipe = { phase: "opening", startTs: now, center: openCenter, onCovered: null };
-      console.debug("[scene-wipe] covered — swap ran, opening", openCenter);
+      drawCount = 0;
+      console.debug("[scene-wipe]", wipeSeq, "covered — swap ran, opening", openCenter);
     }
     return;
   }
@@ -130,6 +174,6 @@ export function drawSceneWipe(ctx: CanvasRenderingContext2D, w: number, h: numbe
   drawIris(ctx, cx, cy, r, w, h);
   if (t >= 1) {
     wipe = null;
-    console.debug("[scene-wipe] done");
+    console.debug("[scene-wipe]", wipeSeq, "done");
   }
 }
