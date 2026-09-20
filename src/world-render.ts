@@ -8,7 +8,23 @@
 // affected by any of it.
 
 import type { Point } from "../data/types";
+import type { ActivityLevel } from "../shared/activity";
 import { sanitizeLabel, type TimeOfDayId, type WeatherId } from "../shared/world";
+import { getTimeOfDay, getWeather } from "./world-state";
+
+/** One frame's shared timing/preference inputs — built once in src/main.ts's
+ * frame() and threaded down to whatever draw calls need it, instead of each
+ * one re-deriving its own (see this file's drawWorldEffects and main.ts's
+ * frame() for the callers). `dt`/`ts` are the rAF frame's own delta/
+ * timestamp (used for particle animation, independent of any Chronicle
+ * replay); `clockMs` is world-state.ts's getSceneClockMs() — the replay's
+ * fixed nowMs while one is active, else Date.now(). */
+export interface WorldEnv {
+  dt: number;
+  ts: number;
+  reduced: boolean;
+  clockMs: number;
+}
 
 // ---------------------------------------------------------------------------
 // Time-of-day tint
@@ -58,6 +74,32 @@ export function drawNightGlows(ctx: CanvasRenderingContext2D, points: Point[]): 
     ctx.fill();
   });
   ctx.restore();
+}
+
+/** One candidate night-glow point plus the activity level of whatever slot
+ * it belongs to (src/listening-source.ts's getActivity, itself replay-aware
+ * via world-state.ts's getEffectiveWorld) — see pickGlowPoints below. */
+export interface GlowCandidate {
+  point: Point;
+  activity: ActivityLevel;
+}
+
+const ACTIVITY_RANK: Record<ActivityLevel, number> = { dormant: 0, quiet: 1, active: 2, festival: 3 };
+
+/** Selects which of `candidates` get a night glow. Bug fix (was: the first
+ * MAX_NIGHT_GLOWS points in whatever order the caller listed them, i.e. the
+ * first six districts in roster order, regardless of activity): once there
+ * are more candidates than the cap, pick the most active ones instead,
+ * dropping dormant slots entirely. Below the cap, every candidate glows
+ * (unchanged) — a single-point scene (a district's own home anchor) always
+ * glows at night exactly like before this fix. */
+function pickGlowPoints(candidates: GlowCandidate[]): Point[] {
+  if (candidates.length <= MAX_NIGHT_GLOWS) return candidates.map((c) => c.point);
+  return candidates
+    .filter((c) => c.activity !== "dormant")
+    .sort((a, b) => ACTIVITY_RANK[b.activity] - ACTIVITY_RANK[a.activity])
+    .slice(0, MAX_NIGHT_GLOWS)
+    .map((c) => c.point);
 }
 
 // ---------------------------------------------------------------------------
@@ -354,4 +396,39 @@ export function drawWeather(
       break;
   }
   ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// Combined world-effects pass — the tint/glows/weather sequence
+// src/main.ts's renderVillage and renderDistrict each used to run inline,
+// now shared here so the two stay in lock-step as new effects are added.
+// ---------------------------------------------------------------------------
+
+/** What differs between renderVillage's and renderDistrict's call —
+ * everything else (time-of-day, weather) is read once inside
+ * drawWorldEffects itself via world-state.ts, since both callers want the
+ * same value. `w`/`h` size the tint wash (a scene's full background, not
+ * just the viewport); `camX`/`camY`/`viewW`/`viewH` are drawWeather's own
+ * camera/viewport args. */
+export interface WorldEffectsScene {
+  w: number;
+  h: number;
+  camX: number;
+  camY: number;
+  viewW: number;
+  viewH: number;
+  glowCandidates: GlowCandidate[];
+}
+
+/** Runs one frame's world-effects draw for `scene`: time-of-day tint, then
+ * night glows cutting through it, then weather particles on top of all of
+ * it — same order src/main.ts's renderVillage/renderDistrict each ran this
+ * sequence in before this was pulled out (see this file's top doc comment
+ * for why: called inside the caller's own world-space save()/
+ * translate(-camX,-camY)/restore() block). */
+export function drawWorldEffects(ctx: CanvasRenderingContext2D, scene: WorldEffectsScene, env: WorldEnv): void {
+  const timeOfDay = getTimeOfDay();
+  drawTimeOfDayTint(ctx, timeOfDay, scene.w, scene.h);
+  if (timeOfDay === "night") drawNightGlows(ctx, pickGlowPoints(scene.glowCandidates));
+  drawWeather(ctx, getWeather(), scene.camX, scene.camY, scene.viewW, scene.viewH, env.dt, env.ts, env.reduced);
 }
