@@ -12,6 +12,7 @@
 import {
   EMPTY_WORLD,
   effectiveWorld,
+  hourFormatterFor,
   timeOfDayFor,
   type EffectiveWorld,
   type TimeOfDayId,
@@ -115,10 +116,36 @@ export function getOwnerTz(): string {
   return ownerTz;
 }
 
+/** The clock this render frame should treat as "now": a Chronicle replay's
+ * fixed nowMs while one is active (see setReplayState above), else the real
+ * clock. Same replay-or-live split getEffectiveWorld() already makes, split
+ * out so callers that need a raw timestamp (not a WorldState) — world-render.
+ * ts's world-effects draw, via getTimeOfDay/getSceneHour below — don't have
+ * to reach into the replay override directly. */
+export function getSceneClockMs(): number {
+  return replay ? replay.nowMs : Date.now();
+}
+
 /** This moment's time-of-day: the agent's override if still live, else the
- * real clock in ownerTz (shared/world.ts's timeOfDayFor). */
+ * scene clock's real dawn/day/dusk/night in ownerTz (shared/world.ts's
+ * timeOfDayFor). Uses getSceneClockMs() rather than Date.now() so a
+ * Chronicle replay of a past day shows that day's time of day, not the real
+ * current one. */
 export function getTimeOfDay(): TimeOfDayId {
-  return getEffectiveWorld().timeOfDay?.value ?? timeOfDayFor(Date.now(), ownerTz);
+  return getEffectiveWorld().timeOfDay?.value ?? timeOfDayFor(getSceneClockMs(), ownerTz);
+}
+
+/** The scene clock's fractional owner-local hour (e.g. 14.5 for 2:30pm) —
+ * minutes folded in as a fraction, for callers that need finer granularity
+ * than timeOfDayFor's dawn/day/dusk/night buckets. Reuses shared/world.ts's
+ * cached hourFormatterFor(tz) rather than constructing an Intl.DateTimeFormat
+ * per call, same reasoning as timeOfDayFor's own use of it. */
+export function getSceneHour(): number {
+  const d = new Date(getSceneClockMs());
+  const parts = hourFormatterFor(ownerTz).formatToParts(d);
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+  return hour + minute / 60;
 }
 
 /** undefined (rather than "clear") when there's no live weather override —

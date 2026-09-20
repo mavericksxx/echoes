@@ -55,8 +55,8 @@ import {
   isVillageLive,
   refreshVillage,
 } from "./listening-source";
-import { fetchWorldResponse, getFestivals, getTimeOfDay, getVisitors, getWeather, getWorldVersion, initWorldState } from "./world-state";
-import { drawFestivalDecor, drawNightGlows, drawTimeOfDayTint, drawWeather } from "./world-render";
+import { fetchWorldResponse, getFestivals, getSceneClockMs, getVisitors, getWeather, getWorldVersion, initWorldState } from "./world-state";
+import { drawFestivalDecor, drawWorldEffects, type GlowCandidate, type WorldEnv } from "./world-render";
 import { onEraChange } from "./era";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
 import { downloadRecording, isRecordingSupported, startRecording, takeSnapshot, type Recording } from "./capture";
@@ -347,6 +347,11 @@ function isDesktop(): boolean {
 function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
+
+// Cached rather than re-queried on every frame — frame() reads .matches off
+// this once per frame to build WorldEnv.reduced, instead of the per-draw-site
+// matchMedia() calls drawWeather used to make internally.
+const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 const VILLAGE_AUTO_MAX_ZOOM = 3;
 const ZOOM_MIN = 1;
@@ -742,7 +747,7 @@ function followActiveDistrictLeader(dt: number): void {
   camY += (targetY - camY) * t;
 }
 
-function renderDistrict(dt: number, ts: number): void {
+function renderDistrict(env: WorldEnv): void {
   if (!currentDistrictId) return;
   const { district } = getSlot(currentDistrictId);
   const leader = districtNpcsBySlot.get(currentDistrictId)!;
@@ -773,11 +778,15 @@ function renderDistrict(dt: number, ts: number): void {
 
   // Phase 11: world effects — a lighting wash on top of everything drawn so
   // far, then night glows cutting through it, then weather particles on top
-  // of all of it (see world-render.ts's doc comment on draw order).
-  const timeOfDay = getTimeOfDay();
-  drawTimeOfDayTint(ctx, timeOfDay, bgW, bgH);
-  if (timeOfDay === "night") drawNightGlows(ctx, [district.home]);
-  drawWeather(ctx, getWeather(), camX, camY, viewW, viewH, dt, ts, prefersReducedMotion());
+  // of all of it (see world-render.ts's drawWorldEffects doc comment on draw
+  // order). Single-point glow candidate — a district's own home anchor —
+  // so it always glows at night regardless of activity (see
+  // pickGlowPoints's doc comment).
+  drawWorldEffects(
+    ctx,
+    { w: bgW, h: bgH, camX, camY, viewW, viewH, glowCandidates: [{ point: district.home, activity: level }] },
+    env,
+  );
   ctx.restore();
 }
 
@@ -818,7 +827,7 @@ function tickVillage(now: number, dt: number): void {
   );
 }
 
-function renderVillage(dt: number, ts: number): void {
+function renderVillage(env: WorldEnv): void {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
   ctx.translate(-camX, -camY);
@@ -842,14 +851,15 @@ function renderVillage(dt: number, ts: number): void {
   sorted.filter((n) => n.caption).forEach((n) => drawNpc(ctx, images, n, view));
 
   // Phase 11: world effects — see renderDistrict's matching block for the
-  // draw-order reasoning (tint, then night glows, then weather on top).
-  const timeOfDay = getTimeOfDay();
-  drawTimeOfDayTint(ctx, timeOfDay, mapW, mapH);
-  if (timeOfDay === "night") {
-    const glowPoints = SLOTS.map((s) => VILLAGE.anchors[s.character.id]).filter((p): p is Point => Boolean(p));
-    drawNightGlows(ctx, glowPoints);
-  }
-  drawWeather(ctx, getWeather(), camX, camY, viewW, viewH, dt, ts, prefersReducedMotion());
+  // draw-order reasoning (tint, then night glows, then weather on top). Bug
+  // fix: glow candidates carry each slot's activity level so
+  // drawWorldEffects can glow the busiest districts instead of whichever
+  // six came first in roster order (see world-render.ts's pickGlowPoints).
+  const glowCandidates: GlowCandidate[] = SLOTS.map((s) => {
+    const anchor = VILLAGE.anchors[s.character.id];
+    return anchor ? { point: anchor, activity: getActivity(s.district.id).level } : null;
+  }).filter((c): c is GlowCandidate => c !== null);
+  drawWorldEffects(ctx, { w: mapW, h: mapH, camX, camY, viewW, viewH, glowCandidates }, env);
   ctx.restore();
 }
 
@@ -1261,6 +1271,11 @@ function frame(ts: number): void {
   updateZoomAnim(ts);
   updatePanAnim(ts);
 
+  // One env per frame (dt/ts already derived above) rather than each draw
+  // call re-deriving its own reduced-motion/clock reads — see world-render.
+  // ts's WorldEnv doc comment.
+  const env: WorldEnv = { dt, ts, reduced: reducedMotionQuery.matches, clockMs: getSceneClockMs() };
+
   // Phase 12: a Chronicle replay step (or its start/stop) changes which
   // visitors world-state.ts's getVisitors() reports — visitorNpcs is built
   // once, not derived fresh per frame like everything else here, so it needs
@@ -1307,11 +1322,11 @@ function frame(ts: number): void {
   if (mode === "village") {
     applyKeyPan(dt);
     tickVillage(ts, dt);
-    renderVillage(dt, ts);
+    renderVillage(env);
     renderCaptions(villageCaptionLabels());
   } else {
     followActiveDistrictLeader(dt);
-    renderDistrict(dt, ts);
+    renderDistrict(env);
     renderCaptions(districtCaptionLabels());
   }
 
