@@ -196,6 +196,7 @@ initSidebar(sidebarRoot, sidebarBackdrop, {
     // highlight doesn't linger once its sidebar isn't what's showing.
     if (sidebarSlotId() === null) selectedNpc = null;
   },
+  onReplayCaption: (text) => setReplayCaption(text),
 });
 initTopArtists();
 initNowPlayingCard();
@@ -1218,6 +1219,23 @@ function dismissVillageCaption(): void {
 }
 function armVillageCaptionTimer(): void {
   window.setTimeout(dismissVillageCaption, VILLAGE_CAPTION_TIMEOUT_MS);
+}
+
+/** Reuses villageCaption for Chronicle replay steps (src/sidebar.ts's
+ * onReplayCaption hook) instead of a second overlay — a replayed change
+ * (e.g. a mood shift) otherwise only renders as a tint inside that
+ * district's own view, invisible from the whole-village view the replay
+ * runs in. Bypasses the onboarding hint's dismiss-once state: by the time a
+ * visitor reaches Chronicle that hint has long since faded, and a step's
+ * caption isn't a one-time hint anyway. */
+function setReplayCaption(text: string | null): void {
+  villageCaption.classList.remove("is-dismissed");
+  if (text === null) {
+    villageCaption.hidden = true;
+    return;
+  }
+  villageCaption.textContent = text;
+  villageCaption.hidden = false;
 }
 // Deferred to onboarding's onClose callback above when it auto-opened —
 // otherwise armed right away, same as before.

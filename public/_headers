@@ -1,12 +1,14 @@
 # CSP for the HTML shell (Phase 3.5 fix pass). The sidebar hotlinks real
 # Spotify album/artist art from i.scdn.co (SPEC.md's cover-art rules —
-# hotlinked, never re-hosted) and the official Spotify logo is served from
-# this same origin (public/brand/). Verified safe to actually enforce: no
-# data:/blob: image URLs anywhere in the app (src/recolor.ts's bakeRecolor
-# returns a live <canvas>, not a data URL, so img-src doesn't touch it), and
-# i.scdn.co is the only external image host in use. Scoped to img-src only —
-# every other directive stays unset so this can't regress scripts, styles,
-# or fonts (Google Fonts, the Vite module bundle) that never had a CSP.
+# hotlinked, never re-hosted), playlist covers also come from
+# image-cdn-fa.spotifycdn.com and mosaic covers from mosaic.scdn.co, and the
+# official Spotify logo is served from this same origin (public/brand/).
+# Verified safe to actually enforce: no data:/blob: image URLs anywhere in
+# the app (src/recolor.ts's bakeRecolor returns a live <canvas>, not a data
+# URL, so img-src doesn't touch it), and *.spotifycdn.com / *.scdn.co cover
+# the external image hosts in use. Scoped to img-src only — every other
+# directive stays unset so this can't regress scripts, styles, or fonts
+# (Google Fonts, the Vite module bundle) that never had a CSP.
 #
 # This lives here, not in worker/index.ts, because wrangler.jsonc's `assets`
 # config has no `run_worker_first`: a request for "/" is served by
@@ -15,7 +17,7 @@
 # would target. `_headers` is honored by that same asset layer, so it's the
 # only place this policy can actually take effect.
 /
-  Content-Security-Policy: img-src 'self' https://i.scdn.co
+  Content-Security-Policy: img-src 'self' https://i.scdn.co https://*.spotifycdn.com https://*.scdn.co
 
 /index.html
-  Content-Security-Policy: img-src 'self' https://i.scdn.co
+  Content-Security-Policy: img-src 'self' https://i.scdn.co https://*.spotifycdn.com https://*.scdn.co
