@@ -21,7 +21,12 @@ export function activityLevel(playShare: number): ActivityLevel {
 /** What an activity level looks/feels like in a district's interior (see
  * src/main.ts's renderDistrict + src/residents.ts's crowd helpers) — kept as
  * one small table, documented here, rather than scattered magic numbers:
- *  - `overlay`: a CSS color drawn as a full-bg wash (null = no wash).
+ *  - `overlay`: a CSS color drawn as a full-bg wash (null = no wash). Only
+ *    festival still has one (a warm glow) — dormant/quiet's darkening wash
+ *    was folded into src/lighting.ts's lighting layer instead (its light
+ *    pool intensity is already sourced from this same activity level, see
+ *    src/world-render.ts's ACTIVITY_POOL_INTENSITY), so district darkness
+ *    now tracks time-of-day like everywhere else instead of being always-on.
  *  - `crowdExtra`: extra non-interactive background villagers.
  *  - `festivalProps`: whether to draw festival bunting/lanterns.
  *  - `performChanceMul`: multiplies the leader's spontaneous "perform" chance
@@ -35,8 +40,8 @@ export interface ActivityTreatment {
 }
 
 export const ACTIVITY_TREATMENT: Record<ActivityLevel, ActivityTreatment> = {
-  dormant: { overlay: "rgba(6, 10, 16, 0.5)", crowdExtra: 0, festivalProps: false, performChanceMul: 0 },
-  quiet: { overlay: "rgba(6, 10, 16, 0.24)", crowdExtra: 0, festivalProps: false, performChanceMul: 0.6 },
+  dormant: { overlay: null, crowdExtra: 0, festivalProps: false, performChanceMul: 0 },
+  quiet: { overlay: null, crowdExtra: 0, festivalProps: false, performChanceMul: 0.6 },
   active: { overlay: null, crowdExtra: 1, festivalProps: false, performChanceMul: 1 },
   festival: { overlay: "rgba(255, 191, 110, 0.16)", crowdExtra: 2, festivalProps: true, performChanceMul: 1.8 },
 };

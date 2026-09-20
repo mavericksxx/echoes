@@ -10,6 +10,8 @@
 import type { Point } from "../data/types";
 import type { ActivityLevel } from "../shared/activity";
 import { sanitizeLabel, type TimeOfDayId, type WeatherId } from "../shared/world";
+import { drawLighting, lerpTowards, type LightPool } from "./lighting";
+import { getLiveNowPlaying } from "./now-playing-card";
 import { getTimeOfDay, getWeather } from "./world-state";
 
 /** One frame's shared timing/preference inputs — built once in src/main.ts's
@@ -18,12 +20,21 @@ import { getTimeOfDay, getWeather } from "./world-state";
  * frame() for the callers). `dt`/`ts` are the rAF frame's own delta/
  * timestamp (used for particle animation, independent of any Chronicle
  * replay); `clockMs` is world-state.ts's getSceneClockMs() — the replay's
- * fixed nowMs while one is active, else Date.now(). */
+ * fixed nowMs while one is active, else Date.now(). `hour` is world-state.
+ * ts's getSceneHour() (fractional owner-local hour), read once here for
+ * src/lighting.ts's darkness curve. `breathe` is the app's single "the map
+ * breathes with the music" oscillator (Feature 2) — computed once per frame
+ * in main.ts's frame() from the now-playing district's mood energy (there's
+ * no per-track tempo/energy available; Spotify's audio-features API is
+ * gone), 0.5 constant under reduced motion. No other module may create its
+ * own oscillator — see drawWorldEffects below, the only reader. */
 export interface WorldEnv {
   dt: number;
   ts: number;
   reduced: boolean;
   clockMs: number;
+  hour: number;
+  breathe: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -31,11 +42,13 @@ export interface WorldEnv {
 // ---------------------------------------------------------------------------
 // Low-alpha washes, same spirit as src/residents.ts's MOOD_TINTS — this
 // reads as ambient lighting over the whole scene, not a color filter over
-// the Naruto DS pixel art. "day" has no entry: real daylight needs no tint.
+// the Naruto DS pixel art. "day"/"night" have no entry: real daylight needs
+// no tint, and night is now the lighting layer's job (src/lighting.ts's
+// drawLighting, folded in below) rather than a flat wash stacked on top of
+// it — dawn/dusk keep their color tints, since those are hue, not darkness.
 const TIME_TINTS: Partial<Record<TimeOfDayId, string | [string, string]>> = {
   dawn: "rgba(255, 178, 112, 0.14)",
   dusk: ["rgba(255, 142, 84, 0.16)", "rgba(112, 64, 158, 0.2)"],
-  night: "rgba(8, 16, 46, 0.4)",
 };
 
 export function drawTimeOfDayTint(ctx: CanvasRenderingContext2D, timeOfDay: TimeOfDayId, w: number, h: number): void {
@@ -54,52 +67,57 @@ export function drawTimeOfDayTint(ctx: CanvasRenderingContext2D, timeOfDay: Time
   ctx.restore();
 }
 
-const MAX_NIGHT_GLOWS = 6;
-const NIGHT_GLOW_RADIUS = 40;
+// ---------------------------------------------------------------------------
+// Lighting — light pools per district, replacing the old per-point night-
+// glow gradients (deleted above) and src/residents.ts's ACTIVITY_TREATMENT
+// dormant/quiet full-bg darkening (deleted at that call site) with
+// src/lighting.ts's single darkness-layer-plus-punched-pools pass. One
+// intensity per slot, persisted across frames and lerped toward its target
+// (see stepPoolIntensity) so activity-level changes fade rather than pop.
+// ---------------------------------------------------------------------------
 
-/** Cheap "lit window" glow at up to MAX_NIGHT_GLOWS points — night only,
- * drawn on top of drawTimeOfDayTint's dark wash so it reads as light
- * cutting through it rather than being darkened along with everything
- * else. */
-export function drawNightGlows(ctx: CanvasRenderingContext2D, points: Point[]): void {
-  if (points.length === 0) return;
-  ctx.save();
-  points.slice(0, MAX_NIGHT_GLOWS).forEach((p) => {
-    const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, NIGHT_GLOW_RADIUS);
-    grad.addColorStop(0, "rgba(255, 210, 138, 0.32)");
-    grad.addColorStop(1, "rgba(255, 210, 138, 0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, NIGHT_GLOW_RADIUS, 0, Math.PI * 2);
-    ctx.fill();
-  });
-  ctx.restore();
-}
-
-/** One candidate night-glow point plus the activity level of whatever slot
- * it belongs to (src/listening-source.ts's getActivity, itself replay-aware
- * via world-state.ts's getEffectiveWorld) — see pickGlowPoints below. */
-export interface GlowCandidate {
+/** One candidate light pool: the world-space point a district's pool is
+ * centered on (VILLAGE.anchors in village view, district.home in district
+ * view — see main.ts's renderVillage/renderDistrict), plus the slotId and
+ * activity level (src/listening-source.ts's getActivity, itself replay-aware
+ * via world-state.ts's getEffectiveWorld) that decide its target
+ * intensity. */
+export interface LightCandidate {
+  slotId: string;
   point: Point;
   activity: ActivityLevel;
 }
 
-const ACTIVITY_RANK: Record<ActivityLevel, number> = { dormant: 0, quiet: 1, active: 2, festival: 3 };
+const ACTIVITY_POOL_INTENSITY: Record<ActivityLevel, number> = { dormant: 0, quiet: 0.35, active: 0.7, festival: 1.0 };
+const NOW_PLAYING_INTENSITY = 1.0;
 
-/** Selects which of `candidates` get a night glow. Bug fix (was: the first
- * MAX_NIGHT_GLOWS points in whatever order the caller listed them, i.e. the
- * first six districts in roster order, regardless of activity): once there
- * are more candidates than the cap, pick the most active ones instead,
- * dropping dormant slots entirely. Below the cap, every candidate glows
- * (unchanged) — a single-point scene (a district's own home anchor) always
- * glows at night exactly like before this fix. */
-function pickGlowPoints(candidates: GlowCandidate[]): Point[] {
-  if (candidates.length <= MAX_NIGHT_GLOWS) return candidates.map((c) => c.point);
-  return candidates
-    .filter((c) => c.activity !== "dormant")
-    .sort((a, b) => ACTIVITY_RANK[b.activity] - ACTIVITY_RANK[a.activity])
-    .slice(0, MAX_NIGHT_GLOWS)
-    .map((c) => c.point);
+const VILLAGE_POOL_RADIUS = 76;
+const DISTRICT_POOL_RADIUS = 210;
+// Feature 2: the now-playing district's pool "breathes" ±10% off its base
+// radius — the only place `breathe` touches lighting (the other is weather
+// particle speed, see drawWeather below).
+const BREATHE_RADIUS_SPAN = 0.1;
+
+// Per-slot lerped intensity, persisted across frames — see lerpTowards's doc
+// comment for why this isn't just a straight snap to target.
+const poolIntensity = new Map<string, number>();
+
+function stepPoolIntensity(slotId: string, target: number, dt: number, reduced: boolean): number {
+  const current = poolIntensity.get(slotId) ?? target;
+  const next = reduced ? target : lerpTowards(current, target, dt);
+  poolIntensity.set(slotId, next);
+  return next;
+}
+
+function buildLightPools(candidates: LightCandidate[], baseRadius: number, env: WorldEnv, nowPlayingSlotId: string | null): LightPool[] {
+  return candidates.map((c) => {
+    const boosted = c.slotId === nowPlayingSlotId;
+    const target = boosted ? NOW_PLAYING_INTENSITY : ACTIVITY_POOL_INTENSITY[c.activity];
+    const intensity = stepPoolIntensity(c.slotId, target, env.dt, env.reduced);
+    const breathe = env.reduced ? 0.5 : env.breathe;
+    const radius = boosted ? baseRadius * (1 + (breathe - 0.5) * 2 * BREATHE_RADIUS_SPAN) : baseRadius;
+    return { point: c.point, intensity, radius };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -353,7 +371,10 @@ function stormFlashAlpha(nowMs: number, reduced: boolean): number {
  * translate internally so particle density stays constant regardless of
  * camera pan/zoom. No-op for undefined/"clear". `reducedMotion` freezes
  * particles in place (no drift, no storm flash) rather than hiding them
- * outright, per prefers-reduced-motion's "static or much-reduced". */
+ * outright, per prefers-reduced-motion's "static or much-reduced". `speedMul`
+ * is Feature 2's breathe oscillator (~0.8x-1.3x, see drawWorldEffects below)
+ * — applied only to the streaming/falling kinds (rain/storm/snow/blossom) by
+ * scaling the dt they step with, not to fog's ambient pulse. */
 export function drawWeather(
   ctx: CanvasRenderingContext2D,
   weather: WeatherId | undefined,
@@ -364,6 +385,7 @@ export function drawWeather(
   dt: number,
   nowMs: number,
   reducedMotion: boolean,
+  speedMul = 1,
 ): void {
   if (!weather || weather === "clear") return;
   ctx.save();
@@ -371,13 +393,14 @@ export function drawWeather(
   ctx.beginPath();
   ctx.rect(0, 0, viewW, viewH);
   ctx.clip();
+  const particleDt = dt * speedMul;
 
   switch (weather) {
     case "rain":
-      stepAndDrawRain(ctx, viewW, viewH, dt, reducedMotion, false);
+      stepAndDrawRain(ctx, viewW, viewH, particleDt, reducedMotion, false);
       break;
     case "storm": {
-      stepAndDrawRain(ctx, viewW, viewH, dt, reducedMotion, true);
+      stepAndDrawRain(ctx, viewW, viewH, particleDt, reducedMotion, true);
       const alpha = stormFlashAlpha(nowMs, reducedMotion);
       if (alpha > 0) {
         ctx.fillStyle = `rgba(226, 236, 255, ${alpha.toFixed(3)})`;
@@ -386,10 +409,10 @@ export function drawWeather(
       break;
     }
     case "snow":
-      stepAndDrawSnow(ctx, viewW, viewH, dt, reducedMotion);
+      stepAndDrawSnow(ctx, viewW, viewH, particleDt, reducedMotion);
       break;
     case "blossom":
-      stepAndDrawBlossom(ctx, viewW, viewH, dt, reducedMotion);
+      stepAndDrawBlossom(ctx, viewW, viewH, particleDt, reducedMotion);
       break;
     case "fog":
       stepAndDrawFog(ctx, viewW, viewH, dt, reducedMotion);
@@ -405,11 +428,16 @@ export function drawWeather(
 // ---------------------------------------------------------------------------
 
 /** What differs between renderVillage's and renderDistrict's call —
- * everything else (time-of-day, weather) is read once inside
+ * everything else (time-of-day, weather, lighting) is read once inside
  * drawWorldEffects itself via world-state.ts, since both callers want the
  * same value. `w`/`h` size the tint wash (a scene's full background, not
- * just the viewport); `camX`/`camY`/`viewW`/`viewH` are drawWeather's own
- * camera/viewport args. */
+ * just the viewport); `camX`/`camY`/`viewW`/`viewH` are drawWeather's/
+ * drawLighting's own camera/viewport args. `view` picks the light pool's
+ * base radius — village anchors are close together on one shared map,
+ * district.home is the only point in a much larger per-district bg (see
+ * VILLAGE_POOL_RADIUS/DISTRICT_POOL_RADIUS above). `lightCandidates`
+ * replaces the old glowCandidates now that lighting punches pools instead of
+ * drawing per-point glows. */
 export interface WorldEffectsScene {
   w: number;
   h: number;
@@ -417,18 +445,31 @@ export interface WorldEffectsScene {
   camY: number;
   viewW: number;
   viewH: number;
-  glowCandidates: GlowCandidate[];
+  view: "village" | "district";
+  lightCandidates: LightCandidate[];
 }
 
-/** Runs one frame's world-effects draw for `scene`: time-of-day tint, then
- * night glows cutting through it, then weather particles on top of all of
- * it — same order src/main.ts's renderVillage/renderDistrict each ran this
- * sequence in before this was pulled out (see this file's top doc comment
- * for why: called inside the caller's own world-space save()/
- * translate(-camX,-camY)/restore() block). */
+/** Runs one frame's world-effects draw for `scene`: time-of-day tint
+ * (dawn/dusk color only now — see TIME_TINTS), then the lighting layer
+ * (darkness curve punched with light pools, folding in the old night glows
+ * and ACTIVITY_TREATMENT's dormant/quiet darkening — see this file's top
+ * doc comment), then weather particles (sped up/slowed by the breathe
+ * oscillator) on top of all of it — same order src/main.ts's renderVillage/
+ * renderDistrict each ran this sequence in before this was pulled out (see
+ * this file's top doc comment for why: called inside the caller's own
+ * world-space save()/translate(-camX,-camY)/restore() block). Budget: this
+ * draws at most 2 full-viewport washes (dawn/dusk tint, lighting) — the
+ * mood tint is a third, separate wash drawn by src/residents.ts's
+ * drawMoodTint at the caller's own call site, not here. */
 export function drawWorldEffects(ctx: CanvasRenderingContext2D, scene: WorldEffectsScene, env: WorldEnv): void {
   const timeOfDay = getTimeOfDay();
   drawTimeOfDayTint(ctx, timeOfDay, scene.w, scene.h);
-  if (timeOfDay === "night") drawNightGlows(ctx, pickGlowPoints(scene.glowCandidates));
-  drawWeather(ctx, getWeather(), scene.camX, scene.camY, scene.viewW, scene.viewH, env.dt, env.ts, env.reduced);
+
+  const nowPlayingSlotId = getLiveNowPlaying()?.slotId ?? null;
+  const baseRadius = scene.view === "village" ? VILLAGE_POOL_RADIUS : DISTRICT_POOL_RADIUS;
+  const pools = buildLightPools(scene.lightCandidates, baseRadius, env, nowPlayingSlotId);
+  drawLighting(ctx, scene.camX, scene.camY, env.hour, pools);
+
+  const speedMul = 0.8 + (env.reduced ? 0.5 : env.breathe) * 0.5; // ~0.8x-1.3x, Feature 2
+  drawWeather(ctx, getWeather(), scene.camX, scene.camY, scene.viewW, scene.viewH, env.dt, env.ts, env.reduced, speedMul);
 }
