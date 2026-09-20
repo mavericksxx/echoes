@@ -6,6 +6,12 @@
 // canvas.width/height and clears everything) can't desync the wipe's math —
 // see main.ts's enterDistrict/exitToVillage for the sequencing that calls
 // into this module.
+//
+// Timing is entirely self-contained (performance.now(), read fresh on every
+// call) rather than threaded through frame()'s rAF timestamp — the two
+// clocks share an origin in practice, but there's no reason for this module
+// to depend on that being exactly true, and it keeps drawSceneWipe callable
+// with nothing but a context and a size.
 
 /** A wipe center, as a fraction of the canvas's current width/height —
  * survives a resize because it's re-multiplied by the live canvas size on
@@ -45,6 +51,14 @@ export function isSceneWiping(): boolean {
   return wipe !== null;
 }
 
+/** Debug/self-check accessor (see main.ts's frame() and BACKLOG-adjacent
+ * console.debug tracing) — not used by any rendering or state-machine logic
+ * itself, just a window into "what phase is the wipe actually in right now"
+ * from outside this module, since the state above is otherwise private. */
+export function getWipePhase(): WipePhase | null {
+  return wipe ? wipe.phase : null;
+}
+
 /** Starts the wipe: a circle centered on `closeCenter` shrinks to nothing
  * (fully covering the canvas in black), then `onCovered` runs — swap the
  * scene and hand back where the reveal should grow open from — then a
@@ -52,6 +66,17 @@ export function isSceneWiping(): boolean {
  * revealing). */
 export function startSceneWipe(closeCenter: WipeCenter, onCovered: () => WipeCenter): void {
   wipe = { phase: "closing", startTs: performance.now(), center: closeCenter, onCovered };
+  console.debug("[scene-wipe] closing", closeCenter);
+}
+
+/** Forcibly abandons any in-flight wipe without running `onCovered` — an
+ * escape hatch for main.ts's transition watchdog (see its doc comment) so a
+ * bug in the state machine can never leave input permanently locked, even if
+ * it leaves the visible scene in a slightly odd spot. Never called in the
+ * normal (working) path. */
+export function cancelSceneWipe(): void {
+  if (wipe) console.debug("[scene-wipe] cancelled from phase", wipe.phase);
+  wipe = null;
 }
 
 function maxRadius(cx: number, cy: number, w: number, h: number): number {
@@ -81,12 +106,13 @@ function drawIris(ctx: CanvasRenderingContext2D, cx: number, cy: number, holeR: 
  * transform. `w`/`h` are the canvas's live backing-store size (canvas.width/
  * height), read fresh each call so a resize mid-wipe is picked up
  * automatically. */
-export function drawSceneWipe(ctx: CanvasRenderingContext2D, w: number, h: number, ts: number): void {
+export function drawSceneWipe(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   if (!wipe) return;
   const cx = wipe.center.x * w;
   const cy = wipe.center.y * h;
   const maxR = maxRadius(cx, cy, w, h);
-  const t = Math.min(1, (ts - wipe.startTs) / WIPE_MS);
+  const now = performance.now();
+  const t = Math.max(0, Math.min(1, (now - wipe.startTs) / WIPE_MS));
 
   if (wipe.phase === "closing") {
     const r = maxR * (1 - easeInCubic(t));
@@ -94,12 +120,16 @@ export function drawSceneWipe(ctx: CanvasRenderingContext2D, w: number, h: numbe
     if (t >= 1) {
       const onCovered = wipe.onCovered!;
       const openCenter = onCovered();
-      wipe = { phase: "opening", startTs: ts, center: openCenter, onCovered: null };
+      wipe = { phase: "opening", startTs: now, center: openCenter, onCovered: null };
+      console.debug("[scene-wipe] covered — swap ran, opening", openCenter);
     }
     return;
   }
 
   const r = maxR * easeOutCubic(t);
   drawIris(ctx, cx, cy, r, w, h);
-  if (t >= 1) wipe = null;
+  if (t >= 1) {
+    wipe = null;
+    console.debug("[scene-wipe] done");
+  }
 }

@@ -58,7 +58,7 @@ import {
 } from "./listening-source";
 import { fetchWorldResponse, getFestivals, getSceneClockMs, getVisitors, getWeather, getWorldVersion, initWorldState } from "./world-state";
 import { drawFestivalDecor, drawWorldEffects, type GlowCandidate, type WorldEnv } from "./world-render";
-import { drawSceneWipe, isSceneWiping, startSceneWipe, type WipeCenter } from "./scene-wipe";
+import { cancelSceneWipe, drawSceneWipe, getWipePhase, isSceneWiping, startSceneWipe, type WipeCenter } from "./scene-wipe";
 import { onEraChange } from "./era";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
 import { downloadRecording, isRecordingSupported, startRecording, takeSnapshot, type Recording } from "./capture";
@@ -667,21 +667,55 @@ function screenToWorld(clientX: number, clientY: number): Point {
 // too (see stepZoom and the keydown handler below).
 //
 // Sequencing for entering a district: enterDistrict kicks off a camera pan
-// (panAnim) + one zoom step (zoomAnim) toward the door, both already
-// reused from the zoom/pan controls above; frame() below watches for both
-// to finish (pendingDistrictEnter), then starts the wipe closing on the
-// door's now-centered screen position; the wipe's onCovered callback does
-// the actual applyDistrictScene swap (and whatever fitCanvas() resize that
-// causes) and hands back the district leader's post-swap screen position for
-// the wipe to open from. Exiting is the same shape without the door push:
+// (panAnim) + one zoom step (zoomAnim) toward the door, both already reused
+// from the zoom/pan controls above. frame() below then waits for the push to
+// be done before starting the wipe — on a fixed deadline (readyAt, the push
+// animations' own known durations), NOT by polling panAnim/zoomAnim back to
+// null. That polling was tried first and is exactly what produced the bug
+// this deadline replaced: entering a district would visibly push the camera
+// and then just hang there forever, input dead, applyDistrictScene never
+// called. `!panAnim && !zoomAnim` depends on both animators reliably
+// reaching their own null state in the same observed frame — any unrelated
+// caller that cancels/restarts either one mid-push (fitCanvas() does exactly
+// this: it unconditionally nulls both, and runs on every ResizeObserver tick
+// and every ZOOM_MIN-triggered exitToVillage) can leave that condition never
+// simultaneously true again, with no way to recover. A deadline computed
+// once, up front, from constants this file already owns (PAN_ANIM_MS,
+// ZOOM_ANIM_MS) can't be perturbed by any of that — it doesn't read
+// panAnim/zoomAnim's live state at all.
+//
+// Once the deadline passes, the wipe closes on the door's now-centered
+// screen position; its onCovered callback does the actual applyDistrictScene
+// swap (and whatever fitCanvas() resize that causes) and hands back the
+// district leader's post-swap screen position for the wipe to open from.
+// Exiting is the same shape without the door push (no deadline to wait on):
 // wipe closes on the leader's current position, swap, opens from the
-// district's door. sceneTransitionActive is the re-entrancy guard (a) —
-// held from the moment either transition starts until the wipe's opening
-// phase finishes — and is also checked by the pointer/keyboard handlers
-// below to ignore input for the duration (guard (b)).
+// district's door.
+//
+// sceneTransitionActive is the re-entrancy guard (a) — held from the moment
+// either transition starts until the wipe's opening phase finishes — and is
+// also checked by the pointer/keyboard handlers below to ignore input for
+// the duration (guard (b)). sceneTransitionWatchdogAt is a second, generous
+// deadline on top of that: if anything above still manages to wedge (a
+// hostile getSlot/districtNpcsBySlot lookup throwing inside onCovered, some
+// future change reintroducing a hang), it force-clears the transition
+// instead of leaving input dead forever — see the frame() call site.
 // ---------------------------------------------------------------------------
 let sceneTransitionActive = false;
-let pendingDistrictEnter: string | null = null;
+let sceneTransitionWatchdogAt = 0;
+// Longer than the slowest real path (a door push, up to PAN_ANIM_MS, plus
+// two wipe phases, up to 2*WIPE_MS-ish ~520ms) with a wide margin — this
+// should never fire in practice; see the doc comment above.
+const SCENE_TRANSITION_WATCHDOG_MS = 3000;
+
+interface PendingDistrictEnter {
+  slotId: string;
+  /** performance.now() timestamp the door push (pan + zoom step) should be
+   * done by — see the doc comment above for why this is a deadline, not a
+   * poll on panAnim/zoomAnim. */
+  readyAt: number;
+}
+let pendingDistrictEnter: PendingDistrictEnter | null = null;
 
 /** Client-space (screen) position of a world point, under the *current*
  * camera/zoom — the inverse of screenToWorld. Used to find where a door or
@@ -752,17 +786,22 @@ function enterDistrict(slotId: string, opts: { pushState?: boolean } = {}): void
     applyDistrictScene(slotId);
   } else {
     sceneTransitionActive = true;
-    pendingDistrictEnter = slotId;
+    sceneTransitionWatchdogAt = performance.now() + SCENE_TRANSITION_WATCHDOG_MS;
     const door = doorForSlot(slotId);
+    let pushMs = 0;
     if (door) {
       panCameraTo(door.x, door.y);
       // stepZoom itself refuses to run during an active recording (the
       // resize would corrupt captureStream) — guard (c) is inherited for
       // free by reusing it rather than resizing some other way.
       stepZoom(1, worldToClient(door.x, door.y));
+      pushMs = Math.max(PAN_ANIM_MS, ZOOM_ANIM_MS);
     }
-    // frame() below starts the actual wipe once panAnim/zoomAnim (if any)
-    // finish — see pendingDistrictEnter.
+    pendingDistrictEnter = { slotId, readyAt: performance.now() + pushMs };
+    console.debug("[scene-transition] enter: push started", { slotId, pushMs });
+    // frame() below starts the actual wipe once readyAt passes — see
+    // PendingDistrictEnter's doc comment on why that's a deadline, not a
+    // poll on panAnim/zoomAnim.
   }
   if (pushState) history.pushState({ echoesDistrict: slotId }, "", `#${slotId}`);
 }
@@ -776,9 +815,11 @@ function exitToVillage(opts: { pushState?: boolean } = {}): void {
     applyVillageScene();
   } else {
     sceneTransitionActive = true;
+    sceneTransitionWatchdogAt = performance.now() + SCENE_TRANSITION_WATCHDOG_MS;
     const exitingSlotId = currentDistrictId;
     const leader = exitingSlotId ? districtNpcsBySlot.get(exitingSlotId) : null;
     const closeCenter = clientToWipeCenter(leader ? worldToClient(leader.x, leader.y) : null);
+    console.debug("[scene-transition] exit: wipe started", { exitingSlotId });
     startSceneWipe(closeCenter, () => {
       applyVillageScene();
       const door = exitingSlotId ? doorForSlot(exitingSlotId) : null;
@@ -1365,19 +1406,41 @@ function frame(ts: number): void {
   updateZoomAnim(ts);
   updatePanAnim(ts);
 
-  // The door-push (pan + one zoom step, both kicked off by enterDistrict)
-  // has finished once neither animator is still in flight — start the
-  // actual wipe now, closing on the door's now-centered screen position.
-  if (pendingDistrictEnter && !panAnim && !zoomAnim) {
-    const slotId = pendingDistrictEnter;
+  // The door-push (pan + one zoom step, both kicked off by enterDistrict) is
+  // done once its own deadline passes — see PendingDistrictEnter's doc
+  // comment on why this is a fixed deadline rather than polling
+  // panAnim/zoomAnim back to null. `performance.now()`, not `ts`: readyAt
+  // was itself computed from performance.now() in enterDistrict, and the two
+  // need to share a clock to compare correctly (the rAF `ts` argument tracks
+  // the same origin in every real browser, but there's no reason to lean on
+  // that here when performance.now() is right there).
+  if (pendingDistrictEnter && performance.now() >= pendingDistrictEnter.readyAt) {
+    const { slotId } = pendingDistrictEnter;
     pendingDistrictEnter = null;
     const door = doorForSlot(slotId);
     const closeCenter = clientToWipeCenter(door ? worldToClient(door.x, door.y) : null);
+    console.debug("[scene-transition] enter: push done, wipe starting", { slotId });
     startSceneWipe(closeCenter, () => {
       applyDistrictScene(slotId);
+      console.debug("[scene-transition] enter: swap ran", { slotId });
       const leader = districtNpcsBySlot.get(slotId)!;
       return clientToWipeCenter(worldToClient(leader.x, leader.y));
     });
+  }
+
+  // Belt-and-suspenders (see sceneTransitionWatchdogAt's doc comment above):
+  // this should never actually fire, since pendingDistrictEnter's readyAt
+  // and the wipe's own phases are all self-timing now, but if some future
+  // change wedges the state machine anyway, this guarantees input recovers
+  // instead of staying dead forever.
+  if (sceneTransitionActive && performance.now() > sceneTransitionWatchdogAt) {
+    console.warn("[scene-transition] watchdog fired — forcing recovery", {
+      pendingDistrictEnter,
+      wipePhase: getWipePhase(),
+    });
+    pendingDistrictEnter = null;
+    cancelSceneWipe();
+    sceneTransitionActive = false;
   }
 
   // One env per frame (dt/ts already derived above) rather than each draw
@@ -1444,7 +1507,7 @@ function frame(ts: number): void {
   // Screen-space, drawn every frame after the world/caption passes above
   // have restore()'d — see scene-wipe.ts's doc comment on why it survives
   // applyDistrictScene's mid-transition canvas resize.
-  drawSceneWipe(ctx, canvas.width, canvas.height, ts);
+  drawSceneWipe(ctx, canvas.width, canvas.height);
   if (sceneTransitionActive && pendingDistrictEnter === null && !isSceneWiping()) sceneTransitionActive = false;
 
   requestAnimationFrame(frame);
