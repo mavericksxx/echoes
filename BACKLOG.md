@@ -40,6 +40,13 @@ and `scripts/walkability-draft-interiors.json` are kept as historical record; 4 
   sample-data artist rosters (paused means no real roster either) needs its own design pass rather
   than a quick wire-through.
 
+- **Entering a district while recording is still broken** — the DS-style scene-wipe transition
+  (`enterDistrict`) skips its own door-push zoom while `activeRecording` is set (reusing `stepZoom`'s
+  existing guard), but `applyDistrictScene` still calls `fitCanvas()` on the actual scene swap, which
+  resizes `canvas.width`/`height` and corrupts the in-flight `captureStream` the same way it always
+  has. Not fixed here — would need `startRecording`'s capture to survive a backing-store resize, or
+  recording to be disabled while a district transition is possible.
+
 ## Known exposure (not a bug, not fixed yet)
 - ~~`wrangler deploy` silently drops the cron schedule~~ fixed 2026-09-18: the API token gained
   `Zone / Workers Routes / Edit`, so deploys now register routes and the cron together.

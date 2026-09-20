@@ -49,6 +49,7 @@ import {
   getActivity,
   getMoodEnergy,
   getNowPlaying,
+  getPersona,
   initListeningSource,
   isVillageConnected,
   isVillageEmpty,
@@ -57,6 +58,7 @@ import {
 } from "./listening-source";
 import { fetchWorldResponse, getFestivals, getSceneClockMs, getVisitors, getWeather, getWorldVersion, initWorldState } from "./world-state";
 import { drawFestivalDecor, drawWorldEffects, type GlowCandidate, type WorldEnv } from "./world-render";
+import { drawSceneWipe, isSceneWiping, startSceneWipe, type WipeCenter } from "./scene-wipe";
 import { onEraChange } from "./era";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
 import { downloadRecording, isRecordingSupported, startRecording, takeSnapshot, type Recording } from "./capture";
@@ -70,7 +72,6 @@ const DISTRICT_ZOOM_PHONE = 2;
 const DISTRICT_ZOOM_DESKTOP = 3;
 const PAN_KEY_SPEED = 260; // world px/sec for arrow-key panning in village view
 const DRAG_THRESHOLD = 6; // css px before a pointer-down counts as a drag, not a tap
-const SCENE_TRANSITION_MS = 220; // matches --duration-base in style.css
 // Phase 9: the notice board's fixed world-space spot — an open patch of the
 // town map with no character anchor right on top of it (data/village.json's
 // nearest anchor, sakura, is still ~104px away; every other anchor is
@@ -659,23 +660,53 @@ function screenToWorld(clientX: number, clientY: number): Point {
 }
 
 // ---------------------------------------------------------------------------
-// Scene stack: village <-> one district, with a short fade (skipped under
-// prefers-reduced-motion — see .stage-area in style.css, and the global
-// reduced-motion rule that already collapses any transition-duration to
-// ~0). Entering pushes browser history so back exits; Esc, the app-bar back
-// button, and zooming out below the minimum all exit too (see stepZoom and
-// the keydown handler below).
+// Scene stack: village <-> one district, via a DS-style iris wipe (see
+// src/scene-wipe.ts) — skipped for an instant swap under
+// prefers-reduced-motion. Entering pushes browser history so back exits;
+// Esc, the app-bar back button, and zooming out below the minimum all exit
+// too (see stepZoom and the keydown handler below).
+//
+// Sequencing for entering a district: enterDistrict kicks off a camera pan
+// (panAnim) + one zoom step (zoomAnim) toward the door, both already
+// reused from the zoom/pan controls above; frame() below watches for both
+// to finish (pendingDistrictEnter), then starts the wipe closing on the
+// door's now-centered screen position; the wipe's onCovered callback does
+// the actual applyDistrictScene swap (and whatever fitCanvas() resize that
+// causes) and hands back the district leader's post-swap screen position for
+// the wipe to open from. Exiting is the same shape without the door push:
+// wipe closes on the leader's current position, swap, opens from the
+// district's door. sceneTransitionActive is the re-entrancy guard (a) —
+// held from the moment either transition starts until the wipe's opening
+// phase finishes — and is also checked by the pointer/keyboard handlers
+// below to ignore input for the duration (guard (b)).
 // ---------------------------------------------------------------------------
-function transitionScene(action: () => void): void {
-  if (prefersReducedMotion()) {
-    action();
-    return;
-  }
-  stageArea.classList.add("is-transitioning");
-  window.setTimeout(() => {
-    action();
-    requestAnimationFrame(() => stageArea.classList.remove("is-transitioning"));
-  }, SCENE_TRANSITION_MS);
+let sceneTransitionActive = false;
+let pendingDistrictEnter: string | null = null;
+
+/** Client-space (screen) position of a world point, under the *current*
+ * camera/zoom — the inverse of screenToWorld. Used to find where a door or
+ * an NPC currently sits on screen, to center the wipe on it. */
+function worldToClient(wx: number, wy: number): { x: number; y: number } {
+  const rect = canvas.getBoundingClientRect();
+  return { x: rect.left + (wx - camX) * zoom, y: rect.top + (wy - camY) * zoom };
+}
+
+/** Converts a client-space point into a fraction of the canvas's own
+ * rendered box (0..1) — see scene-wipe.ts's WipeCenter doc comment for why
+ * the wipe stores fractions, not pixels. Falls back to dead-center when no
+ * point is given (e.g. a slot with no door). */
+function clientToWipeCenter(pt: { x: number; y: number } | null): WipeCenter {
+  const rect = canvas.getBoundingClientRect();
+  if (!pt || rect.width === 0 || rect.height === 0) return { x: 0.5, y: 0.5 };
+  return { x: (pt.x - rect.left) / rect.width, y: (pt.y - rect.top) / rect.height };
+}
+
+/** A slot's village "door" point (data/village.json's `doors`, keyed by
+ * character id, same as `anchors`) — where the district enter/exit wipe
+ * centers on, mirroring panCameraToSlot's anchor lookup. */
+function doorForSlot(slotId: string): Point | null {
+  const slot = SLOTS.find((s) => s.district.id === slotId);
+  return (slot && VILLAGE.doors[slot.character.id]) || null;
 }
 
 function applyDistrictScene(slotId: string): void {
@@ -714,17 +745,46 @@ function applyVillageScene(): void {
 
 function enterDistrict(slotId: string, opts: { pushState?: boolean } = {}): void {
   const { pushState = true } = opts;
+  if (sceneTransitionActive) return; // guard (a): ignore a retrigger mid-transition
   if (mode === "district" && currentDistrictId === slotId) return;
   manualZoom = null; // each scene starts at its own sensible default zoom
-  transitionScene(() => applyDistrictScene(slotId));
+  if (prefersReducedMotion()) {
+    applyDistrictScene(slotId);
+  } else {
+    sceneTransitionActive = true;
+    pendingDistrictEnter = slotId;
+    const door = doorForSlot(slotId);
+    if (door) {
+      panCameraTo(door.x, door.y);
+      // stepZoom itself refuses to run during an active recording (the
+      // resize would corrupt captureStream) — guard (c) is inherited for
+      // free by reusing it rather than resizing some other way.
+      stepZoom(1, worldToClient(door.x, door.y));
+    }
+    // frame() below starts the actual wipe once panAnim/zoomAnim (if any)
+    // finish — see pendingDistrictEnter.
+  }
   if (pushState) history.pushState({ echoesDistrict: slotId }, "", `#${slotId}`);
 }
 
 function exitToVillage(opts: { pushState?: boolean } = {}): void {
   const { pushState = true } = opts;
+  if (sceneTransitionActive) return; // guard (a)
   if (mode === "village") return;
   manualZoom = null;
-  transitionScene(applyVillageScene);
+  if (prefersReducedMotion()) {
+    applyVillageScene();
+  } else {
+    sceneTransitionActive = true;
+    const exitingSlotId = currentDistrictId;
+    const leader = exitingSlotId ? districtNpcsBySlot.get(exitingSlotId) : null;
+    const closeCenter = clientToWipeCenter(leader ? worldToClient(leader.x, leader.y) : null);
+    startSceneWipe(closeCenter, () => {
+      applyVillageScene();
+      const door = exitingSlotId ? doorForSlot(exitingSlotId) : null;
+      return clientToWipeCenter(door ? worldToClient(door.x, door.y) : null);
+    });
+  }
   if (pushState) history.pushState({ echoesDistrict: null }, "", `${location.pathname}${location.search}`);
 }
 
@@ -807,6 +867,16 @@ function districtCaptionLabels(): CaptionLabel[] {
 // ---------------------------------------------------------------------------
 let lastVillageEvent = 0;
 
+// Anti-mush budget for the village view's caption stagger (src/render.ts's
+// drawCaptions only staggers 3 tiers deep before giving up and hiding a
+// label) — a spontaneous persona line never fires within
+// SPONTANEOUS_CAPTION_GAP_MS of the last one, village-wide, and never while
+// MAX_LIVE_CAPTIONS labels are already showing. Now-playing captions
+// (above) are exempt from both: they always win.
+const SPONTANEOUS_CAPTION_GAP_MS = 8000;
+const MAX_LIVE_CAPTIONS = 2;
+let lastSpontaneousCaptionAt = 0;
+
 function tickVillage(now: number, dt: number): void {
   if (now - lastVillageEvent > VILLAGE_EVENT_INTERVAL_MS) {
     lastVillageEvent = now;
@@ -818,11 +888,27 @@ function tickVillage(now: number, dt: number): void {
       startPerform(npc, "idle");
     }
   }
+
+  if (now - lastSpontaneousCaptionAt > SPONTANEOUS_CAPTION_GAP_MS) {
+    const liveCount = villageNpcs.filter((n) => n.caption !== null).length;
+    if (liveCount < MAX_LIVE_CAPTIONS) {
+      const candidates = villageNpcs.filter((n) => n.caption === null && (n.state === "idle" || n.state === "walk"));
+      const npc = candidates.length > 0 ? candidates[Math.floor(Math.random() * candidates.length)]! : null;
+      const dialogue = npc ? getPersona(npc.district.id)?.dialogue : null;
+      const line = dialogue && dialogue.length > 0 ? dialogue[Math.floor(Math.random() * dialogue.length)]! : null;
+      if (npc && line) {
+        setCaption(npc, line, 3.2);
+        lastSpontaneousCaptionAt = now;
+      }
+    }
+  }
+
   villageNpcs.forEach((npc) =>
     updateNpc(npc, dt, now, {
       isActive: false,
       nowPlayingIntervalMs: Number.POSITIVE_INFINITY,
       getNowPlaying: () => getNowPlayingFor(npc.district.id),
+      activityLevel: getActivity(npc.district.id).level,
     }),
   );
 }
@@ -971,6 +1057,7 @@ function pointerMid(a: { x: number; y: number }, b: { x: number; y: number }) {
 }
 
 canvas.addEventListener("pointerdown", (ev) => {
+  if (sceneTransitionActive) return; // guard (b): no pan/tap/pinch while a wipe is in flight
   dismissVillageCaption();
   canvas.setPointerCapture(ev.pointerId);
   activePointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
@@ -1045,6 +1132,7 @@ canvas.addEventListener(
   "wheel",
   (ev) => {
     ev.preventDefault();
+    if (sceneTransitionActive) return; // guard (b)
     stepZoom(ev.deltaY < 0 ? 1 : -1, { x: ev.clientX, y: ev.clientY });
   },
   { passive: false },
@@ -1092,6 +1180,7 @@ function nearestNpcToViewCenter(pool: Npc[]): Npc | null {
 // (once the sidebar and any open district are already closed) so normal Tab
 // order resumes.
 canvas.addEventListener("keydown", (ev) => {
+  if (sceneTransitionActive) return; // guard (b)
   const pool = interactionPool();
   if (pool.length === 0) return;
 
@@ -1109,6 +1198,7 @@ canvas.addEventListener("keydown", (ev) => {
 });
 
 window.addEventListener("keydown", (ev) => {
+  if (sceneTransitionActive) return; // guard (b)
   if (ev.key === "Escape") {
     if (isSidebarOpen()) closeSidebar();
     else if (mode === "district") exitToVillage();
@@ -1142,8 +1232,12 @@ function applyKeyPan(dt: number): void {
 // UI wiring
 // ---------------------------------------------------------------------------
 backBtn.addEventListener("click", () => exitToVillage());
-zoomInBtn.addEventListener("click", () => stepZoom(1));
-zoomOutBtn.addEventListener("click", () => stepZoom(-1));
+zoomInBtn.addEventListener("click", () => {
+  if (!sceneTransitionActive) stepZoom(1); // guard (b)
+});
+zoomOutBtn.addEventListener("click", () => {
+  if (!sceneTransitionActive) stepZoom(-1);
+});
 
 // ---------------------------------------------------------------------------
 // Phase 13a: Snapshot / Record / Sound — see src/capture.ts, src/sound.ts.
@@ -1271,6 +1365,21 @@ function frame(ts: number): void {
   updateZoomAnim(ts);
   updatePanAnim(ts);
 
+  // The door-push (pan + one zoom step, both kicked off by enterDistrict)
+  // has finished once neither animator is still in flight — start the
+  // actual wipe now, closing on the door's now-centered screen position.
+  if (pendingDistrictEnter && !panAnim && !zoomAnim) {
+    const slotId = pendingDistrictEnter;
+    pendingDistrictEnter = null;
+    const door = doorForSlot(slotId);
+    const closeCenter = clientToWipeCenter(door ? worldToClient(door.x, door.y) : null);
+    startSceneWipe(closeCenter, () => {
+      applyDistrictScene(slotId);
+      const leader = districtNpcsBySlot.get(slotId)!;
+      return clientToWipeCenter(worldToClient(leader.x, leader.y));
+    });
+  }
+
   // One env per frame (dt/ts already derived above) rather than each draw
   // call re-deriving its own reduced-motion/clock reads — see world-render.
   // ts's WorldEnv doc comment.
@@ -1292,14 +1401,16 @@ function frame(ts: number): void {
 
   districtNpcsBySlot.forEach((npc, slotId) => {
     const { energy } = getMoodEnergy(slotId);
+    const { level } = getActivity(slotId);
     updateNpc(npc, dt, ts, {
       isActive: mode === "district" && slotId === currentDistrictId,
       nowPlayingIntervalMs: NOW_PLAYING_INTERVAL_MS,
       getNowPlaying: () => getNowPlayingFor(npc.district.id),
       // Activity level (how busy the district is) and mood/energy (how its
       // music feels) are independent signals — the two multipliers stack.
-      performChanceMul: ACTIVITY_TREATMENT[getActivity(slotId).level].performChanceMul * energyPerformMul(energy),
+      performChanceMul: ACTIVITY_TREATMENT[level].performChanceMul * energyPerformMul(energy),
       energySpeedMul: energySpeedMul(energy),
+      activityLevel: level,
     });
   });
   allResidents.forEach(({ npc }) =>
@@ -1329,6 +1440,12 @@ function frame(ts: number): void {
     renderDistrict(env);
     renderCaptions(districtCaptionLabels());
   }
+
+  // Screen-space, drawn every frame after the world/caption passes above
+  // have restore()'d — see scene-wipe.ts's doc comment on why it survives
+  // applyDistrictScene's mid-transition canvas resize.
+  drawSceneWipe(ctx, canvas.width, canvas.height, ts);
+  if (sceneTransitionActive && pendingDistrictEnter === null && !isSceneWiping()) sceneTransitionActive = false;
 
   requestAnimationFrame(frame);
 }

@@ -119,6 +119,21 @@ function currentSpriteRect(npc: Npc): Rect {
   return currentSprite(npc).rect;
 }
 
+/** World-space vertical offset for the NPC's current emote (see npc.ts's
+ * Npc.emote doc comment) — added to its anchorY before drawOrigin resolves
+ * the sprite box, so a hop/cheer/slump reads as a bounce or stoop without
+ * touching opacity (0.4 opacity already means "faded resident") or needing
+ * new sprite frames. Negative = up. */
+function emoteOffsetY(npc: Npc): number {
+  if (!npc.emote) return 0;
+  const { kind, t } = npc.emote;
+  if (kind === "slump") return 1.5; // a small constant droop while it lasts
+  const dur = kind === "hop" ? 0.4 : 0.45;
+  const p = Math.min(1, t / dur);
+  const bounceH = kind === "hop" ? 4 : 3;
+  return -Math.sin(p * Math.PI) * bounceH;
+}
+
 /** Draws one NPC's sprite onto ctx (world space), anchored at its pivot (feet).
  * Caption bubbles are drawn separately, in a screen-space overlay pass — see drawCaptions().
  *
@@ -143,7 +158,7 @@ export function drawNpc(
   const sw = rx1 - sx;
   const sh = ry1 - sy;
   const pivot = resolvePivot(npc.character, label, rect);
-  const { dx, dy, dw, dh } = drawOrigin(rect, pivot, npc.x, npc.y, scale);
+  const { dx, dy, dw, dh } = drawOrigin(rect, pivot, npc.x, npc.y + emoteOffsetY(npc), scale);
   const mirror =
     npc.state !== "performing" && (npc.character.mirrorDirs?.some((d) => d === npc.dir) ?? false);
   const opacity = opts.opacity ?? 1;

@@ -645,9 +645,9 @@ select {
    floats translucently on top of it). main.ts sizes the canvas's backing
    store to an integer fraction of the container so the browser's own
    upscaling (with image-rendering: pixelated) lands on exact-pixel zoom.
-   Fades briefly to transparent on village <-> district transitions (see
-   main.ts's transitionScene()); the global prefers-reduced-motion rule
-   above already collapses this to near-instant.
+   Village <-> district transitions are an iris wipe drawn on #game itself
+   (see src/scene-wipe.ts), not a CSS fade — no opacity/transition needed
+   here.
    ========================================================================== */
 .stage-area {
   position: absolute;
@@ -656,12 +656,6 @@ select {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  opacity: 1;
-  transition: opacity var(--duration-base) var(--ease-standard);
-}
-
-.stage-area.is-transitioning {
-  opacity: 0;
 }
 
 #game {
