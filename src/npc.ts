@@ -5,6 +5,7 @@
 
 import type { CharacterDef, DistrictDef, Point, WalkGrid } from "../data/types";
 import { getWalkGrid } from "../data/loader";
+import type { ActivityLevel } from "../shared/activity";
 import { type Cell, cellCenter, findPath, mergeUpDiagonals, reachableWithin, worldToCell } from "./pathfinding";
 
 export const WALK_SPEED = 22; // px/sec in world space, before an NPC's own speedMul
@@ -51,6 +52,14 @@ export interface Npc {
   /** Cell key this NPC currently holds in the per-map wander reservation
    * set (see reserveCell/releaseReservation), or null if it holds none. */
   reservedCellKey: string | null;
+  /** A transient reaction, rendered in src/render.ts's drawNpc as a vertical
+   * offset (never opacity — 0.4 opacity already means "faded resident", see
+   * src/residents.ts's Resident.faded). A field, not a fourth NpcState:
+   * NpcState is compared with `=== "idle"` / `=== "walk"` in several places
+   * (this file, main.ts), so an NPC can be walking/idle/performing *and*
+   * emoting at once. `t` is seconds since the emote started, decayed in
+   * updateNpc below. */
+  emote: { kind: "hop" | "slump" | "cheer"; t: number } | null;
 }
 
 function cellKeyOf(cell: Cell): string {
@@ -195,6 +204,7 @@ export function makeNpc(
     path: [],
     pathIdx: 0,
     reservedCellKey: null,
+    emote: null,
   };
 }
 
@@ -265,6 +275,11 @@ export interface UpdateOptions {
    * set by the caller from its district's energy (see this file's
    * energySpeedMul and src/listening-source.ts's getMoodEnergy). */
   energySpeedMul?: number;
+  /** This NPC's district's current activity level (shared/activity.ts),
+   * when the caller tracks one — decides whether an idle NPC occasionally
+   * "slump"s (see maybeSlump below). Omitted entirely by callers with no
+   * meaningful activity level (e.g. residents/crowd), which just never slump. */
+  activityLevel?: ActivityLevel;
 }
 
 /** Sets `npc.dir` from the direction of its current path segment — facing
@@ -395,11 +410,46 @@ function goHomeToPerform(npc: Npc, now: number): void {
  * already traveling home or performing, so a rapid back-to-back track
  * change can't interrupt a reaction already in flight. */
 export function triggerNowPlayingReaction(npc: Npc, now: number): void {
-  if (npc.state === "idle" || npc.state === "walk") goHomeToPerform(npc, now);
+  if (npc.state === "idle" || npc.state === "walk") {
+    goHomeToPerform(npc, now);
+    npc.emote = { kind: "hop", t: 0 }; // a quick excited hop the instant the reaction fires
+  }
+}
+
+// How long each emote kind stays visible before clearing itself (seconds) —
+// "slump" has none: it's cleared explicitly once the NPC leaves idle, since
+// it's meant to read as an ongoing low-energy mood, not a one-shot reaction.
+const EMOTE_DURATION: Record<"hop" | "cheer", number> = { hop: 0.4, cheer: 0.45 };
+
+/** Chance an idle NPC in a dormant/quiet district slumps this frame — a
+ * subtle 1-2px stretch of dwell time, layered on top of pickDwell's own
+ * skewed-short/occasional-long distribution, never an opacity change (see
+ * Npc.emote's doc comment). */
+const SLUMP_CHANCE_PER_FRAME = 0.001;
+
+function maybeSlump(npc: Npc, activityLevel: ActivityLevel | undefined): void {
+  if (npc.emote !== null) return;
+  if (activityLevel !== "dormant" && activityLevel !== "quiet") return;
+  if (Math.random() >= SLUMP_CHANCE_PER_FRAME) return;
+  npc.emote = { kind: "slump", t: 0 };
+  npc.idleTimer += 2; // the "stretched idle timer" half of the slump
 }
 
 export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions): void {
   const { character } = npc;
+
+  if (npc.emote) {
+    // A slump lasts as long as the idle stretch it caused, not a fixed
+    // timer — cleared the moment this NPC actually leaves idle (a frame
+    // late relative to the state change below, which is fine for a 1-2px
+    // offset). hop/cheer are one-shot reactions that just time out.
+    if (npc.emote.kind === "slump") {
+      if (npc.state !== "idle") npc.emote = null;
+    } else {
+      npc.emote.t += dt;
+      if (npc.emote.t >= EMOTE_DURATION[npc.emote.kind]) npc.emote = null;
+    }
+  }
 
   if (
     opts.isActive &&
@@ -439,6 +489,7 @@ export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions
       // old separate "walk back to patrol start" leg is gone; wander resumes
       // from here on its own next idle beat.
       startPerform(npc, "idle");
+      npc.emote = { kind: "cheer", t: 0 }; // the celebratory beat once the performance actually starts
     });
     return;
   }
@@ -450,9 +501,11 @@ export function updateNpc(npc: Npc, dt: number, now: number, opts: UpdateOptions
       const info = opts.getNowPlaying();
       if (info) {
         startPerform(npc, "idle");
+        npc.emote = { kind: "cheer", t: 0 };
         setCaption(npc, info.caption ?? `${character.name.split(" ")[0]} is vibing to ${info.artist}`, 2.4);
       }
     }
+    if (npc.state === "idle") maybeSlump(npc, opts.activityLevel);
     return;
   }
 
