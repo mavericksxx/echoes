@@ -33,6 +33,7 @@ import {
   type ArtistEntry,
 } from "./listening-source";
 import { getFestivalForSlot, getFestivals, getTimeOfDay, getVisitors, getWeather, setReplayState } from "./world-state";
+import { isTimelapseActive, startTimelapse, stopTimelapse } from "./timelapse";
 import {
   applyAgentEventSlice,
   type ChronicleEvent,
@@ -2179,7 +2180,10 @@ function buildChronicleDay(run: ChronicleRun): HTMLElement {
     replayBtn.addEventListener("click", () => stopChronicleReplay());
   } else {
     replayBtn.textContent = "Replay";
-    replayBtn.disabled = chronicleReplay !== null || run.events.length === 0;
+    // Also disabled while the time-lapse is running (timelapse.ts) — they
+    // share src/world-state.ts's one replay slot, and running both at once
+    // would just fight over the map.
+    replayBtn.disabled = chronicleReplay !== null || run.events.length === 0 || isTimelapseActive() || timelapseStarting;
     replayBtn.addEventListener("click", () => startChronicleReplay(run));
   }
   day.appendChild(replayBtn);
@@ -2194,7 +2198,72 @@ function buildChronicleDay(run: ChronicleRun): HTMLElement {
   return day;
 }
 
+// "Replay the last 24h" time-lapse — its own DOM ref, updated in place by
+// updateTimelapseButtonLabel on every ~150ms step (src/timelapse.ts's
+// STEP_MS) instead of a full renderSection("chronicle") re-render, same
+// reasoning as updateChronicleReplayDom above. `starting` covers the gap
+// between the click and startTimelapse's fetch resolving, since
+// isTimelapseActive() only flips once that fetch is in.
+let timelapseButtonEl: HTMLButtonElement | null = null;
+let timelapseStarting = false;
+
+function updateTimelapseButtonLabel(): void {
+  const btn = timelapseButtonEl;
+  if (!btn) return;
+  if (timelapseStarting) {
+    btn.textContent = "Loading…";
+  } else if (isTimelapseActive()) {
+    btn.textContent = "Stop";
+  } else {
+    btn.textContent = "Replay last 24h";
+  }
+  btn.classList.toggle("chronicle-replay-btn--active", isTimelapseActive());
+}
+
+/** Re-renders the Chronicle section after the time-lapse starts/stops (both
+ * flip which of every button here is disabled — see buildTimelapseButton's
+ * and buildChronicleDay's own disabled checks), keeping scroll position the
+ * way rerenderChronicleKeepingScrollAndFocus does for a day's own replay. */
+function rerenderChronicleKeepingScroll(): void {
+  const scrollTop = panelHost.scrollTop;
+  if (panel && activeSectionId === "chronicle") renderSection("chronicle");
+  panelHost.scrollTop = scrollTop;
+}
+
+function buildTimelapseButton(): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "chronicle-replay-btn chronicle-timelapse-btn";
+  timelapseButtonEl = btn;
+  // Also disabled while a day's own Chronicle replay is running (see
+  // buildChronicleDay's own isTimelapseActive() check) — one replay slot,
+  // one replay at a time (src/world-state.ts's ReplayOwner).
+  btn.disabled = timelapseStarting || chronicleReplay !== null;
+  updateTimelapseButtonLabel();
+  btn.addEventListener("click", () => {
+    if (isTimelapseActive()) {
+      stopTimelapse();
+      rerenderChronicleKeepingScroll();
+      return;
+    }
+    timelapseStarting = true;
+    updateTimelapseButtonLabel();
+    btn.disabled = true;
+    void startTimelapse(isVillageConnected(), {
+      onCaption: (text) => hooks.onReplayCaption(text),
+      onFocusSlot: (slotId) => hooks.onFocusSlot(slotId),
+      onStepChange: () => updateTimelapseButtonLabel(),
+    }).finally(() => {
+      timelapseStarting = false;
+      rerenderChronicleKeepingScroll();
+    });
+  });
+  return btn;
+}
+
 function renderChronicle(container: HTMLElement): void {
+  container.appendChild(buildTimelapseButton());
+
   if (!isVillageConnected()) {
     SAMPLE_CHRONICLE.runs.forEach((run) => container.appendChild(buildChronicleDay(run)));
     return;
@@ -2608,10 +2677,11 @@ export function openVillagePanel(section = "wrapped"): void {
 export function close(): void {
   if (!root.classList.contains("is-open")) return;
   // A replay in progress overrides the map's live world state (see
-  // startChronicleReplay) — closing the sidebar is the one place nothing
-  // else would ever clear that, so it always stops here too, not just via
-  // the timeline's own Stop button.
+  // startChronicleReplay/startTimelapse) — closing the sidebar is the one
+  // place nothing else would ever clear that, so both stop here too, not
+  // just via their own Stop buttons.
   stopChronicleReplay();
+  stopTimelapse();
   root.classList.remove("is-open");
   backdrop.classList.remove("is-open");
   root.setAttribute("aria-hidden", "true");
