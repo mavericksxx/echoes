@@ -1,6 +1,22 @@
 # Changelog
 
 ## Unreleased
+- **Five visual features.** *Lighting:* night is now a darkness layer punched through by warm light
+  pools at the districts you actually listen to (brightest at the now-playing one), on a smooth
+  hourly curve instead of four fixed day parts; the old always-on dormant/quiet washes and the
+  first-six-anchors night glow are gone. *Breathe:* one app-wide oscillator, driven by the
+  now-playing district's mood energy, modulating light-pool radius and weather particle speed only
+  (never a canvas transform — that would blur the pixel art). *Scene wipes:* entering a district
+  pushes the camera to its door then irises closed and open again, with input locked during the
+  transition, a re-entrancy guard and a watchdog; the old CSS fade is gone. *Emotes:* leaders hop on
+  a track change, cheer when a performance starts and slump in a dormant district, as render offsets
+  (no new sprite frames); spontaneous persona lines are capped at 2 on screen and 8s apart.
+  *Time-lapse:* "Replay last 24h" in the Chronicle tab plays the day in ~3.5s over a new
+  `/api/history/hourly`, reusing the replay override (now with an owner token so it and the
+  Chronicle replay can't clobber each other).
+- **Render seams (prep):** one shared `drawWorldEffects`, one per-frame `WorldEnv` (dt/ts/reduced/
+  clock/hour/breathe), and `getSceneClockMs`/`getSceneHour` in world-state — a Chronicle replay's
+  time of day now follows the replayed day instead of the real clock.
 - **Village panel fixes:** the village panel no longer repeats the topbar buttons as tabs on
   desktop (the tab row stays below 1100px, where the topbar collapses); playlist covers load again
   (`public/_headers` CSP now allows `*.spotifycdn.com`/`*.scdn.co`, not just `i.scdn.co`) and a

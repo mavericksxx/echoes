@@ -16,6 +16,7 @@ Phase 10 (Hokage chat agent) deployed 2026-09-19. Phase 11 (self-evolving villag
 Phase 13 (show it off: snapshot/clip, sound, onboarding, edge states, full disconnect, README) deployed 2026-09-19. All SPEC phases built.
 Village navigation (topbar village panel, per-character sidebar) deployed 2026-09-20.
 Village panel fixes (playlist cover CSP, no duplicate tabs, visible Chronicle replay) deployed 2026-09-20.
+Visual pass (lighting, music breathe, scene wipes, character emotes, 24h time-lapse) deployed 2026-09-20.
 
 Notes on the finished grid work: two rooms are tight enough to watch — `shopFlower` collapses the 5
 resident/crowd spawn offsets onto 2 distinct cells and `shopWeapons` onto 4 (the others keep all 5),
