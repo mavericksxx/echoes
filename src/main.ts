@@ -55,8 +55,9 @@ import {
   isVillageLive,
   refreshVillage,
 } from "./listening-source";
-import { fetchWorldResponse, getFestivals, getSceneClockMs, getVisitors, getWeather, getWorldVersion, initWorldState } from "./world-state";
-import { drawFestivalDecor, drawWorldEffects, type GlowCandidate, type WorldEnv } from "./world-render";
+import { fetchWorldResponse, getFestivals, getSceneClockMs, getSceneHour, getVisitors, getWeather, getWorldVersion, initWorldState } from "./world-state";
+import { drawFestivalDecor, drawWorldEffects, type LightCandidate, type WorldEnv } from "./world-render";
+import { resizeLighting } from "./lighting";
 import { onEraChange } from "./era";
 import { ACTIVITY_TREATMENT } from "../shared/activity";
 import { downloadRecording, isRecordingSupported, startRecording, takeSnapshot, type Recording } from "./capture";
@@ -447,6 +448,7 @@ function applyCanvasSize(zoomValue: number): void {
   canvas.style.width = `${viewW * zoom}px`;
   canvas.style.height = `${viewH * zoom}px`;
   ctx.imageSmoothingEnabled = false;
+  resizeLighting(viewW, viewH); // src/lighting.ts's offscreen darkness layer tracks the backing store
   clampCamera();
   fitCaptionLayer(availW, availH);
 }
@@ -776,15 +778,22 @@ function renderDistrict(env: WorldEnv): void {
     drawNpc(ctx, imgs, npc, view, { opacity });
   });
 
-  // Phase 11: world effects — a lighting wash on top of everything drawn so
-  // far, then night glows cutting through it, then weather particles on top
-  // of all of it (see world-render.ts's drawWorldEffects doc comment on draw
-  // order). Single-point glow candidate — a district's own home anchor —
-  // so it always glows at night regardless of activity (see
-  // pickGlowPoints's doc comment).
+  // Phase 11/Feature 1: world effects — time-of-day tint, then the lighting
+  // layer (a single light pool at the district's own home anchor, sized/
+  // lerped by its activity level — see world-render.ts's drawWorldEffects
+  // doc comment on draw order), then weather particles on top of all of it.
   drawWorldEffects(
     ctx,
-    { w: bgW, h: bgH, camX, camY, viewW, viewH, glowCandidates: [{ point: district.home, activity: level }] },
+    {
+      w: bgW,
+      h: bgH,
+      camX,
+      camY,
+      viewW,
+      viewH,
+      view: "district",
+      lightCandidates: [{ slotId: district.id, point: district.home, activity: level }],
+    },
     env,
   );
   ctx.restore();
@@ -850,16 +859,14 @@ function renderVillage(env: WorldEnv): void {
   sorted.filter((n) => !n.caption).forEach((n) => drawNpc(ctx, images, n, view));
   sorted.filter((n) => n.caption).forEach((n) => drawNpc(ctx, images, n, view));
 
-  // Phase 11: world effects — see renderDistrict's matching block for the
-  // draw-order reasoning (tint, then night glows, then weather on top). Bug
-  // fix: glow candidates carry each slot's activity level so
-  // drawWorldEffects can glow the busiest districts instead of whichever
-  // six came first in roster order (see world-render.ts's pickGlowPoints).
-  const glowCandidates: GlowCandidate[] = SLOTS.map((s) => {
+  // Phase 11/Feature 1: world effects — see renderDistrict's matching block
+  // for the draw-order reasoning (tint, then lighting, then weather on top).
+  // Each anchor's light pool is sized by that slot's own activity level.
+  const lightCandidates: LightCandidate[] = SLOTS.map((s) => {
     const anchor = VILLAGE.anchors[s.character.id];
-    return anchor ? { point: anchor, activity: getActivity(s.district.id).level } : null;
-  }).filter((c): c is GlowCandidate => c !== null);
-  drawWorldEffects(ctx, { w: mapW, h: mapH, camX, camY, viewW, viewH, glowCandidates }, env);
+    return anchor ? { slotId: s.district.id, point: anchor, activity: getActivity(s.district.id).level } : null;
+  }).filter((c): c is LightCandidate => c !== null);
+  drawWorldEffects(ctx, { w: mapW, h: mapH, camX, camY, viewW, viewH, view: "village", lightCandidates }, env);
   ctx.restore();
 }
 
@@ -1263,6 +1270,19 @@ window.matchMedia(DESKTOP_QUERY).addEventListener("change", () => fitCanvas());
 // ---------------------------------------------------------------------------
 let lastTs: number | null = null;
 
+// Feature 2's single breathe oscillator (see WorldEnv.breathe's doc comment)
+// — its angular rate (rad/ms against the rAF timestamp) scales with the
+// now-playing district's mood energy (0..1, or null when nothing's playing/
+// no energy is known), so a high-energy track pulses faster than a mellow
+// one. Picked by ear, not derived from anything: there's no real tempo
+// signal to anchor it to.
+const BREATHE_RATE_BASE = 0.0015;
+const BREATHE_RATE_ENERGY_SPAN = 0.0025;
+
+function breatheRate(energy: number | null): number {
+  return BREATHE_RATE_BASE + (energy ?? 0.5) * BREATHE_RATE_ENERGY_SPAN;
+}
+
 function frame(ts: number): void {
   if (lastTs === null) lastTs = ts;
   const dt = Math.min(0.05, (ts - lastTs) / 1000);
@@ -1273,8 +1293,15 @@ function frame(ts: number): void {
 
   // One env per frame (dt/ts already derived above) rather than each draw
   // call re-deriving its own reduced-motion/clock reads — see world-render.
-  // ts's WorldEnv doc comment.
-  const env: WorldEnv = { dt, ts, reduced: reducedMotionQuery.matches, clockMs: getSceneClockMs() };
+  // ts's WorldEnv doc comment. `breathe` is the app's one "the map breathes
+  // with the music" oscillator (Feature 2) — its rate is driven by the
+  // now-playing district's aggregate mood energy (there's no per-track
+  // tempo/energy available; Spotify's audio-features API is gone, so this
+  // is the closest live signal), defaulting to a middling rate when nothing
+  // is playing. Constant 0.5 under reduced motion, per SPEC.
+  const nowPlayingEnergy = getLiveNowPlaying()?.slotId ? getMoodEnergy(getLiveNowPlaying()!.slotId).energy : null;
+  const breathe = reducedMotionQuery.matches ? 0.5 : 0.5 + 0.5 * Math.sin(ts * breatheRate(nowPlayingEnergy));
+  const env: WorldEnv = { dt, ts, reduced: reducedMotionQuery.matches, clockMs: getSceneClockMs(), hour: getSceneHour(), breathe };
 
   // Phase 12: a Chronicle replay step (or its start/stop) changes which
   // visitors world-state.ts's getVisitors() reports — visitorNpcs is built
