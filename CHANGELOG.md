@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- **Village panel fixes:** the village panel no longer repeats the topbar buttons as tabs on
+  desktop (the tab row stays below 1100px, where the topbar collapses); playlist covers load again
+  (`public/_headers` CSP now allows `*.spotifycdn.com`/`*.scdn.co`, not just `i.scdn.co`) and a
+  playlist's track count no longer runs into its name; Chronicle replay is visible — each step pans
+  the camera to the district it changed and shows a caption on the map.
 - **Village navigation:** village-wide sections (Wrapped, Playlists, Notice board, Chronicle,
   Hokage) moved out of the character sidebar into a village panel opened from new topbar buttons
   (a single "Village" button below 1100px). The character sidebar keeps only its six per-character
