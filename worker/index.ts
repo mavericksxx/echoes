@@ -38,6 +38,7 @@ import { handleVillage } from "./village";
 import { handleNowPlaying } from "./now-playing";
 import { runHistorySync, handleHistoryStats } from "./history";
 import { handleHistoryDaily } from "./history-daily";
+import { handleHistoryHourly } from "./history-hourly";
 import { handleWrapped } from "./wrapped";
 import { handlePlaylists, handlePlaylistDetail } from "./playlists";
 import { runWeeklyBrief, handleWeeklyBrief } from "./weekly-brief";
@@ -76,6 +77,9 @@ const ROUTE_BUCKETS: Record<string, keyof typeof RATE_LIMIT_RULES> = {
   // D1-only reads too (worker/history-daily.ts) — same generous limit as
   // historyStats, reusing its rule rather than defining a near-identical one.
   "/api/history/daily": "historyStats",
+  // Time-lapse's 24h-hourly read (worker/history-hourly.ts) — same D1-only
+  // profile as /api/history/daily above, so it reuses that bucket too.
+  "/api/history/hourly": "historyStats",
   // Phase 8.5: the common case is D1-only, same as /api/history/daily above.
   // When it does fall back to Spotify (worker/wrapped.ts), that fallback is
   // itself cached in caches.default by time_range (same 30-min-TTL
@@ -163,6 +167,10 @@ export default {
 
     if (url.pathname === "/api/history/daily") {
       return handleHistoryDaily(env);
+    }
+
+    if (url.pathname === "/api/history/hourly") {
+      return handleHistoryHourly(env);
     }
 
     if (url.pathname === "/api/wrapped") {

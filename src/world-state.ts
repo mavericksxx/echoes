@@ -77,7 +77,14 @@ export async function initWorldState(connected: boolean, pending?: Promise<World
 // when they were live, not "now" for real. `replayVisitorNames` is a
 // separate map (not a swap of `visitorNames` below) since a replayed day's
 // visitor may not be among today's live visitors at all.
-let replay: { state: WorldState; nowMs: number; visitorNames: Record<string, string> } | null = null;
+/** Who's driving the current replay override — the Chronicle tab's day
+ * replay (src/sidebar.ts's startChronicleReplay) or the "replay the last
+ * 24h" time-lapse (src/timelapse.ts). They share this one `replay` slot, so
+ * each owns its own stop: see setReplayState's doc comment below. */
+export type ReplayOwner = "chronicle" | "timelapse";
+
+let replay: { state: WorldState; nowMs: number; visitorNames: Record<string, string>; owner: ReplayOwner } | null =
+  null;
 
 // Bumped on every setReplayState call (start/step/stop) — src/main.ts's
 // frame() polls this to know when to call rebuildVisitors() again.
@@ -90,13 +97,34 @@ export function getWorldVersion(): number {
   return worldVersion;
 }
 
-/** Starts/updates (non-null) or ends (null) a Chronicle replay override.
- * `visitorNames` defaults to {} — every caller providing a non-null `state`
- * should also pass its own (worker/chronicle.ts's ChronicleResponse.
- * visitorNames, or SAMPLE_CHRONICLE.visitorNames offline), so a replayed
- * visitor's name resolves instead of falling back to a bare artist id. */
-export function setReplayState(state: WorldState | null, nowMs: number, visitorNames: Record<string, string> = {}): void {
-  replay = state ? { state, nowMs, visitorNames } : null;
+/** Starts/updates (non-null) or ends (null) a replay override on behalf of
+ * `owner` — either the Chronicle tab's day replay or the time-lapse
+ * (ReplayOwner above). `visitorNames` defaults to {} — every caller
+ * providing a non-null `state` should also pass its own (worker/chronicle.
+ * ts's ChronicleResponse.visitorNames, or SAMPLE_CHRONICLE.visitorNames
+ * offline), so a replayed visitor's name resolves instead of falling back
+ * to a bare artist id.
+ *
+ * Ending a replay (`state === null`) only clears it when `owner` matches
+ * whoever's actually driving it right now — Chronicle and the time-lapse
+ * share this one `replay` slot, and without this check either one's stop
+ * call could clobber the other's still-running replay. Starting a new
+ * replay (`state !== null`) always takes the slot regardless of the
+ * previous owner — each start call is expected to have already stopped its
+ * own prior replay (see startChronicleReplay/startTimelapse), so this is
+ * just "whoever calls with real state wins the slot". */
+export function setReplayState(
+  state: WorldState | null,
+  nowMs: number,
+  visitorNames: Record<string, string> = {},
+  owner: ReplayOwner = "chronicle",
+): void {
+  if (state === null) {
+    if (replay !== null && replay.owner !== owner) return; // not this owner's replay to stop
+    replay = null;
+  } else {
+    replay = { state, nowMs, visitorNames, owner };
+  }
   worldVersion++;
 }
 
